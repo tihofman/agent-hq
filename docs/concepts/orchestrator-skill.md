@@ -25,12 +25,12 @@ flowchart TD
     subgraph Lead ["Lead Architect & Orchestrator (Claude Code)"]
         direction TB
         L1["Ticket-Planung & Scope"]
-        L2["PR-Review gegen Akzeptanzkriterien"]
+        L2["Gatekeeping & Review-Delegation"]
         L3["PR Ready schalten (gh pr ready)"]
         L4["Merge-Gate (CI Check & Auto-Merge)"]
     end
 
-    subgraph Worker ["Execution Subagents (agy / codex)"]
+    subgraph Worker ["Execution Subagent (agy / codex)"]
         direction TB
         W1["Code-Implementierung im Feature-Worktree"]
         W2["Lokale Test-Ausführung (nx test / pytest)"]
@@ -38,11 +38,22 @@ flowchart TD
         W4["Push auf Feature-Branch & Draft PR erstellen"]
     end
 
+    subgraph Reviewer ["Review Subagent (Task / subagent-reviewer)"]
+        direction TB
+        R1["PR-Diff & Ticket abrufen (isoliert)"]
+        R2["Akzeptanzkriterien Punkt-für-Punkt prüfen"]
+        R3["Code-Qualität & Ponytail validieren"]
+        R4["Kompaktes Verdikt: APPROVED / CHANGES_REQUESTED"]
+    end
+
     L1 -->|Delegiert via Task / delegate.sh| W1
     W1 --> W2 --> W3 --> W4
     W4 -->|Draft PR URL| L2
-    L2 -->|Feedback / Remediation| W1
-    L2 -->|Alles erfüllt| L3
+    L2 -->|Spawnt Review-Subagent| R1
+    R1 --> R2 --> R3 --> R4
+    R4 -->|Kompaktes Verdikt| L2
+    L2 -->|Findings: Remediation Loop| W1
+    L2 -->|Approved: PR freigeben| L3
     L3 --> L4
 ```
 
@@ -89,14 +100,23 @@ Claude ruft das Delegationsskript in einem isolierten Subagent-Kontext auf:
   ```
 - Meldet die Draft-PR-URL zurück an Claude.
 
-### Schritt 4: Review gegen Akzeptanzkriterien (Claude – Pflicht-Gate)
+### Schritt 4: Review gegen Akzeptanzkriterien via isoliertem Subagent (Claude – Pflicht-Gate)
 
-- **Punkt-für-Punkt-Abgleich:** Claude ruft das Original-Ticket ab und vergleicht jedes einzelne **Akzeptanzkriterium** der Definition of Done mit dem PR-Diff.
-- **Qualitätsprüfung:** Code-Architektur, Testabdeckung, Edge Cases und Einhaltung von Ponytail (kein unnötiger Boilerplate-Code).
-- **Remediation Loop (Ping-Pong):** Falls Kriterien nicht erfüllt sind oder Mängel vorliegen, postet Claude konkrete Findings und beauftragt den Subagent erneut auf demselben Branch:
-  ```bash
-  delegate.sh agy "Ticket #<ID>: Behebe die folgenden Review-Findings auf diesem Branch, teste und pushe: <Findings>"
-  ```
+- **Isolierter Review-Subagent (Schutz vor Context-Bloat & Blockaden)**:
+  Um den Kontext des Lead Architects schlank zu halten und den Orchestrator nicht mit Hunderten Zeilen Diff zu blockieren, spawnt Claude einen isolierten Review-Subagent (`subagent-reviewer` via `Task`-Tool):
+  - **Prüfung gegen Original-Ticket**: Der Reviewer ruft das Ticket ab (`gh issue view <ID>`) und zieht den gesamten PR-Diff (`gh pr diff <PR_ID>`).
+  - **Punkt-für-Punkt-Abgleich**: Jedes einzelne **Akzeptanzkriterium** der Definition of Done wird systematisch mit den Code-Änderungen und Tests abgeglichen.
+  - **Qualitätsprüfung**: Code-Architektur, Testabdeckung, Edge Cases und strikte Einhaltung von Ponytail (kein unaufgeforderter Boilerplate-Code).
+  - **Kompaktes Ergebnis**: Der Review-Subagent liefert an Claude ausschließlich ein strukturiertes Kurz-Verdikt zurück:
+    - **Status**: `APPROVED` oder `CHANGES_REQUESTED`
+    - **Akzeptanzkriterien-Check**: `[x]` bzw. `[ ]` pro Kriterium
+    - **Findings**: Konkrete Mängel mit Dateinamen, Zeilennummer und Handlungsempfehlung.
+- **Entscheidung & Remediation Loop (Ping-Pong)**:
+  - Bei `CHANGES_REQUESTED`: Claude übernimmt das Gatekeeping, postet die Mängel und beauftragt den Worker-Subagent auf demselben Branch zur Nachbesserung:
+    ```bash
+    delegate.sh agy "Ticket #<ID>: Behebe die folgenden Review-Findings auf diesem Branch, teste und pushe: <Findings>"
+    ```
+  - Bei `APPROVED`: Alle Kriterien sind nachweislich erfüllt – Claude schaltet den PR scharf (Schritt 5).
 
 ### Schritt 5: Mark Ready for Review (Claude)
 
@@ -210,7 +230,7 @@ Das Visualisierungs-Dashboard **Agent-HQ** erhält Events aus drei Quellen: `del
 | **Schritt 3**        | `TASK_START` / `TASK_PROGRESS`    | `delegate.sh` / Server (Log-Tail)  | 💻 Dev Lab (`dev`)        | `agy` sitzt am Rechner und tippt (Log-Stream in Sidebar)               |
 | **Schritt 3 (Ende)** | `DRAFT_PR_CREATED`                | Hook (`gh pr create --draft`)      | 💻 Dev Lab ➔ 🔍 QS (`qa`) | Draft-PR-Symbol erscheint, `agy` lehnt sich zurück                     |
 | **Schritt 3 (Ende)** | `TASK_COMPLETE` / `TASK_FAILED`   | `delegate.sh` (Exit-Code)          | 💻 Dev Lab (`dev`)        | Figur steht auf bzw. Error-Alert über dem Kopf                         |
-| **Schritt 4**        | `REVIEW_START`                    | Hook (`gh pr diff` / `gh pr view`) | 🔍 QS Station (`qa`)      | Claude steht mit Lupe/Klemmbrett vor Akzeptanzkriterien                |
+| **Schritt 4**        | `REVIEW_START`                    | Hook (`gh pr diff` / `gh pr view`) | 🔍 QS Station (`qa`)      | Review-Subagent steht mit Lupe/Klemmbrett vor Akzeptanzkriterien       |
 | **Schritt 5**        | `PR_READY`                        | Hook (`gh pr ready`)               | 🔍 QS Station (`qa`)      | Grünes Check-Badge über PR                                             |
 | **Schritt 6**        | `CI_CHECK_PASS` / `CI_CHECK_FAIL` | Hook (`gh pr checks`)              | 🔍 QS Station (`qa`)      | Grüne bzw. rote Checkmarks auf dem Monitor                             |
 | **Schritt 6**        | `MERGED`                          | Hook (`gh pr merge`)               | 👔 CEO Suite (`ceo`)      | Konfetti / Ticket wird geschlossen, alle gehen in ☕ Lounge (`lounge`) |

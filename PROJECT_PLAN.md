@@ -83,13 +83,13 @@ Das Büro ist in visuelle Funktionszonen (Räume) unterteilt. Jede Figur besitzt
 
 Fünf Zonen, im Event-Schema als `room` kodiert:
 
-| Raum                                | `room`   | Primäre Agenten     | Auslöser / Aktivität                                     | Visuelle Raum-Elemente                                   |
-| :---------------------------------- | :------- | :------------------ | :------------------------------------------------------- | :------------------------------------------------------- |
-| 👔 **CEO Suite / Architect Office** | `ceo`    | **Claude**          | Ticket-Erstellung, Architektur-Planung, Scope-Definition | Großer Schreibtisch, Architektur-Whiteboard, Bücherregal |
-| 🚪 **Flur & Übergabezone**          | `hall`   | **Claude ➔ Worker** | Moment der Task-Delegation (`delegate.sh`)               | Verbindender Gang zwischen den Büros                     |
-| 💻 **Dev Lab (Entwickler)**         | `dev`    | **`agy` / `codex`** | Code-Generierung, Refactoring, Datei-Edits               | Monitore mit Matrix-Code, Workstations, Kaffeetassen     |
-| 🔍 **QS & Review Station**          | `qa`     | **Claude / CI**     | Prüfen von Akzeptanzkriterien, Test-Runs, PR-Review      | Test-Server-Racks, Monitor mit grünen/roten Checkmarks   |
-| ☕ **Lounge / Breakroom**           | `lounge` | **Alle Idler**      | Kein aktiver Task, Wartet auf User-Input, Cooldown       | Couch, Kaffeemaschine, Wasserspender, Pflanze            |
+| Raum                                | `room`   | Primäre Agenten          | Auslöser / Aktivität                                     | Visuelle Raum-Elemente                                   |
+| :---------------------------------- | :------- | :----------------------- | :------------------------------------------------------- | :------------------------------------------------------- |
+| 👔 **CEO Suite / Architect Office** | `ceo`    | **Claude**               | Ticket-Erstellung, Architektur-Planung, Scope-Definition | Großer Schreibtisch, Architektur-Whiteboard, Bücherregal |
+| 🚪 **Flur & Übergabezone**          | `hall`   | **Claude ➔ Worker**      | Moment der Task-Delegation (`delegate.sh`)               | Verbindender Gang zwischen den Büros                     |
+| 💻 **Dev Lab (Entwickler)**         | `dev`    | **`agy` / `codex`**      | Code-Generierung, Refactoring, Datei-Edits               | Monitore mit Matrix-Code, Workstations, Kaffeetassen     |
+| 🔍 **QS & Review Station**          | `qa`     | **Review-Subagent / CI** | Prüfen von Akzeptanzkriterien, Test-Runs, PR-Review      | Test-Server-Racks, Monitor mit grünen/roten Checkmarks   |
+| ☕ **Lounge / Breakroom**           | `lounge` | **Alle Idler**           | Kein aktiver Task, Wartet auf User-Input, Cooldown       | Couch, Kaffeemaschine, Wasserspender, Pflanze            |
 
 ### Charakter-Zustände & Animationen
 
