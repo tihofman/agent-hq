@@ -87,39 +87,68 @@ export function soundFor(event: unknown): SoundType | null {
   return null;
 }
 
+export interface NoteDef {
+  freq: number;
+  start: number;
+  dur: number;
+}
+
 /**
- * Level-Up Fanfare (Ascending square-wave arpeggio: C5 -> E5 -> G5 -> C6)
- * Played on PR_READY or MERGED.
+ * Shared helper for WebAudio oscillator synthesis and envelope generation.
+ * Disconnects audio nodes in onended to prevent memory leaks.
  */
-export function playLevelUp(): void {
+export function playNotes(
+  type: OscillatorType,
+  notes: NoteDef[],
+  peak = 0.12,
+): void {
   const ctx = getAudioContext();
-  if (!ctx) return;
+  if (!ctx || ctx.state !== 'running') return;
 
   const now = ctx.currentTime;
-  const notes = [
-    { freq: 523.25, start: 0.0, dur: 0.08 }, // C5
-    { freq: 659.25, start: 0.08, dur: 0.08 }, // E5
-    { freq: 783.99, start: 0.16, dur: 0.08 }, // G5
-    { freq: 1046.5, start: 0.24, dur: 0.25 }, // C6
-  ];
-
   for (const { freq, start, dur } of notes) {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    osc.type = 'square';
+    osc.type = type;
     osc.frequency.setValueAtTime(freq, now + start);
 
     gain.gain.setValueAtTime(0.0001, now + start);
-    gain.gain.linearRampToValueAtTime(0.12, now + start + 0.01);
+    gain.gain.linearRampToValueAtTime(peak, now + start + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
 
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // Safe disconnect
+      }
+    };
+
     osc.start(now + start);
     osc.stop(now + start + dur + 0.01);
   }
+}
+
+/**
+ * Level-Up Fanfare (Ascending square-wave arpeggio: C5 -> E5 -> G5 -> C6)
+ * Played on PR_READY or MERGED.
+ */
+export function playLevelUp(): void {
+  playNotes(
+    'square',
+    [
+      { freq: 523.25, start: 0.0, dur: 0.08 }, // C5
+      { freq: 659.25, start: 0.08, dur: 0.08 }, // E5
+      { freq: 783.99, start: 0.16, dur: 0.08 }, // G5
+      { freq: 1046.5, start: 0.24, dur: 0.25 }, // C6
+    ],
+    0.12,
+  );
 }
 
 /**
@@ -127,32 +156,14 @@ export function playLevelUp(): void {
  * Played on TASK_HANDOVER.
  */
 export function playDoorbell(): void {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
-  const now = ctx.currentTime;
-  const tones = [
-    { freq: 659.25, start: 0.0, dur: 0.15 }, // E5
-    { freq: 523.25, start: 0.14, dur: 0.35 }, // C5
-  ];
-
-  for (const { freq, start, dur } of tones) {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, now + start);
-
-    gain.gain.setValueAtTime(0.0001, now + start);
-    gain.gain.linearRampToValueAtTime(0.15, now + start + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(now + start);
-    osc.stop(now + start + dur + 0.01);
-  }
+  playNotes(
+    'triangle',
+    [
+      { freq: 659.25, start: 0.0, dur: 0.15 }, // E5
+      { freq: 523.25, start: 0.14, dur: 0.35 }, // C5
+    ],
+    0.15,
+  );
 }
 
 /**
@@ -160,30 +171,12 @@ export function playDoorbell(): void {
  * Played on TASK_FAILED or CI_CHECK_FAIL.
  */
 export function playBuzzer(): void {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
-  const now = ctx.currentTime;
-  const bursts = [
-    { freq: 150, start: 0.0, dur: 0.12 },
-    { freq: 110, start: 0.14, dur: 0.22 },
-  ];
-
-  for (const { freq, start, dur } of bursts) {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(freq, now + start);
-
-    gain.gain.setValueAtTime(0.0001, now + start);
-    gain.gain.linearRampToValueAtTime(0.12, now + start + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(now + start);
-    osc.stop(now + start + dur + 0.01);
-  }
+  playNotes(
+    'sawtooth',
+    [
+      { freq: 150, start: 0.0, dur: 0.12 },
+      { freq: 110, start: 0.14, dur: 0.22 },
+    ],
+    0.12,
+  );
 }

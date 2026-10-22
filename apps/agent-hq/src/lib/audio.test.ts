@@ -5,6 +5,7 @@ import {
   setAudioEnabled,
   resetAudioStateForTesting,
   setAudioContextForTesting,
+  playNotes,
   playLevelUp,
   playDoorbell,
   playBuzzer,
@@ -175,7 +176,7 @@ describe('audio logic (lib/audio.ts)', () => {
     });
   });
 
-  describe('WebAudio sound synthesis', () => {
+  describe('WebAudio sound synthesis (playNotes)', () => {
     function createMockAudioContext(state: AudioContextState = 'running') {
       const createdOscillators: {
         type: OscillatorType;
@@ -183,6 +184,8 @@ describe('audio logic (lib/audio.ts)', () => {
         start: ReturnType<typeof vi.fn>;
         stop: ReturnType<typeof vi.fn>;
         connect: ReturnType<typeof vi.fn>;
+        disconnect: ReturnType<typeof vi.fn>;
+        onended: (() => void) | null;
       }[] = [];
 
       const createdGains: {
@@ -192,6 +195,7 @@ describe('audio logic (lib/audio.ts)', () => {
           exponentialRampToValueAtTime: ReturnType<typeof vi.fn>;
         };
         connect: ReturnType<typeof vi.fn>;
+        disconnect: ReturnType<typeof vi.fn>;
       }[] = [];
 
       const resumeMock = vi.fn().mockResolvedValue(undefined);
@@ -208,6 +212,8 @@ describe('audio logic (lib/audio.ts)', () => {
             start: vi.fn(),
             stop: vi.fn(),
             connect: vi.fn(),
+            disconnect: vi.fn(),
+            onended: null,
           };
           createdOscillators.push(osc);
           return osc as unknown as OscillatorNode;
@@ -220,6 +226,7 @@ describe('audio logic (lib/audio.ts)', () => {
               exponentialRampToValueAtTime: vi.fn(),
             },
             connect: vi.fn(),
+            disconnect: vi.fn(),
           };
           createdGains.push(gainNode);
           return gainNode as unknown as GainNode;
@@ -229,17 +236,27 @@ describe('audio logic (lib/audio.ts)', () => {
       return { mockCtx, createdOscillators, createdGains, resumeMock };
     }
 
-    it('synthesizes square-wave arpeggio for playLevelUp', () => {
-      const { mockCtx, createdOscillators } = createMockAudioContext();
+    it('synthesizes square-wave arpeggio for playLevelUp and disconnects nodes onended', () => {
+      const { mockCtx, createdOscillators, createdGains } =
+        createMockAudioContext();
       setAudioContextForTesting(mockCtx);
 
       playLevelUp();
 
       expect(createdOscillators.length).toBe(4);
-      for (const osc of createdOscillators) {
+      expect(createdGains.length).toBe(4);
+      for (let i = 0; i < createdOscillators.length; i++) {
+        const osc = createdOscillators[i];
+        const gain = createdGains[i];
         expect(osc.type).toBe('square');
         expect(osc.start).toHaveBeenCalled();
         expect(osc.stop).toHaveBeenCalled();
+        expect(typeof osc.onended).toBe('function');
+
+        // Verify onended cleanly disconnects oscillator and gain
+        osc.onended?.();
+        expect(osc.disconnect).toHaveBeenCalled();
+        expect(gain.disconnect).toHaveBeenCalled();
       }
     });
 
@@ -271,13 +288,16 @@ describe('audio logic (lib/audio.ts)', () => {
       }
     });
 
-    it('resumes audio context if suspended', () => {
-      const { mockCtx, resumeMock } = createMockAudioContext('suspended');
+    it('does not play notes when audio context state is not running (e.g. suspended)', () => {
+      const { mockCtx, createdOscillators } =
+        createMockAudioContext('suspended');
       setAudioContextForTesting(mockCtx);
 
       playLevelUp();
+      playDoorbell();
+      playBuzzer();
 
-      expect(resumeMock).toHaveBeenCalled();
+      expect(createdOscillators.length).toBe(0);
     });
 
     it('is safe if AudioContext is not available (e.g. headless SSR)', () => {
@@ -285,6 +305,9 @@ describe('audio logic (lib/audio.ts)', () => {
       expect(() => playLevelUp()).not.toThrow();
       expect(() => playDoorbell()).not.toThrow();
       expect(() => playBuzzer()).not.toThrow();
+      expect(() =>
+        playNotes('sine', [{ freq: 440, start: 0, dur: 0.1 }]),
+      ).not.toThrow();
     });
   });
 });

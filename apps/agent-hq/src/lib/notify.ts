@@ -1,5 +1,4 @@
-import type { State, HQEvent, Run } from './server/state';
-import { detectPendingInput } from './feed';
+import type { State, HQEvent } from './server/state';
 
 export interface NotificationPayload {
   title: string;
@@ -12,12 +11,10 @@ export interface NotificationPayload {
  * Scenarios:
  * 1. TASK_FAILED -> Failure alert
  * 2. PR_READY -> Pull request ready for manual review/merge
- * 3. Waiting for input -> Prompt detected via detectPendingInput
  */
 export function notificationFor(
   entry: unknown,
   state?: State,
-  nowMs?: number,
 ): NotificationPayload | null {
   if (!entry || typeof entry !== 'object' || !('event' in entry)) {
     return null;
@@ -48,43 +45,6 @@ export function notificationFor(
     return { title, body };
   }
 
-  if (item.event === 'TASK_PROGRESS') {
-    const runs = state?.runs ?? {};
-    const effectiveRuns: Record<string, Run> = { ...runs };
-    if (
-      item.runId &&
-      (!effectiveRuns[item.runId] ||
-        effectiveRuns[item.runId].status !== 'running')
-    ) {
-      if (!state?.runs?.[item.runId]) {
-        effectiveRuns[item.runId] = {
-          runId: item.runId,
-          agent: item.agent,
-          status: 'running',
-          timestamp: item.timestamp,
-          data: item.data,
-        };
-      }
-    }
-
-    const checkTime =
-      nowMs !== undefined
-        ? nowMs
-        : Number.isFinite(Date.parse(item.timestamp))
-          ? Date.parse(item.timestamp) + 10_000
-          : Date.now();
-
-    const pending = detectPendingInput([item], effectiveRuns, checkTime);
-    if (pending.isPending) {
-      return {
-        title: 'Agent wartet auf Eingabe',
-        body:
-          pending.promptText ||
-          'Bestätigung oder Eingabe im Terminal erforderlich.',
-      };
-    }
-  }
-
   return null;
 }
 
@@ -92,20 +52,20 @@ export function notificationFor(
  * Identifies new entries added to a feed since the last processed item object.
  *
  * Safe against feed capping (e.g. constant 1000 items length).
+ * If lastSeen was evicted from the capped feed (index === -1), returns at most
+ * the latest single entry (feed.slice(-1)) to prevent an old notification/audio flood.
  */
 export function findNewEntries<T>(
   feed: T[],
   lastSeen: T | null | undefined,
-  options?: { isInitial?: boolean },
 ): T[] {
   if (!feed || feed.length === 0) return [];
-  if (options?.isInitial) return [];
   if (lastSeen === null || lastSeen === undefined) {
     return feed.slice();
   }
   const index = feed.lastIndexOf(lastSeen);
   if (index === -1) {
-    return feed.slice();
+    return feed.slice(-1);
   }
   return feed.slice(index + 1);
 }

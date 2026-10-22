@@ -98,89 +98,10 @@ describe('notify logic (lib/notify.ts)', () => {
       });
     });
 
-    describe('waiting for input (detectPendingInput integration)', () => {
-      const promptEvent: HQEvent = {
-        event: 'TASK_PROGRESS',
-        agent: 'agy',
-        runId: 'run-test-1',
-        room: 'dev',
-        timestamp: '2026-10-22T20:00:00.000Z',
-        data: { logChunk: 'Möchten Sie die Änderungen anwenden? [y/n]\n' },
-      };
-
-      const stateWithRunning: State = {
-        ...baseState,
-        runs: {
-          'run-test-1': {
-            runId: 'run-test-1',
-            agent: 'agy',
-            status: 'running',
-            timestamp: '2026-10-22T20:00:00.000Z',
-            data: {},
-          },
-        },
-      };
-
-      it('returns notification when prompt appeared >= 10s ago', () => {
-        const nowMs = Date.parse('2026-10-22T20:00:15.000Z');
-        const result = notificationFor(promptEvent, stateWithRunning, nowMs);
-
-        expect(result).toEqual({
-          title: 'Agent wartet auf Eingabe',
-          body: 'Möchten Sie die Änderungen anwenden? [y/n]',
-        });
-      });
-
-      it('returns null when prompt appeared < 10s ago', () => {
-        const nowMs = Date.parse('2026-10-22T20:00:04.000Z');
-        const result = notificationFor(promptEvent, stateWithRunning, nowMs);
-        expect(result).toBeNull();
-      });
-
-      it('returns notification by default if timestamp was in the past or nowMs omitted', () => {
-        const result = notificationFor(promptEvent, stateWithRunning);
-        expect(result).toEqual({
-          title: 'Agent wartet auf Eingabe',
-          body: 'Möchten Sie die Änderungen anwenden? [y/n]',
-        });
-      });
-
-      it('returns null if the run is completed or not running', () => {
-        const stateComplete: State = {
-          ...baseState,
-          runs: {
-            'run-test-1': {
-              runId: 'run-test-1',
-              agent: 'agy',
-              status: 'complete',
-              timestamp: '2026-10-22T20:00:00.000Z',
-              data: {},
-            },
-          },
-        };
-        const nowMs = Date.parse('2026-10-22T20:00:15.000Z');
-        const result = notificationFor(promptEvent, stateComplete, nowMs);
-        expect(result).toBeNull();
-      });
-
-      it('returns null if TASK_PROGRESS logChunk is normal output (not a prompt)', () => {
-        const logEvent: HQEvent = {
-          event: 'TASK_PROGRESS',
-          agent: 'agy',
-          runId: 'run-test-1',
-          room: 'dev',
-          timestamp: '2026-10-22T20:00:00.000Z',
-          data: { logChunk: 'Building project bundles...\n' },
-        };
-        const nowMs = Date.parse('2026-10-22T20:00:15.000Z');
-        const result = notificationFor(logEvent, stateWithRunning, nowMs);
-        expect(result).toBeNull();
-      });
-    });
-
     it('returns null for non-notifying events', () => {
       const nonNotifying: HQEvent['event'][] = [
         'TASK_START',
+        'TASK_PROGRESS',
         'TASK_COMPLETE',
         'TASK_ABORTED',
         'TASK_HANDOVER',
@@ -229,12 +150,6 @@ describe('notify logic (lib/notify.ts)', () => {
       expect(findNewEntries([], undefined)).toEqual([]);
     });
 
-    it('returns empty array on initial mount / reload when isInitial: true', () => {
-      const feed = [createEvent(1), createEvent(2), createEvent(3)];
-      expect(findNewEntries(feed, null, { isInitial: true })).toEqual([]);
-      expect(findNewEntries(feed, feed[2], { isInitial: true })).toEqual([]);
-    });
-
     it('detects a single newly added entry', () => {
       const e1 = createEvent(1);
       const e2 = createEvent(2);
@@ -264,56 +179,26 @@ describe('notify logic (lib/notify.ts)', () => {
       expect(newEntries).toEqual([]);
     });
 
-    it('correctly detects new entry when feed is at 1000 items capacity (feed.length remains constant)', () => {
-      // Create initial feed with exactly 1000 entries
+    it('detects new entries when feed is at 1000 items capacity and capped via shift()', () => {
       const feed: HQEvent[] = [];
       for (let i = 0; i < 1000; i++) {
         feed.push(createEvent(i));
       }
       expect(feed).toHaveLength(1000);
-
-      // The last seen entry before the update
       const lastSeen = feed[999];
       expect(lastSeen.data.statusText).toBe('event-999');
 
-      // New event arrives: liveStore.feed.push(e1000); while (feed.length > 1000) feed.shift();
-      const newEvent = createEvent(1000);
-      feed.push(newEvent);
-      while (feed.length > 1000) feed.shift();
-
-      // Feed length is STILL 1000!
-      expect(feed).toHaveLength(1000);
-      expect(feed[0].data.statusText).toBe('event-1');
-      expect(feed[999].data.statusText).toBe('event-1000');
-
-      // findNewEntries must detect the new entry via lastSeen, NOT feed.length!
-      const detected = findNewEntries(feed, lastSeen);
-      expect(detected).toHaveLength(1);
-      expect(detected[0]).toBe(newEvent);
-      expect(detected[0].data.statusText).toBe('event-1000');
-    });
-
-    it('detects multiple new entries arriving in a capped 1000-item feed', () => {
-      const feed: HQEvent[] = [];
-      for (let i = 0; i < 1000; i++) {
-        feed.push(createEvent(i));
-      }
-      const lastSeen = feed[999];
-
-      // 5 new events arrive
-      const newEvents = [
-        createEvent(1000),
-        createEvent(1001),
-        createEvent(1002),
-        createEvent(1003),
-        createEvent(1004),
-      ];
+      // 2 new events arrive; feed remains capped at 1000
+      const newEvents = [createEvent(1000), createEvent(1001)];
       for (const e of newEvents) {
         feed.push(e);
         while (feed.length > 1000) feed.shift();
       }
 
       expect(feed).toHaveLength(1000);
+      expect(feed[0].data.statusText).toBe('event-2');
+      expect(feed[999].data.statusText).toBe('event-1001');
+
       const detected = findNewEntries(feed, lastSeen);
       expect(detected).toEqual(newEvents);
     });
@@ -339,16 +224,16 @@ describe('notify logic (lib/notify.ts)', () => {
       expect(lastSeen).toBe(firstNew);
     });
 
-    it('returns all items if lastSeen was evicted due to massive burst >1000 items', () => {
+    it('returns only the latest item if lastSeen was evicted due to massive burst >1000 items', () => {
       const oldEvent = createEvent(0);
       const feed: HQEvent[] = [];
       for (let i = 1; i <= 1000; i++) {
         feed.push(createEvent(i));
       }
 
-      // oldEvent is not in feed anymore
+      // oldEvent is not in feed anymore -> at most feed.slice(-1) to prevent flood
       const detected = findNewEntries(feed, oldEvent);
-      expect(detected).toEqual(feed);
+      expect(detected).toEqual([feed[feed.length - 1]]);
     });
   });
 
