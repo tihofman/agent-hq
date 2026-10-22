@@ -297,6 +297,7 @@ Um den Alltag mit lokalen Subagents stabil, transparent und nervenschonend zu ge
 - **Spike (Phase 4, time-boxed)**: Klären, ob `agy` / `codex` in einem interaktiven Modus über ein vom Server verwaltetes PTY (`node-pty`) gesteuert werden können, ohne den Delegations-Workflow über Claude zu brechen.
   - **Positiv** ➔ Chat-Eingabe, Quick-Reply-Karten und `POST /api/chat/send` werden als eigenes Ticket umgesetzt.
   - **Negativ** ➔ Feature entfällt; Korrekturen laufen weiter über Kill Switch + erneute Delegation durch Claude.
+- **Ergebnis (22.10.2026)**: No-Go, siehe [ADR 0005](docs/adr/0005-kein-pty-chat-korrektur-per-resume.md). Stattdessen „Unterbrechen & nachsteuern“: Kill Switch mit Zusatzanweisung, `delegate.sh` setzt dieselbe Session headless fort (`codex exec resume` / `agy --conversation`), umgesetzt in #35.
 
 ---
 
