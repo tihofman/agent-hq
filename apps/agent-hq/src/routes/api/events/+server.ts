@@ -40,11 +40,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
   }
 
   dispatch(event);
-  try {
-    await appendHistory(event);
-  } catch (err) {
-    console.error('Failed to append event to history:', err);
-  }
+  void appendHistory(event);
 
   return json({ ok: true }, { status: 202 });
 };

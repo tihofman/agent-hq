@@ -1,6 +1,8 @@
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -24,6 +26,9 @@ export default defineConfig({
   ],
   test: {
     environment: 'node',
+    env: {
+      AGENT_HQ_HOME: join(tmpdir(), 'agent-hq-test'),
+    },
     include: ['src/**/*.{test,spec}.{js,ts}'],
     expect: { requireAssertions: true },
   },

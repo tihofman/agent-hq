@@ -2,43 +2,18 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  initialState,
   parseEvent,
-  type Agent,
-  type EventData,
-  type EventType,
+  reduce,
   type HQEvent,
-  type RunStatus,
+  type Run,
 } from './state';
 
-const runStatuses: Partial<Record<EventType, RunStatus>> = {
-  TASK_HANDOVER: 'handover',
-  TASK_START: 'running',
-  TASK_COMPLETE: 'complete',
-  TASK_FAILED: 'failed',
-  TASK_ABORTED: 'aborted',
-  RATE_LIMITED: 'cooldown',
-};
-
-export interface HistoryRun {
-  runId: string;
-  agent: Agent;
-  status: RunStatus;
-  timestamp: string;
+export interface HistoryRun extends Run {
   startedAt: string;
-  endedAt: string;
   durationMs: number;
-  pid?: number | null;
-  ticketId?: string;
-  cwd?: string;
-  logFile?: string;
-  exitCode?: number | null;
-  prNumber?: number;
-  data: EventData;
   events: HQEvent[];
 }
-
-export type RunHistoryEntry = HistoryRun;
-export type HistoricalRun = HistoryRun;
 
 export function getHistoryDir(): string {
   const env = process.env.AGENT_HQ_HOME?.trim();
@@ -53,15 +28,6 @@ export function getHistoryPath(): string {
 export async function appendHistory(event: HQEvent): Promise<void> {
   try {
     const dir = getHistoryDir();
-    if (
-      (process.env.VITEST || process.env.NODE_ENV === 'test') &&
-      !process.env.AGENT_HQ_HOME?.trim()
-    ) {
-      console.error(
-        'Refusing to write to history: AGENT_HQ_HOME not set in test environment',
-      );
-      return;
-    }
     await mkdir(dir, { recursive: true });
     const line = JSON.stringify(event) + '\n';
     await appendFile(getHistoryPath(), line, 'utf8');
@@ -101,56 +67,38 @@ export async function readHistory(): Promise<HQEvent[]> {
 
 export async function readRecentRuns(limit = 20): Promise<HistoryRun[]> {
   const events = await readHistory();
-  const runsMap = new Map<string, HistoryRun>();
+  const state = events.reduce((s, e) => reduce(s, e), initialState);
 
+  const eventsByRun = new Map<string, HQEvent[]>();
   for (const event of events) {
     if (!event.runId) continue;
-
-    let run = runsMap.get(event.runId);
-    if (!run) {
-      run = {
-        runId: event.runId,
-        agent: event.agent,
-        status: runStatuses[event.event] ?? 'running',
-        timestamp: event.timestamp,
-        startedAt: event.timestamp,
-        endedAt: event.timestamp,
-        durationMs: 0,
-        data: {},
-        events: [],
-      };
-      runsMap.set(event.runId, run);
+    let list = eventsByRun.get(event.runId);
+    if (!list) {
+      list = [];
+      eventsByRun.set(event.runId, list);
     }
-
-    run.events.push(event);
-    run.timestamp = event.timestamp;
-    run.endedAt = event.timestamp;
-    const duration = Date.parse(run.endedAt) - Date.parse(run.startedAt);
-    run.durationMs = Number.isNaN(duration) ? 0 : Math.max(0, duration);
-
-    if (runStatuses[event.event]) {
-      run.status = runStatuses[event.event]!;
-    }
-    if (event.ticketId !== undefined) run.ticketId = event.ticketId;
-    if (event.cwd !== undefined) run.cwd = event.cwd;
-    if (event.pid !== undefined) run.pid = event.pid;
-    if (event.data.logFile !== undefined) run.logFile = event.data.logFile;
-    if (event.data.exitCode !== undefined) run.exitCode = event.data.exitCode;
-    if (event.data.prNumber !== undefined) run.prNumber = event.data.prNumber;
-    run.data = { ...run.data, ...event.data };
+    list.push(event);
   }
 
-  const runs = Array.from(runsMap.values());
+  const runs: HistoryRun[] = Object.values(state.runs).map((run) => {
+    const runEvents = eventsByRun.get(run.runId) ?? [];
+    const startedAt = runEvents[0]?.timestamp ?? run.timestamp;
+    const duration = Date.parse(run.timestamp) - Date.parse(startedAt);
+    const durationMs = Number.isNaN(duration) ? 0 : Math.max(0, duration);
+
+    return {
+      ...run,
+      startedAt,
+      durationMs,
+      events: runEvents,
+    };
+  });
+
   runs.sort((a, b) => {
     const diff = Date.parse(b.startedAt) - Date.parse(a.startedAt);
     if (diff !== 0 && !Number.isNaN(diff)) return diff;
     return b.runId.localeCompare(a.runId);
   });
 
-  if (limit !== undefined) {
-    return runs.slice(0, Math.max(0, limit));
-  }
-  return runs;
+  return runs.slice(0, Math.max(0, limit));
 }
-
-export const getRecentRuns = readRecentRuns;

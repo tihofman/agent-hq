@@ -6,7 +6,6 @@ import {
   appendHistory,
   getHistoryDir,
   getHistoryPath,
-  getRecentRuns,
   readHistory,
   readRecentRuns,
 } from './history';
@@ -117,26 +116,6 @@ describe('history', () => {
       );
       consoleSpy.mockRestore();
     });
-
-    it('refuses to write if AGENT_HQ_HOME is unset in test environment', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-      delete process.env.AGENT_HQ_HOME;
-
-      const event = parseEvent({
-        event: 'TASK_START',
-        agent: 'codex',
-        runId: 'run-safety',
-      });
-
-      await appendHistory(event);
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Refusing to write to history: AGENT_HQ_HOME not set in test environment',
-      );
-      consoleSpy.mockRestore();
-    });
   });
 
   describe('readHistory', () => {
@@ -177,7 +156,7 @@ describe('history', () => {
     });
   });
 
-  describe('readRecentRuns / getRecentRuns', () => {
+  describe('readRecentRuns', () => {
     it('returns empty array when file does not exist', async () => {
       const runs = await readRecentRuns();
       expect(runs).toEqual([]);
@@ -225,9 +204,9 @@ describe('history', () => {
       expect(run.pid).toBe(1234);
       expect(run.logFile).toBe('/tmp/run-1.log');
       expect(run.exitCode).toBe(0);
-      expect(run.prNumber).toBe(99);
+      expect(run.data.prNumber).toBe(99);
       expect(run.startedAt).toBe('2026-10-22T10:00:00.000Z');
-      expect(run.endedAt).toBe('2026-10-22T10:02:00.000Z');
+      expect(run.timestamp).toBe('2026-10-22T10:02:00.000Z');
       expect(run.durationMs).toBe(120000);
       expect(run.events).toHaveLength(3);
     });
@@ -313,10 +292,6 @@ describe('history', () => {
 
       const zeroRuns = await readRecentRuns(0);
       expect(zeroRuns).toEqual([]);
-    });
-
-    it('exports getRecentRuns as alias of readRecentRuns', async () => {
-      expect(getRecentRuns).toBe(readRecentRuns);
     });
   });
 });
