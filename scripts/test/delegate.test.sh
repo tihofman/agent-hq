@@ -14,6 +14,7 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; [ ! -f "$TEST_DIR/stdout" ] || cat "$TEST_DIR/stdout"; exit 1; }
 pass() { echo "PASS: $*"; }
 mkdir -p "$TEST_DIR/bin"
+export AGENT_HQ_LOG_DIR="$TEST_DIR/agent-hq"
 export TMPDIR="$TEST_DIR" WORKER_PID_FILE="$TEST_DIR/worker.pid"
 export PATH="$TEST_DIR/bin:$PATH"
 cat > "$TEST_DIR/bin/agy" <<'WORKER'

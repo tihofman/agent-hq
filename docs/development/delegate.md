@@ -20,4 +20,46 @@ Aufruf: `scripts/delegate.sh agy "Implementiere #7"` (oder `codex`).
 `AGENT_HQ_URL` überschreibt `http://127.0.0.1:3333`; `TICKET_ID` überschreibt
 die Ticket-Erkennung aus dem Prompt. Logs liegen unter `${TMPDIR:-/tmp}/agent-hq/<runId>.log`.
 
-Prüfen mit `bash scripts/test/delegate.test.sh`.
+`AGENT_HQ_LOG_DIR` überschreibt das Log-Verzeichnis (bei Server und Skript gleich setzen).
+
+Der Kill Switch bietet eine optionale „Anweisung für Fortsetzung“ (maximal 4000 Zeichen).
+Ohne Anweisung beendet er den Worker wie bisher. Mit Anweisung schreibt der Server
+vor dem Signal eine `.msg` neben das registrierte Log, ausschließlich im erwarteten
+Log-Verzeichnis. Nach dem Worker-Ende liest und entfernt `delegate.sh` diese Datei.
+Die Anweisung erscheint als `>>> User-Anweisung: …` in stdout und im neuen Run-Log.
+Jede Fortsetzung bekommt eine neue Run-ID, ein eigenes Log und neue Handover-/Start-Events;
+Exit-Code und Bash-Aufruf bleiben für Claude transparent. Mehrfaches Nachsteuern ist möglich.
+
+codex liefert die Session-ID über die erste vollständige `session id:`-Zeile mit
+einer strikten UUID (`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`) im Log und wird mit `exec resume`
+fortgesetzt. Da resume keine `-s`/`--add-dir`-Flags unterstützt, setzt es die Sandbox
+über `-c sandbox_mode="workspace-write"`, Netzwerkzugriff und die Schreibverzeichnisse
+(Arbeitsverzeichnis und `~/.npm`) explizit wie beim Erstlauf.
+
+agy läuft mit `--output-format stream-json`: Das frühe Init-Event liefert
+`conversation_id`, auch wenn der Lauf später abgebrochen wird. Der Ausgabefilter
+schreibt nur für Init-Events den eigenen Marker `>>> agy init session:` und rendert
+Text aus Assistant-Events zeilenweise. Gleichlautende Marker aus Text oder Diagnosen
+werden eingerückt und damit von der Session-Erkennung ausgeschlossen;
+unbekannte Events und Diagnosen bleiben unverändert sichtbar. So bleibt das Log für
+den Tailer lesbar, ohne zusätzliche Abhängigkeit. Fortsetzung erfolgt gezielt mit
+`--conversation <id>` und denselben Berechtigungen wie beim Erstlauf.
+Nur die erste Init-ID wird berücksichtigt; sie muss `^[A-Za-z0-9][A-Za-z0-9_-]*$` erfüllen.
+Fehlt eine gültige Session-ID, startet der Worker mit Originalprompt und bisherigen Anweisungen neu.
+
+Prüfen mit `bash scripts/test/delegate.test.sh` und
+`bash scripts/test/delegate-resume.test.sh` (Fake-CLIs, keine echten Worker).
+
+Die lokalen Hilfen von `codex exec`, `codex exec resume` und `agy` wurden geprüft.
+Codex akzeptiert `--` als Optionsende (zusätzlich mit Parser-Proben geprüft);
+das Skript setzt es vor den Prompt bei Erstlauf und Resume. Für agy lässt sich
+diese Unterstützung nicht verlässlich bestätigen. Prompts und Anweisungen für agy
+dürfen deshalb nicht mit `-` beginnen; das Skript neutralisiert eine dennoch
+führende `-` durch ein vorangestelltes Leerzeichen.
+
+Endet der Worker von selbst kurz vor dem Kill, kann eine verspätet geschriebene
+`.msg` ungelesen liegen bleiben. Diese harmlose Race führt zu keiner Fortsetzung;
+der nächste Lauf verwendet eine neue Run-ID und liest die alte Datei nicht.
+
+Die isolierten Parser-/Argv-Tests laufen auch ohne Worker-Start:
+`bash scripts/test/delegate-resume.test.sh --unit-only`.
