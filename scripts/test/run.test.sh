@@ -29,51 +29,44 @@ fail() {
 }
 
 # -----------------------------------------------------------------------------
-# Test 1: Fehlendes Tool (jq) führt zu Exit 1 mit verständlicher Meldung
+# Test 1/2: Fehlendes Tool führt zu Exit 1 mit verständlicher Meldung
 # -----------------------------------------------------------------------------
-MOCK_BIN_NO_JQ="$TEST_DIR/bin_no_jq"
-mkdir -p "$MOCK_BIN_NO_JQ"
-for cmd in bash sh node npm gh lsof dirname basename; do
-  p="$(command -v "$cmd" 2>/dev/null || true)"
-  [ -z "$p" ] || ln -sf "$p" "$MOCK_BIN_NO_JQ/$cmd"
+for missing in jq gh lsof; do
+  MOCK_BIN="$TEST_DIR/bin_no_$missing"
+  mkdir -p "$MOCK_BIN"
+  for cmd in bash sh node npm jq gh lsof dirname basename; do
+    [ "$cmd" = "$missing" ] && continue
+    p="$(command -v "$cmd" 2>/dev/null || true)"
+    [ -z "$p" ] || ln -sf "$p" "$MOCK_BIN/$cmd"
+  done
+
+  OUT_FILE="$TEST_DIR/out_no_$missing"
+  set +e
+  PATH="$MOCK_BIN" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
+  EXIT_CODE=$?
+  set -e
+
+  if [ "$EXIT_CODE" -ne 1 ]; then
+    fail "Fehlendes Tool ($missing) erwartete Exit 1, bekam $EXIT_CODE"
+  elif ! grep -q "$missing" "$OUT_FILE"; then
+    fail "Fehlermeldung nennt das fehlende Tool $missing nicht (Ausgabe: $(cat "$OUT_FILE"))"
+  else
+    pass "Fehlendes Tool $missing -> Exit 1 mit klarer Meldung"
+  fi
 done
 
-OUT_FILE="$TEST_DIR/out_no_jq"
+# -----------------------------------------------------------------------------
+# Nicht-numerischer PORT führt zu Exit 1
+# -----------------------------------------------------------------------------
+OUT_FILE="$TEST_DIR/out_bad_port"
 set +e
-PATH="$MOCK_BIN_NO_JQ" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
+PORT="3484 x" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
 EXIT_CODE=$?
 set -e
-
-if [ "$EXIT_CODE" -ne 1 ]; then
-  fail "Fehlendes Tool (jq) erwartete Exit 1, bekam $EXIT_CODE"
-elif ! grep -q "jq" "$OUT_FILE"; then
-  fail "Fehlermeldung nennt das fehlende Tool jq nicht (Ausgabe: $(cat "$OUT_FILE"))"
+if [ "$EXIT_CODE" -ne 1 ] || ! grep -q "numerisch" "$OUT_FILE"; then
+  fail "Nicht-numerischer PORT erwartete Exit 1 mit Meldung, bekam $EXIT_CODE (Ausgabe: $(cat "$OUT_FILE"))"
 else
-  pass "Fehlendes Tool jq -> Exit 1 mit klarer Meldung"
-fi
-
-# -----------------------------------------------------------------------------
-# Test 2: Fehlendes Tool (gh) führt zu Exit 1 mit verständlicher Meldung
-# -----------------------------------------------------------------------------
-MOCK_BIN_NO_GH="$TEST_DIR/bin_no_gh"
-mkdir -p "$MOCK_BIN_NO_GH"
-for cmd in bash sh node npm jq lsof dirname basename; do
-  p="$(command -v "$cmd" 2>/dev/null || true)"
-  [ -z "$p" ] || ln -sf "$p" "$MOCK_BIN_NO_GH/$cmd"
-done
-
-OUT_FILE="$TEST_DIR/out_no_gh"
-set +e
-PATH="$MOCK_BIN_NO_GH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
-EXIT_CODE=$?
-set -e
-
-if [ "$EXIT_CODE" -ne 1 ]; then
-  fail "Fehlendes Tool (gh) erwartete Exit 1, bekam $EXIT_CODE"
-elif ! grep -q "gh" "$OUT_FILE"; then
-  fail "Fehlermeldung nennt das fehlende Tool gh nicht (Ausgabe: $(cat "$OUT_FILE"))"
-else
-  pass "Fehlendes Tool gh -> Exit 1 mit klarer Meldung"
+  pass "Nicht-numerischer PORT -> Exit 1 mit Meldung"
 fi
 
 # -----------------------------------------------------------------------------
@@ -105,6 +98,7 @@ else
   EXIT_CODE=$?
   set -e
 
+  BUSY_PID="$LISTENER_PID"
   kill "$LISTENER_PID" 2>/dev/null || true
   wait "$LISTENER_PID" 2>/dev/null || true
   LISTENER_PID=
@@ -115,7 +109,8 @@ else
     fail "Fehlermeldung nennt den belegten Port nicht (Ausgabe: $(cat "$OUT_FILE"))"
   elif ! grep -q -i "belegt" "$OUT_FILE"; then
     fail "Fehlermeldung erwähnt 'belegt' nicht (Ausgabe: $(cat "$OUT_FILE"))"
-  elif ! grep -q "node" "$OUT_FILE"; then
+  # lsof shows the command name differently per OS (Linux: "MainThrea"), so check the PID.
+  elif ! grep -q "$BUSY_PID" "$OUT_FILE"; then
     fail "Fehlermeldung enthält den belegenden Prozess nicht (Ausgabe: $(cat "$OUT_FILE"))"
   else
     pass "Belegter Port $BUSY_PORT -> Exit 1 mit Prozessinformationen"

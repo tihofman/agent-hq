@@ -6,9 +6,14 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PORT="${PORT:-3333}"
 HOST="${HOST:-127.0.0.1}"
 
-# 1. Voraussetzungen prüfen (node, npm, jq, gh)
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+  echo "Fehler: PORT muss numerisch sein: $PORT" >&2
+  exit 1
+fi
+
+# 1. Voraussetzungen prüfen (lsof wird für die Port-Prüfung gebraucht)
 MISSING_TOOLS=()
-for tool in node npm jq gh; do
+for tool in node npm jq gh lsof; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     MISSING_TOOLS+=("$tool")
   fi
@@ -21,7 +26,7 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
 fi
 
 # 2. Port-Prüfung
-OCCUPYING="$(lsof -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+OCCUPYING="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
 if [ -n "$OCCUPYING" ]; then
   echo "Fehler: Port $PORT ist bereits durch einen anderen Prozess belegt:" >&2
   echo "$OCCUPYING" >&2

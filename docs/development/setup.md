@@ -54,7 +54,6 @@ Der Entwicklungsserver unterstützt schnelles Hot Module Replacement (HMR).
 npx nx test agent-hq
 
 # Shell-Skript-Tests (inkl. run.sh, delegate.sh, hq-hook.sh)
-bash scripts/test/run.test.sh
 for f in scripts/test/*.test.sh; do bash "$f" || exit 1; done
 
 # Gesamte Validierungs-Pipeline (Lint, Test, Build, Typecheck)
@@ -70,14 +69,14 @@ npx nx format:check --all
 
 Agent-HQ und seine Hilfsskripte können über Umgebungsvariablen gesteuert werden:
 
-| Variable           | Standardwert               | Beschreibung                                                                                                           |
-| :----------------- | :------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
-| `PORT`             | `3333`                     | Port, auf dem der Agent-HQ-Server lauscht (z.B. `PORT=3482 ./run.sh`).                                                 |
-| `HOST`             | `127.0.0.1`                | Bind-Adresse des Servers (standardmäßig nur localhost).                                                                |
-| `AGENT_HQ_URL`     | `http://127.0.0.1:3333`    | Basis-URL, die von Client-Skripten (`delegate.sh`, `hq-hook.sh`) zur Ingest-API aufgerufen wird.                       |
-| `AGENT_HQ_HOME`    | `~/.agent-hq`              | Verzeichnis zur Speicherung der persistenten Event-Historie (`history.jsonl`).                                         |
-| `AGENT_HQ_LOG_DIR` | `${TMPDIR:-/tmp}/agent-hq` | Verzeichnis für Ausführungs-Logs delegierter Worker-Runs (`<runId>.log`).                                              |
-| `RUN_SH_DRY_RUN`   | `0`                        | Wenn auf `1` gesetzt, führt `./run.sh` nur Pre-Flight-Prüfungen durch und beendet ohne Serverstart (genutzt in Tests). |
+| Variable           | Standardwert               | Beschreibung                                                                                                                      |
+| :----------------- | :------------------------- | :-------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`             | `3333`                     | Port, auf dem der Agent-HQ-Server lauscht (z.B. `PORT=3482 ./run.sh`).                                                            |
+| `HOST`             | `127.0.0.1`                | Bind-Adresse des Servers (standardmäßig nur localhost).                                                                           |
+| `AGENT_HQ_URL`     | `http://127.0.0.1:3333`    | Basis-URL, die von Client-Skripten (`delegate.sh`, `hq-hook.sh`) zur Ingest-API aufgerufen wird.                                  |
+| `AGENT_HQ_HOME`    | `~/.agent-hq`              | Verzeichnis zur Speicherung der persistenten Event-Historie (`history.jsonl`).                                                    |
+| `AGENT_HQ_LOG_DIR` | `${TMPDIR:-/tmp}/agent-hq` | Verzeichnis, aus dem der Server Run-Logs liest. Muss zu `delegate.sh` passen, das immer nach `${TMPDIR:-/tmp}/agent-hq` schreibt. |
+| `RUN_SH_DRY_RUN`   | `0`                        | Wenn auf `1` gesetzt, führt `./run.sh` nur Pre-Flight-Prüfungen durch und beendet ohne Serverstart (genutzt in Tests).            |
 
 ---
 
@@ -86,10 +85,10 @@ Agent-HQ und seine Hilfsskripte können über Umgebungsvariablen gesteuert werde
 Um Claude Code und Worker-Agenten an Agent-HQ anzubinden, stehen zwei Skripte zur Verfügung:
 
 - **Task-Delegation (`delegate.sh`)**: Ermöglicht Claude das Delegieren von Aufgaben an Worker (`agy` oder `codex`) unter automatischem Senden von Lifecycle-Events (`TASK_HANDOVER`, `TASK_START`, `TASK_COMPLETE`, etc.) an das Dashboard.  
-  👉 Siehe [delegate.md](file:///docs/development/delegate.md) für Installations- und Aufrufanleitung.
+  👉 Siehe [delegate.md](delegate.md) für Installations- und Aufrufanleitung.
 
 - **PR- & CI-Tracking (`hq-hook.sh`)**: Ein Claude-Code-Hook für `~/.claude/settings.json`, der `gh pr`-Befehle im Terminal überwacht und Lifecycle-Events (`DRAFT_PR_CREATED`, `REVIEW_START`, `PR_READY`, `CI_CHECK_PASS`, `MERGED`) an Agent-HQ meldet.  
-  👉 Siehe [hq-hook.md](file:///docs/development/hq-hook.md) für die Registrierung in den Claude-Code-Settings.
+  👉 Siehe [hq-hook.md](hq-hook.md) für die Registrierung in den Claude-Code-Settings.
 
 ---
 
