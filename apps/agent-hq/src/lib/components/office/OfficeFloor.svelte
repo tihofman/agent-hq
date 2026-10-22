@@ -1,5 +1,6 @@
 <script lang="ts">
   import Room from './Room.svelte';
+  import CharacterSprite from './CharacterSprite.svelte';
   import {
     ROOMS,
     GRID_WIDTH,
@@ -112,6 +113,11 @@
         isHighlighted={highlightedRoom === room.id}
       />
     {/each}
+
+    <!-- 3 Character Sprites: Claude, agy, codex -->
+    <CharacterSprite agent="claude" />
+    <CharacterSprite agent="agy" />
+    <CharacterSprite agent="codex" />
 
     <!-- Optional Waypoints Debug Overlay -->
     {#if showWaypoints}
