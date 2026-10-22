@@ -42,7 +42,7 @@ export function startServerTail(options?: { dir?: string }): () => void {
     ) {
       dispatch({ type: 'TICK', timestamp: new Date().toISOString() });
     }
-  }, 30_000);
+  }, 5_000);
   timer.unref();
 
   const stop = () => {

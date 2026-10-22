@@ -1,0 +1,2 @@
+# Verified template: strings /Users/timmhofmann/.local/share/claude/versions/2.1.308 (claude 2.1.308), O progressSavedSuffix + Bt/XT; instantiated reset values.
+You've hit your session limit · resets Oct 25, 3pm (Europe/Berlin) · progress saved

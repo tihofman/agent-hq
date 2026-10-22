@@ -1,2 +1,2 @@
-# Derived from documented reset message, clock instantiated: https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code
-You've hit your limit · resets at 1:30pm (UTC)
+# Verified template: strings /Users/timmhofmann/.local/share/claude/versions/2.1.308 (claude 2.1.308), Bt + XT reset formatter (imported as pv); instantiated reset values.
+You've hit your limit · resets 1:30pm (Europe/Berlin)

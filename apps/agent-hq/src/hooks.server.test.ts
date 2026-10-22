@@ -45,7 +45,7 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it('ticks every 30 seconds only during cooldown and cleans up on HMR and stop', () => {
+  it('ticks every 5 seconds only during cooldown and cleans up on HMR and stop', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
     const ticks: unknown[] = [];
@@ -54,31 +54,31 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
     });
     try {
       init();
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(5_000);
       expect(ticks).toEqual([]);
       dispatch(
         parseEvent({
           event: 'RATE_LIMITED',
           agent: 'codex',
           runId: 'cool',
-          data: { cooldownUntil: '2026-10-22T12:01:30.000Z' },
+          data: { cooldownUntil: '2026-10-22T12:00:12.000Z' },
         }),
       );
       init();
       expect(vi.getTimerCount()).toBe(1);
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(5_000);
       expect(ticks).toEqual([
-        { type: 'TICK', timestamp: '2026-10-22T12:01:00.000Z' },
+        { type: 'TICK', timestamp: '2026-10-22T12:00:10.000Z' },
       ]);
       expect(getState().agents.codex.status).toBe('cooldown');
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(5_000);
       expect(getState().agents.codex.status).toBe('idle');
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(5_000);
       expect(ticks).toHaveLength(2);
       dispatch(
         parseEvent({ event: 'RATE_LIMITED', agent: 'agy', runId: 'unknown' }),
       );
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(5_000);
       expect(ticks).toHaveLength(3);
       stopServerTail();
       expect(vi.getTimerCount()).toBe(0);

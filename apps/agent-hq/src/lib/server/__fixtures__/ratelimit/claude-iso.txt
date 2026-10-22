@@ -1,2 +1,0 @@
-# Derived syntax variant of documented reset diagnostic (synthetic ISO timestamp): https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code
-You've hit your limit · resets at 2026-10-23T14:00:00Z
