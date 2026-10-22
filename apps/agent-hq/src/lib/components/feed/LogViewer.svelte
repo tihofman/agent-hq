@@ -48,18 +48,6 @@
     }
   });
 
-  function getItemKey(item: unknown, index: number): string {
-    if (typeof item === 'object' && item !== null) {
-      const obj = item as Record<string, unknown>;
-      if ('timestamp' in obj && 'event' in obj) {
-        return `${obj.timestamp}-${obj.event}-${index}`;
-      }
-      if ('type' in obj) {
-        return `action-${obj.type}-${index}`;
-      }
-    }
-    return `item-${index}`;
-  }
 </script>
 
 <div
@@ -109,7 +97,8 @@
         </span>
       </div>
     {:else}
-      {#each visibleItems as item, idx (getItemKey(item, idx))}
+      <!-- Keyed by identity: at the 1000-entry cap push+shift shifts every index. -->
+      {#each visibleItems as item (item)}
         <FeedMessage {item} />
       {/each}
     {/if}

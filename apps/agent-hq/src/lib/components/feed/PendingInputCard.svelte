@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import { liveStore } from '../../live.svelte';
   import { detectPendingInput, type PendingInputInfo } from '../../feed';
 
@@ -40,10 +39,6 @@
     return () => {
       clearTimeout(timer);
     };
-  });
-
-  onDestroy(() => {
-    clearTimeout(timer);
   });
 </script>
 

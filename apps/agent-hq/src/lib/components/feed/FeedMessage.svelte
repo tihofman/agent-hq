@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { liveStore } from '../../live.svelte';
   import type { HQEvent, InternalAction } from '../../server/state';
   import {
     getFeedBadges,
@@ -10,16 +9,7 @@
     getBadgeClass,
   } from '../../feed';
 
-  interface Props {
-    item?: HQEvent | InternalAction;
-    index?: number;
-  }
-
-  let { item: propItem, index }: Props = $props();
-
-  const item = $derived(
-    propItem ?? (index !== undefined ? liveStore.feed[index] : undefined),
-  );
+  let { item }: { item: HQEvent | InternalAction } = $props();
 
   const badges = $derived(item ? getFeedBadges(item) : []);
   const text = $derived(item ? getFeedMessageText(item) : '');
