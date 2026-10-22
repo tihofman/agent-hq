@@ -1,0 +1,80 @@
+{
+  "name": "agy",
+  "displayName": "agy",
+  "role": "Core Developer",
+  "frameWidth": 32,
+  "frameHeight": 32,
+  "columns": 8,
+  "rows": 4,
+  "totalFrames": 32,
+  "palette": "Endesga 32 (EDG32)",
+  "license": "CC0 / MIT (Self-created procedural pixel-art)",
+  "animations": {
+    "idle": {
+      "frames": [0, 1, 2, 3],
+      "frameRate": 4,
+      "loop": true,
+      "description": "Subtle breathing and blinking idle animation"
+    },
+    "walk_down": {
+      "frames": [4, 5, 6, 7],
+      "frameRate": 6,
+      "loop": true,
+      "description": "4-direction walk cycle facing forward (south)"
+    },
+    "walk_left": {
+      "frames": [8, 9, 10, 11],
+      "frameRate": 6,
+      "loop": true,
+      "description": "4-direction walk cycle facing left (west)"
+    },
+    "walk_right": {
+      "frames": [12, 13, 14, 15],
+      "frameRate": 6,
+      "loop": true,
+      "description": "4-direction walk cycle facing right (east)"
+    },
+    "walk_up": {
+      "frames": [16, 17, 18, 19],
+      "frameRate": 6,
+      "loop": true,
+      "description": "4-direction walk cycle facing away (north)"
+    },
+    "typing": {
+      "frames": [20, 21, 22],
+      "frameRate": 5,
+      "loop": true,
+      "description": "Rapid keyboard hacking with monitor screen glow flicker"
+    },
+    "handover": {
+      "frames": [23, 24],
+      "frameRate": 3,
+      "loop": false,
+      "description": "Holding and extending ticket folder during delegation"
+    },
+    "review": {
+      "frames": [25, 26],
+      "frameRate": 3,
+      "loop": true,
+      "description": "Checking acceptance criteria on clipboard with green checkmark"
+    },
+    "cooldown": {
+      "frames": [27, 28],
+      "frameRate": 2,
+      "loop": true,
+      "description": "Resting with nightcap (Schlafmütze) and floating Zzz"
+    },
+    "alert": {
+      "frames": [30],
+      "frameRate": 1,
+      "loop": false,
+      "description": "Alert / exclamation mark overhead"
+    },
+    "success": {
+      "frames": [31],
+      "frameRate": 1,
+      "loop": false,
+      "description": "Victory thumbs-up celebration"
+    }
+  }
+}
