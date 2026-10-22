@@ -53,7 +53,14 @@ flowchart TD
 ### Schritt 1: Scoping & Ticket-Planung (Claude)
 
 - Bevor Code geschrieben wird, existiert ein präzises Ticket (GitHub Issue oder `docs/tickets/`).
+- **Must-Have Agent-Empfehlung & Zuweisung**: Jedes Ticket enthält zwingend eine Empfehlung, welcher Agent die Aufgabe umsetzen soll:
+  - **`agent:claude`**: Architektur, Scoping, Ticket-Planung, komplexe Systementscheidungen, Orchestrierung sowie Review & Merge-Gates.
+  - **`agent:agy`** (Antigravity): Umfängliche Feature-Implementierung, Massen-Refactoring, Boilerplate-freie Komponenten, Test-Generierung in isolierten Worktrees.
+  - **`agent:codex`**: Algorithmische Spezialaufgaben, mathematische/logische Optimierung oder Zweitmeinungen.
+- **Verbindliches Label**: Jedes GitHub-Issue bzw. Ticket-Metadatum erhält zwingend das passende Agenten-Label:
+  `agent:claude` | `agent:agy` | `agent:codex`
 - Das Ticket enthält zwingend:
+  - **Empfohlener Agent & Begründung** (`agent:claude` / `agent:agy` / `agent:codex`)
   - **Hintergrund** (Fachlich & Technisch)
   - **Ziel** (Konkreter Zielzustand)
   - **Akzeptanzkriterien & Definition of Done (DoD)** als nummerierte/abzählbare Checkliste.

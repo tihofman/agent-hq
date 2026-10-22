@@ -223,6 +223,7 @@ Der Hook ist ebenso fehlertolerant wie `delegate.sh` (siehe 6D) und gibt immer E
    - **Rückfrage-Hinweis**: Erkennt der Log-Parser eine wartende Eingabeaufforderung, erscheint eine hervorgehobene Karte („Agent wartet auf Eingabe → Terminal“) plus Browser-Notification.
    - Eine Eingabezeile (2-Wege-Chat) kommt nur, wenn der Spike aus Abschnitt 6H positiv ausfällt.
 4. **Untere Leiste: Ticket & Acceptance Criteria Matrix**:
+   - Zeigt Ticket-Titel, ID und das zugewiesene Agenten-Badge (`agent:claude`, `agent:agy`, `agent:codex`).
    - Live-Checkliste der Akzeptanzkriterien des aktuellen Tickets.
    - Haken setzen sich live grün, sobald Claude sie im Review validiert hat.
    - PR-Status-Badge (`Draft` ➔ `Ready` ➔ `Merged`).
