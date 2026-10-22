@@ -1,0 +1,2 @@
+# Verified template: strings ~/.local/bin/claude 2.1.308 (2026-10-22), ole.seven_day_opus and function O: You've hit your ${e}${n}${d}; instantiated without reset.
+You've hit your Opus limit

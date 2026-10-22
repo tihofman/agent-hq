@@ -1,0 +1,2 @@
+# Derived syntax variant of documented reset diagnostic (synthetic duration): https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code
+You've hit your limit · resets in 2 hours

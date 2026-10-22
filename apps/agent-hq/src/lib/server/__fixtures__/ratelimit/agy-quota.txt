@@ -1,0 +1,2 @@
+# Verified: strings /opt/homebrew/bin/agy (installed 2026-10-22); exact diagnostic found in binary.
+You have exhausted your quota on this model.

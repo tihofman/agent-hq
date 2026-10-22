@@ -1,0 +1,2 @@
+# Derived from API diagnostic: https://github.com/router-for-me/CLIProxyAPI/discussions/1746
+You have exhausted your capacity on this model.Your quota will reset after 42s.

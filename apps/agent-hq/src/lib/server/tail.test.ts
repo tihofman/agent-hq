@@ -160,6 +160,44 @@ describe('startTail', () => {
     });
   });
 
+  it('emits validated RATE_LIMITED once per run, and again only for a later reset', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
+    try {
+      start((run) => (run === 'one' ? 'agy' : 'claude'));
+      const quota = 'You have exhausted your quota on this model.';
+      await append('one', `${quota}\n${quota}\n`);
+      await append(
+        'one',
+        `${quota} Retry-After: 60\n${quota} Retry-After: 60\n${quota} Retry-After: 30\n`,
+      );
+      await append('one', `${quota} Retry-After: 120\n${quota}\n`);
+      await append('two', `${quota}\n`);
+      const limits = events.filter(
+        (e) => 'event' in e && e.event === 'RATE_LIMITED',
+      );
+      expect(limits).toMatchObject([
+        { agent: 'agy', runId: 'one', room: 'lounge', data: {} },
+        {
+          agent: 'agy',
+          runId: 'one',
+          data: { cooldownUntil: '2026-10-22T12:01:00.000Z' },
+        },
+        {
+          agent: 'agy',
+          runId: 'one',
+          data: { cooldownUntil: '2026-10-22T12:02:00.000Z' },
+        },
+        { agent: 'claude', runId: 'two', data: {} },
+      ]);
+      expect(limits).toHaveLength(4);
+      for (const event of limits) expect(parseEvent(event)).toEqual(event);
+      expect(progress()).toHaveLength(8);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resets the offset, partial line and UTF-8 decoder after truncation', async () => {
     start();
     await append(

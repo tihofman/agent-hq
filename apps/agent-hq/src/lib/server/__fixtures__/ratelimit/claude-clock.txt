@@ -1,0 +1,2 @@
+# Derived from documented reset message, clock instantiated: https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code
+You've hit your limit · resets at 1:30pm (UTC)

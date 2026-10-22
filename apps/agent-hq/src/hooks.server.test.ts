@@ -45,6 +45,68 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it('ticks every 30 seconds only during cooldown and cleans up on HMR and stop', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
+    const ticks: unknown[] = [];
+    const unsubscribe = subscribe((_state, event) => {
+      if ('type' in event && event.type === 'TICK') ticks.push(event);
+    });
+    try {
+      init();
+      vi.advanceTimersByTime(30_000);
+      expect(ticks).toEqual([]);
+      dispatch(
+        parseEvent({
+          event: 'RATE_LIMITED',
+          agent: 'codex',
+          runId: 'cool',
+          data: { cooldownUntil: '2026-10-22T12:01:30.000Z' },
+        }),
+      );
+      init();
+      expect(vi.getTimerCount()).toBe(1);
+      vi.advanceTimersByTime(30_000);
+      expect(ticks).toEqual([
+        { type: 'TICK', timestamp: '2026-10-22T12:01:00.000Z' },
+      ]);
+      expect(getState().agents.codex.status).toBe('cooldown');
+      vi.advanceTimersByTime(30_000);
+      expect(getState().agents.codex.status).toBe('idle');
+      vi.advanceTimersByTime(30_000);
+      expect(ticks).toHaveLength(2);
+      dispatch(
+        parseEvent({ event: 'RATE_LIMITED', agent: 'agy', runId: 'unknown' }),
+      );
+      vi.advanceTimersByTime(30_000);
+      expect(ticks).toHaveLength(3);
+      stopServerTail();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(60_000);
+      expect(ticks).toHaveLength(3);
+    } finally {
+      stopServerTail();
+      unsubscribe();
+      vi.useRealTimers();
+    }
+  });
+
+  it('continues tailing cooldown runs so later resets can extend the countdown', async () => {
+    dispatch(
+      parseEvent({ event: 'TASK_START', agent: 'agy', runId: 'limited' }),
+    );
+    init();
+    const file = join(tempDir, 'limited.log');
+    await appendFile(file, 'You have exhausted your quota on this model.\n');
+    await expect.poll(() => getState().agents.agy.status).toBe('cooldown');
+    await appendFile(
+      file,
+      'You have exhausted your quota on this model. Retry-After: 60\n',
+    );
+    await expect.poll(() => getState().agents.agy.cooldownUntil).toBeDefined();
+    expect(getState().runs.limited.status).toBe('cooldown');
+  });
+
   it('uses AGENT_HQ_LOG_DIR env or defaults to os.tmpdir()/agent-hq', () => {
     expect(getLogDir()).toBe(tempDir);
     delete process.env.AGENT_HQ_LOG_DIR;
