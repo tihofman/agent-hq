@@ -1,10 +1,11 @@
 <script lang="ts">
+  import KillSwitch from './KillSwitch.svelte';
   interface Props {
     repo?: string;
     branch?: string;
     statusText?: string;
     isBusy?: boolean;
-    onKill?: () => void;
+    activeRunId?: string | null;
     onToggleAudio?: (enabled: boolean) => void;
   }
 
@@ -13,24 +14,15 @@
     branch = '—',
     statusText = 'Bereit • Keine aktiven Subagenten',
     isBusy = false,
-    onKill,
+    activeRunId = null,
     onToggleAudio,
   }: Props = $props();
 
   let audioEnabled = $state(true);
-  let killTriggered = $state(false);
 
   function toggleAudio() {
     audioEnabled = !audioEnabled;
     onToggleAudio?.(audioEnabled);
-  }
-
-  function handleKill() {
-    killTriggered = true;
-    onKill?.();
-    setTimeout(() => {
-      killTriggered = false;
-    }, 2000);
   }
 </script>
 
@@ -134,20 +126,6 @@
       {/if}
     </button>
 
-    <!-- Emergency Kill Button -->
-    <button
-      type="button"
-      onclick={handleKill}
-      class="flex items-center gap-1.5 rounded px-3 py-1 font-semibold text-white transition cursor-pointer {killTriggered
-        ? 'bg-red-700 ring-2 ring-red-400'
-        : 'bg-red-600/90 hover:bg-red-500 border border-red-500/80 shadow-sm shadow-red-950'}"
-      title="Notfall-Stopp: Beendet sofort alle laufenden Subagents (ESC)"
-      data-testid="kill-switch"
-    >
-      <span class="text-xs">🚨</span>
-      <span class="tracking-wide">
-        {killTriggered ? 'STOPPING...' : 'KILL SWITCH'}
-      </span>
-    </button>
+    <KillSwitch runId={activeRunId} />
   </div>
 </header>
