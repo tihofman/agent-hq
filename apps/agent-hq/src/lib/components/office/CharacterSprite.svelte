@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Agent } from '../../server/state';
+  import type { Agent, HQEvent } from '../../server/state';
   import {
     getSpriteMetadata,
     getFrameIndex,
@@ -17,6 +17,17 @@
   }
 
   let { agent }: Props = $props();
+
+  // The feed also carries InternalActions (no event/runId), so narrow to HQEvents.
+  function findLastHandover(): HQEvent | undefined {
+    return liveStore.feed.findLast(
+      (e): e is HQEvent => 'event' in e && e.event === 'TASK_HANDOVER',
+    );
+  }
+
+  function handoverKeyOf(e: HQEvent): string {
+    return `${e.agent}-${e.runId ?? e.timestamp}`;
+  }
 
   const metadata = $derived(getSpriteMetadata(agent));
 
@@ -62,11 +73,9 @@
       return;
     }
 
-    const lastHandoverEvent = liveStore.feed.findLast(
-      (e) => e.event === 'TASK_HANDOVER',
-    );
+    const lastHandoverEvent = findLastHandover();
     const handoverKey = lastHandoverEvent
-      ? `${lastHandoverEvent.agent}-${lastHandoverEvent.runId ?? lastHandoverEvent.timestamp}`
+      ? handoverKeyOf(lastHandoverEvent)
       : null;
 
     let triggerHandover = false;
@@ -141,11 +150,9 @@
   }
 
   onMount(() => {
-    const lastHandoverEvent = liveStore.feed.findLast(
-      (e) => e.event === 'TASK_HANDOVER',
-    );
+    const lastHandoverEvent = findLastHandover();
     if (lastHandoverEvent) {
-      lastHandledHandoverKey = `${lastHandoverEvent.agent}-${lastHandoverEvent.runId ?? lastHandoverEvent.timestamp}`;
+      lastHandledHandoverKey = handoverKeyOf(lastHandoverEvent);
     }
     for (const w of ['agy', 'codex'] as const) {
       knownWorkerRuns[w] = liveStore.state?.agents?.[w]?.runId;
