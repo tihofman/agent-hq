@@ -36,5 +36,8 @@
   "workspaces": [
     "apps/*",
     "libs/*"
-  ]
+  ],
+  "overrides": {
+    "undici": "^7.30.1"
+  }
 }
