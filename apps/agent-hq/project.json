@@ -4,6 +4,13 @@
   "projectType": "application",
   "sourceRoot": "apps/agent-hq/src",
   "targets": {
+    "start": {
+      "command": "HOST=${HOST:-127.0.0.1} PORT=${PORT:-3333} node build",
+      "options": {
+        "cwd": "apps/agent-hq"
+      },
+      "dependsOn": ["build"]
+    },
     "serve": {
       "command": "vite dev",
       "options": {

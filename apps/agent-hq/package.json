@@ -2,14 +2,5 @@
   "name": "agent-hq",
   "version": "0.0.1",
   "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "serve": "vite dev",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
-  }
+  "type": "module"
 }
