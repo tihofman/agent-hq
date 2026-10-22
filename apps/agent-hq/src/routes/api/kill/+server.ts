@@ -16,7 +16,30 @@ async function childrenCommand(command: string, args: string[]) {
   }
 }
 
-function signal(pid: number, value: NodeJS.Signals | 0) {
+class WorkerConflict extends Error {}
+
+async function assertWorker(pid: number) {
+  let parent: string;
+  let command: string;
+  try {
+    parent = (
+      await childrenCommand('ps', ['-o', 'ppid=', '-p', String(pid)])
+    ).trim();
+    if (!parent) return false;
+    command = /^\d+$/.test(parent)
+      ? await childrenCommand('ps', ['-o', 'command=', '-p', parent])
+      : '';
+  } catch {
+    throw new WorkerConflict('Process is no longer a delegate.sh worker');
+  }
+  if (!command.includes('delegate.sh')) {
+    throw new WorkerConflict('Process is no longer a delegate.sh worker');
+  }
+  return true;
+}
+
+async function signal(worker: number, pid: number, value: NodeJS.Signals | 0) {
+  if (!(await assertWorker(worker))) return false;
   try {
     process.kill(pid, value);
     return true;
@@ -48,32 +71,58 @@ export const POST: RequestHandler = async ({ request, url }) => {
   const run = Object.hasOwn(getState().runs, body.runId)
     ? getState().runs[body.runId]
     : undefined;
-  if (!run || !['handover', 'running'].includes(run.status) || !run.pid) {
+  if (
+    !run ||
+    !['handover', 'running'].includes(run.status) ||
+    run.pid == null
+  ) {
     return json({ error: 'Active run not found' }, { status: 404 });
   }
   const pid = run.pid;
-  // Remember children before TERM: they may be reparented when the worker exits.
-  const children = (await childrenCommand('pgrep', ['-P', String(pid)]))
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(Number);
-  await childrenCommand('pkill', ['-TERM', '-P', String(pid)]);
-  signal(pid, 'SIGTERM');
-  const timer = setTimeout(async () => {
-    try {
-      for (const child of children) {
-        if (signal(child, 0)) signal(child, 'SIGKILL');
-      }
-      if (signal(pid, 0)) {
-        await childrenCommand('pkill', ['-KILL', '-P', String(pid)]);
-        signal(pid, 'SIGKILL');
-      }
-    } catch (error) {
-      console.error('Kill switch escalation failed:', error);
+  if (pid <= 1 || pid === process.pid || pid === process.ppid) {
+    return json({ error: 'Refusing to kill protected pid' }, { status: 409 });
+  }
+  try {
+    if (!(await assertWorker(pid))) {
+      throw new WorkerConflict('Process is no longer a delegate.sh worker');
     }
-  }, 1500);
-  timer.unref();
+    // Remember children before TERM: they may be reparented when the worker exits.
+    const children = (await childrenCommand('pgrep', ['-P', String(pid)]))
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(Number);
+    if (!(await assertWorker(pid))) {
+      throw new WorkerConflict('Process is no longer a delegate.sh worker');
+    }
+    await childrenCommand('pkill', ['-TERM', '-P', String(pid)]);
+    await signal(pid, pid, 'SIGTERM');
+    const timer = setTimeout(async () => {
+      try {
+        for (const child of children) {
+          if (await signal(pid, child, 0)) await signal(pid, child, 'SIGKILL');
+        }
+        if (await signal(pid, pid, 0)) {
+          if (!(await assertWorker(pid))) return;
+          await childrenCommand('pkill', ['-KILL', '-P', String(pid)]);
+          await signal(pid, pid, 'SIGKILL');
+        }
+      } catch (error) {
+        if (!(error instanceof WorkerConflict)) {
+          console.error('Kill switch escalation failed:', error);
+        }
+      }
+    }, 1500);
+    timer.unref();
+  } catch (error) {
+    if (error instanceof WorkerConflict) {
+      return json({ error: error.message }, { status: 409 });
+    }
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+      return json({ error: 'Cannot signal pid' }, { status: 409 });
+    }
+    throw error;
+  }
   dispatch(
     parseEvent({ event: 'TASK_ABORTED', agent: run.agent, runId: run.runId }),
   );

@@ -58,6 +58,31 @@ describe('POST /api/kill', () => {
     expect((await request({ runId: 'done' })).status).toBe(404);
   });
 
+  it('leaves a process without a delegate.sh parent alive', async () => {
+    const worker = spawn('sleep', ['30']);
+    const exited = new Promise((resolve) => worker.once('exit', resolve));
+    try {
+      dispatch(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'agy',
+          runId: 'unrelated',
+          pid: worker.pid,
+        }),
+      );
+      const response = await request({ runId: 'unrelated' });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: 'Process is no longer a delegate.sh worker',
+      });
+      expect(process.kill(worker.pid!, 0)).toBe(true);
+      expect(getState().runs.unrelated.status).toBe('running');
+    } finally {
+      worker.kill('SIGKILL');
+      await exited;
+    }
+  });
+
   it('kills delegate worker and child, broadcasts abort, and returns before escalation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hq-kill-'));
     const pidsFile = join(dir, 'pids');

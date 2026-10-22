@@ -25,6 +25,12 @@
 
 <svelte:window
   onkeydown={(event) => {
+    if (
+      event.target instanceof HTMLElement &&
+      (event.target.matches('input, textarea') ||
+        event.target.isContentEditable)
+    )
+      return;
     if (event.key === 'Escape' && !event.repeat) void kill();
   }}
 />
@@ -36,4 +42,4 @@
   title="Notfall-Stopp: Laufenden Worker beenden (Esc)"
   data-testid="kill-switch">🚨 {pending ? 'STOPPING...' : 'KILL SWITCH'}</button
 >
-{#if error}<span role="alert">{error}</span>{/if}
+{#if error}<span role="alert" class="text-xs text-red-400">{error}</span>{/if}
