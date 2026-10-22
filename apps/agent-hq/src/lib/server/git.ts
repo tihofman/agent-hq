@@ -22,39 +22,28 @@ export function clearGitCache(): void {
   inflight.clear();
 }
 
+const MAX_CACHE_ENTRIES = 500;
+
+// cwd comes from events: never let the inspected repo's config run commands.
+async function git(cwd: string, ...args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-c', 'core.fsmonitor=false', '-C', cwd, ...args],
+    { timeout: 1000, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
+  );
+  return stdout.trim();
+}
+
 async function getCommonDir(cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-      { timeout: 1000 },
-    );
-    return path.resolve(stdout.trim());
-  } catch {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', cwd, 'rev-parse', '--git-common-dir'],
-      { timeout: 1000 },
-    );
-    return path.resolve(cwd, stdout.trim());
-  }
+  return git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir');
 }
 
 async function getBranch(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'],
-      { timeout: 1000 },
-    );
-    return stdout.trim();
+    return await git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD');
   } catch {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', cwd, 'symbolic-ref', '--short', 'HEAD'],
-      { timeout: 1000 },
-    );
-    return stdout.trim();
+    // Unborn branch (repo without commits)
+    return git(cwd, 'symbolic-ref', '--short', 'HEAD');
   }
 }
 
@@ -74,11 +63,12 @@ export async function resolveRepo(
   cwd: string,
   options?: { ttlMs?: number; now?: () => number },
 ): Promise<GitInfo | null> {
-  if (!cwd || typeof cwd !== 'string' || !cwd.trim()) {
+  if (!cwd || typeof cwd !== 'string' || !path.isAbsolute(cwd.trim())) {
     return null;
   }
 
   const cacheKey = path.resolve(cwd.trim());
+  if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
   const now = options?.now ? options.now() : Date.now();
   const ttlMs = options?.ttlMs ?? 10_000;
 
