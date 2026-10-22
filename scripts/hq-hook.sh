@@ -100,8 +100,6 @@ if [[ "$COMMAND" =~ /pull/([0-9]+)([^0-9]|$) ]]; then
   PR_NUMBER="${BASH_REMATCH[1]}"
 elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
   PR_NUMBER="${BASH_REMATCH[2]}"
-elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+.*[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
-  PR_NUMBER="${BASH_REMATCH[2]}"
 fi
 
 if [ -z "$PR_NUMBER" ]; then

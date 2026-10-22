@@ -120,6 +120,10 @@ Das Erkennen von Draft-PRs bei `gh pr create` prüft per Regex auf die Flags `--
 - Falls Parameter Werte enthalten, die isoliert `-d` gleichen, könnte dies als Draft interpretiert werden.
 - In normalen GitHub-CLI-Aufrufen ist `-d` jedoch das Standard-Kurzflag für `--draft`.
 
+### CI-Ergebnis nur bei alleinstehendem `gh pr checks`
+
+Der Hook sieht nur den Exit-Code des **gesamten** Bash-Aufrufs. Steht `gh pr checks` in einer Kette (`gh pr checks 42; echo done`, `gh pr checks 42 | tail -5`), bestimmt das letzte Kommando den Exit-Code – ein fehlgeschlagener Check wird dann als `CI_CHECK_PASS` gemeldet. Für korrekte CI-Events `gh pr checks` als letztes Kommando bzw. ohne Pipe aufrufen.
+
 ### Reihenfolge der PR-Nummern-Extraktion
 
 Die PR-Nummer wird nach folgender Priorität ermittelt und als numerischer Wert in `data.prNumber` übermittelt:
