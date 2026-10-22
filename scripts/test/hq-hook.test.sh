@@ -78,12 +78,60 @@ done
 PORT="$(cat "$PORT_FILE")"
 export AGENT_HQ_URL="http://127.0.0.1:$PORT"
 
-# Test 1: gh pr create --draft
-TEST_NAME="Pattern: gh pr create --draft -> DRAFT_PR_CREATED"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# Test runner helper
+run_case() {
+  local name="$1"
+  local json="$2"
+  local expected_event="$3"
+  local expected_pr="${4:-}"
+
+  > "$REQUESTS_FILE"
+  local exit_code=0
+  printf '%s' "$json" | bash "$HOOK_SCRIPT" || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    fail "$name" "hook exited with code $exit_code (expected 0)"
+    return
+  fi
+
+  if [ "$expected_event" = "NONE" ]; then
+    if [ -s "$REQUESTS_FILE" ]; then
+      fail "$name" "server unexpectedly received an event: $(cat "$REQUESTS_FILE")"
+    else
+      pass "$name"
+    fi
+  else
+    if [ ! -s "$REQUESTS_FILE" ]; then
+      fail "$name" "no event was received by server"
+      return
+    fi
+
+    local actual_event actual_agent actual_pr
+    actual_event="$(jq -r '.event // empty' < "$REQUESTS_FILE")"
+    actual_agent="$(jq -r '.agent // empty' < "$REQUESTS_FILE")"
+    actual_pr="$(jq -r '.data.prNumber // empty' < "$REQUESTS_FILE")"
+
+    if [ "$actual_event" != "$expected_event" ]; then
+      fail "$name" "expected event $expected_event, got $actual_event"
+      return
+    fi
+
+    if [ "$actual_agent" != "claude" ]; then
+      fail "$name" "expected agent claude, got $actual_agent"
+      return
+    fi
+
+    if [ -n "$expected_pr" ] && [ "$actual_pr" != "$expected_pr" ]; then
+      fail "$name" "expected prNumber $expected_pr, got $actual_pr"
+      return
+    fi
+
+    pass "$name"
+  fi
+}
+
+# 1. gh pr create --draft
+run_case "Pattern: gh pr create --draft -> DRAFT_PR_CREATED" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -94,30 +142,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "https://github.com/tihofman/agent-hq/pull/42\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  AGENT="$(jq -r .agent < "$REQUESTS_FILE")"
-  CWD="$(jq -r .cwd < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "DRAFT_PR_CREATED" ] && [ "$AGENT" = "claude" ] && [ "$CWD" = "/workspace/agent-hq" ] && [ "$PR" = "42" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, agent=$AGENT, cwd=$CWD, prNumber=$PR"
-  fi
-fi
+}' "DRAFT_PR_CREATED" 42
 
-# Test 2: gh pr diff
-TEST_NAME="Pattern: gh pr diff -> REVIEW_START"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 2. gh pr diff
+run_case "Pattern: gh pr diff -> REVIEW_START" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -128,29 +156,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "diff --git a/scripts/test.sh b/scripts/test.sh\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  AGENT="$(jq -r .agent < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "REVIEW_START" ] && [ "$AGENT" = "claude" ] && [ "$PR" = "15" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, agent=$AGENT, prNumber=$PR"
-  fi
-fi
+}' "REVIEW_START" 15
 
-# Test 3: gh pr view
-TEST_NAME="Pattern: gh pr view -> REVIEW_START"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 3. gh pr view
+run_case "Pattern: gh pr view -> REVIEW_START" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -161,28 +170,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "title:\tClaude-Code-Hook\nstate:\tOPEN\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "REVIEW_START" ] && [ "$PR" = "8" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, prNumber=$PR"
-  fi
-fi
+}' "REVIEW_START" 8
 
-# Test 4: gh pr ready
-TEST_NAME="Pattern: gh pr ready -> PR_READY"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 4. gh pr ready
+run_case "Pattern: gh pr ready -> PR_READY" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -193,28 +184,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "PR_READY" ] && [ "$PR" = "42" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, prNumber=$PR"
-  fi
-fi
+}' "PR_READY" 42
 
-# Test 5: gh pr checks (PASS)
-TEST_NAME="Pattern: gh pr checks (PASS) -> CI_CHECK_PASS"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 5. gh pr checks (PostToolUse) -> CI_CHECK_PASS
+run_case "Pattern: gh pr checks (PostToolUse) -> CI_CHECK_PASS" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -225,60 +198,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "✓ build (push) pass 1m32s https://github.com/...\n✓ test (push) pass 45s https://github.com/...\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "CI_CHECK_PASS" ] && [ "$PR" = "42" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, prNumber=$PR"
-  fi
-fi
+}' "CI_CHECK_PASS" 42
 
-# Test 6: gh pr checks (FAIL)
-TEST_NAME="Pattern: gh pr checks (FAIL) -> CI_CHECK_FAIL"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Bash",
-  "cwd": "/workspace/agent-hq",
-  "tool_input": {
-    "command": "gh pr checks 42"
-  },
-  "tool_response": {
-    "stdout": "✓ build (push) pass 1m32s https://github.com/...\n✕ test (push) fail 45s https://github.com/...\n",
-    "stderr": ""
-  }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "CI_CHECK_FAIL" ] && [ "$PR" = "42" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, prNumber=$PR"
-  fi
-fi
-
-# Test 7: gh pr merge
-TEST_NAME="Pattern: gh pr merge -> MERGED"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 6. gh pr merge -> MERGED
+run_case "Pattern: gh pr merge -> MERGED" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -289,28 +212,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "Merged pull request #42\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "MERGED" ] && [ "$PR" = "42" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, prNumber=$PR"
-  fi
-fi
+}' "MERGED" 42
 
-# Test 8: Non-matching command sends nothing
-TEST_NAME="Non-matching command sends nothing"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 7. Non-matching command sends nothing
+run_case "Non-matching command sends nothing" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -321,49 +226,26 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "On branch main\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE (expected 0)"
-elif [ -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "server unexpectedly received an event: $(cat "$REQUESTS_FILE")"
-else
-  pass "$TEST_NAME"
-fi
+}' "NONE"
 
-# Test 9: Broken JSON exits 0 without error or sending
-TEST_NAME="Broken JSON -> exit 0, sends nothing"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-echo '{ malformed json: not valid...' | bash "$HOOK_SCRIPT" || EXIT_CODE=$?
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE (expected 0)"
-elif [ -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "server unexpectedly received an event"
-else
-  pass "$TEST_NAME"
-fi
+# 8. Broken JSON exits 0 without error or sending
+run_case "Broken JSON -> exit 0, sends nothing" '{ malformed json: not valid...' "NONE"
 
-# Test 10: Empty stdin exits 0 without error or sending
-TEST_NAME="Empty stdin -> exit 0, sends nothing"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-echo -n "" | bash "$HOOK_SCRIPT" || EXIT_CODE=$?
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE (expected 0)"
-elif [ -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "server unexpectedly received an event"
-else
-  pass "$TEST_NAME"
-fi
+# 9. Empty stdin exits 0 without error or sending
+run_case "Empty stdin -> exit 0, sends nothing" "" "NONE"
 
-# Test 11: Server offline -> exit 0 without delay (< 1s)
+# 10. Server offline -> exit 0 without delay (< 1s), measured without python3
 TEST_NAME="Server offline -> exit 0 without delay"
 OLD_HQ_URL="$AGENT_HQ_URL"
-# Use an unassigned port on 127.0.0.1 where nothing is listening
 export AGENT_HQ_URL="http://127.0.0.1:49999"
 
-START_TIME=$(python3 -c 'import time; print(time.time())')
+START_MS=0
+if [ -n "${EPOCHREALTIME:-}" ]; then
+  START_MS=$(( ${EPOCHREALTIME/./} / 1000 ))
+else
+  START_MS=$(node -e 'console.log(Date.now())')
+fi
+
 EXIT_CODE=0
 bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
 {
@@ -379,24 +261,27 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
   }
 }
 EOF
-END_TIME=$(python3 -c 'import time; print(time.time())')
-DURATION=$(python3 -c "print(f'{$END_TIME - $START_TIME:.2f}')")
+
+END_MS=0
+if [ -n "${EPOCHREALTIME:-}" ]; then
+  END_MS=$(( ${EPOCHREALTIME/./} / 1000 ))
+else
+  END_MS=$(node -e 'console.log(Date.now())')
+fi
+
+DURATION_MS=$(( END_MS - START_MS ))
 export AGENT_HQ_URL="$OLD_HQ_URL"
 
 if [ "$EXIT_CODE" -ne 0 ]; then
   fail "$TEST_NAME" "hook exited with code $EXIT_CODE (expected 0)"
-elif python3 -c "import sys; sys.exit(0 if float('$DURATION') < 1.0 else 1)"; then
-  pass "$TEST_NAME (completed in ${DURATION}s)"
+elif [ "$DURATION_MS" -lt 1000 ]; then
+  pass "$TEST_NAME (completed in ${DURATION_MS}ms)"
 else
-  fail "$TEST_NAME" "hook took too long (${DURATION}s >= 1.0s)"
+  fail "$TEST_NAME" "hook took too long (${DURATION_MS}ms >= 1000ms)"
 fi
 
-# Test 12: gh pr create WITHOUT --draft sends nothing
-TEST_NAME="gh pr create without --draft sends nothing"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 11. gh pr create without --draft sends nothing
+run_case "gh pr create without --draft sends nothing" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
   "cwd": "/workspace/agent-hq",
@@ -407,55 +292,10 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "stdout": "https://github.com/tihofman/agent-hq/pull/50\n",
     "stderr": ""
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE (expected 0)"
-elif [ -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "server unexpectedly received an event: $(cat "$REQUESTS_FILE")"
-else
-  pass "$TEST_NAME"
-fi
+}' "NONE"
 
-# Test 13: gh pr checks with exitCode: 1 -> CI_CHECK_FAIL
-TEST_NAME="Pattern: gh pr checks with exitCode: 1 -> CI_CHECK_FAIL"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Bash",
-  "cwd": "/workspace/agent-hq",
-  "tool_input": {
-    "command": "gh pr checks 99"
-  },
-  "tool_response": {
-    "stdout": "checks in progress\n",
-    "stderr": "",
-    "exitCode": 1
-  }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE"
-elif [ ! -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "no event was received by server"
-else
-  EVENT="$(jq -r .event < "$REQUESTS_FILE")"
-  PR="$(jq -r .data.prNumber < "$REQUESTS_FILE")"
-  if [ "$EVENT" = "CI_CHECK_FAIL" ] && [ "$PR" = "99" ]; then
-    pass "$TEST_NAME"
-  else
-    fail "$TEST_NAME" "unexpected payload: event=$EVENT, prNumber=$PR"
-  fi
-fi
-
-# Test 14: Non-bash tool (e.g. Write) sends nothing
-TEST_NAME="Non-Bash tool sends nothing"
-> "$REQUESTS_FILE"
-EXIT_CODE=0
-bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
-{
+# 12. Non-Bash tool (e.g. Write) sends nothing
+run_case "Non-Bash tool sends nothing" '{
   "hook_event_name": "PostToolUse",
   "tool_name": "Write",
   "cwd": "/workspace/agent-hq",
@@ -467,15 +307,68 @@ bash "$HOOK_SCRIPT" <<'EOF' || EXIT_CODE=$?
     "filePath": "/workspace/file.txt",
     "type": "create"
   }
-}
-EOF
-if [ "$EXIT_CODE" -ne 0 ]; then
-  fail "$TEST_NAME" "hook exited with code $EXIT_CODE (expected 0)"
-elif [ -s "$REQUESTS_FILE" ]; then
-  fail "$TEST_NAME" "server unexpectedly received an event: $(cat "$REQUESTS_FILE")"
-else
-  pass "$TEST_NAME"
-fi
+}' "NONE"
+
+# 13. PostToolUseFailure: gh pr checks with Exit 1 -> CI_CHECK_FAIL
+run_case "PostToolUseFailure: gh pr checks with Exit 1 -> CI_CHECK_FAIL" '{
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr checks 99"
+  },
+  "error": "Exit code 1\n✕ build (push) failed 1m32s\n"
+}' "CI_CHECK_FAIL" 99
+
+# 14. PostToolUseFailure: gh pr checks with Exit 8 (pending) -> sends nothing
+run_case "PostToolUseFailure: gh pr checks with Exit 8 -> sends nothing" '{
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr checks 99"
+  },
+  "error": "Exit code 8\n- build (push) pending 1m32s\n"
+}' "NONE"
+
+# 15. PostToolUseFailure: gh pr merge with Exit 1 -> sends nothing
+run_case "PostToolUseFailure: gh pr merge with Exit 1 -> sends nothing" '{
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr merge 42 --squash"
+  },
+  "error": "Exit code 1\nPull request is not mergeable\n"
+}' "NONE"
+
+# 16. PR number precedence: command argument over body URL (/pull/5 in body -> prNumber 28)
+run_case "PR number precedence: command argument over body URL" '{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr view 28 --json body"
+  },
+  "tool_response": {
+    "stdout": "{\"body\": \"See also https://github.com/tihofman/agent-hq/pull/5 for background\"}\n",
+    "stderr": ""
+  }
+}' "REVIEW_START" 28
+
+# 17. PR number fallback: gh pr merge output format (pull request .*#N)
+run_case "PR number fallback: gh pr merge output format" '{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr merge --squash"
+  },
+  "tool_response": {
+    "stdout": "Merged pull request tihofman/agent-hq#42 into main\n",
+    "stderr": ""
+  }
+}' "MERGED" 42
 
 echo "---"
 echo "Tests completed: $TOTAL | Failed: $FAILED"

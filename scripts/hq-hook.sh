@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude-Code-Hook for GitHub PR events
-# Listens to PostToolUse events for Bash commands, extracts PR lifecycle actions,
+# Listens to PostToolUse and PostToolUseFailure events for Bash commands, extracts PR lifecycle actions,
 # and sends corresponding events to Agent-HQ.
 # Always exits 0 to never block Claude Code.
 
@@ -30,83 +30,88 @@ COMMAND="$(jq -r '.tool_input.command // empty' <<<"$INPUT" 2>/dev/null || true)
 CWD="$(jq -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
 [ -z "$CWD" ] && CWD="$PWD"
 
-# Note on Claude Code PostToolUse format:
-# Official docs (https://code.claude.com/docs/en/hooks) state that the Bash tool_response
-# contains { stdout, stderr, interrupted, isImage }, but no exit code.
-# We extract stdout/stderr text and also check for optional exitCode/exit_code if provided.
+HOOK_EVENT_NAME="$(jq -r '.hook_event_name // "PostToolUse"' <<<"$INPUT" 2>/dev/null || true)"
+if [ "$HOOK_EVENT_NAME" != "PostToolUse" ] && [ "$HOOK_EVENT_NAME" != "PostToolUseFailure" ]; then
+  exit 0
+fi
+
+# Note on Claude Code hook formats (https://code.claude.com/docs/en/hooks):
+# PostToolUse: successful tool execution; tool_response contains { stdout, stderr, interrupted, isImage }, but no exit code.
+# PostToolUseFailure: failed tool execution (exit != 0); error field contains "Exit code N\n<output>".
 RESPONSE_TEXT="$(jq -r '
   if .tool_response | type == "object" then
     ((.tool_response.stdout // "") + "\n" + (.tool_response.stderr // ""))
   elif .tool_response | type == "string" then
     .tool_response
+  elif .error | type == "string" then
+    .error
   else
     ""
   end' <<<"$INPUT" 2>/dev/null || true)"
 
-EXIT_CODE="$(jq -r '
-  if .tool_response | type == "object" then
-    (.tool_response.exitCode // .tool_response.exit_code // empty)
-  else
-    empty
-  end' <<<"$INPUT" 2>/dev/null || true)"
-
-# Determine event type based on command pattern
+# Determine event type based on hook event and command pattern
 EVENT=""
 
-# Case-insensitive pattern matching for subcommands and keywords
+# Case-insensitive pattern matching for subcommands
 shopt -s nocasematch
 
-if [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]] && [[ "$COMMAND" =~ (^|[[:space:]])(--draft|-d)([[:space:]]|$) ]]; then
-  EVENT="DRAFT_PR_CREATED"
-elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+(diff|view)([[:space:]]|$) ]]; then
-  EVENT="REVIEW_START"
-elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+ready([[:space:]]|$) ]]; then
-  EVENT="PR_READY"
-elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+checks([[:space:]]|$) ]]; then
-  # Determination of CI_CHECK_PASS / CI_CHECK_FAIL:
-  # If exitCode is present and non-zero, or output contains fail indicators -> CI_CHECK_FAIL
-  # Otherwise if output contains pass indicators or exitCode is 0 -> CI_CHECK_PASS
-  if [ -n "$EXIT_CODE" ] && [ "$EXIT_CODE" != "0" ]; then
-    EVENT="CI_CHECK_FAIL"
-  elif [[ "$RESPONSE_TEXT" =~ (fail|failure|failed|error|✕|✖) ]]; then
-    EVENT="CI_CHECK_FAIL"
-  elif [[ "$RESPONSE_TEXT" =~ (pass|passed|success|successful|✓|✔) ]]; then
-    EVENT="CI_CHECK_PASS"
-  elif [ -n "$EXIT_CODE" ] && [ "$EXIT_CODE" = "0" ]; then
-    EVENT="CI_CHECK_PASS"
+if [ "$HOOK_EVENT_NAME" = "PostToolUseFailure" ]; then
+  # Only gh pr checks failure is reported; all other failed commands must send nothing
+  if [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+checks([[:space:]]|$) ]]; then
+    ERROR_MSG="$(jq -r '.error // empty' <<<"$INPUT" 2>/dev/null || true)"
+    FAIL_CODE=""
+    if [[ "$ERROR_MSG" =~ Exit[[:space:]]+code[[:space:]]+([0-9]+) ]]; then
+      FAIL_CODE="${BASH_REMATCH[1]}"
+    fi
+    if [ "$FAIL_CODE" = "1" ]; then
+      EVENT="CI_CHECK_FAIL"
+    else
+      # Exit code 8 (pending) or other non-1 error: send nothing
+      exit 0
+    fi
   else
-    # Default to PASS if no failure was detected
-    EVENT="CI_CHECK_PASS"
+    exit 0
   fi
-elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$) ]]; then
-  EVENT="MERGED"
 else
-  # Non-matching command: send nothing
-  exit 0
+  # PostToolUse: tool completed successfully (exit code 0)
+  if [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]] && [[ "$COMMAND" =~ (^|[[:space:]])(--draft|-d)([[:space:]]|$) ]]; then
+    EVENT="DRAFT_PR_CREATED"
+  elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+(diff|view)([[:space:]]|$) ]]; then
+    EVENT="REVIEW_START"
+  elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+ready([[:space:]]|$) ]]; then
+    EVENT="PR_READY"
+  elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+checks([[:space:]]|$) ]]; then
+    EVENT="CI_CHECK_PASS"
+  elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$) ]]; then
+    EVENT="MERGED"
+  else
+    # Non-matching command: send nothing
+    exit 0
+  fi
 fi
 
-# Extract PR number where possible
+# Extract PR number:
+# 1. First from command (pull URL or explicit argument)
+# 2. Then /pull/N URL in output
+# 3. Fallback to gh pr merge output format ("pull request .*#N")
 PR_NUMBER=""
 
-# 1. Check for PR URL in tool response or command (e.g. .../pull/123)
-if [[ "$RESPONSE_TEXT" =~ /pull/([0-9]+)([^0-9]|$) ]]; then
+if [[ "$COMMAND" =~ /pull/([0-9]+)([^0-9]|$) ]]; then
   PR_NUMBER="${BASH_REMATCH[1]}"
-elif [[ "$COMMAND" =~ /pull/([0-9]+)([^0-9]|$) ]]; then
-  PR_NUMBER="${BASH_REMATCH[1]}"
+elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
+  PR_NUMBER="${BASH_REMATCH[2]}"
+elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+.*[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
+  PR_NUMBER="${BASH_REMATCH[2]}"
 fi
 
-# 2. Check for explicit number argument in command (e.g. gh pr view 42, gh pr ready #42)
 if [ -z "$PR_NUMBER" ]; then
-  if [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
-    PR_NUMBER="${BASH_REMATCH[2]}"
-  elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+.*[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
-    PR_NUMBER="${BASH_REMATCH[2]}"
+  if [[ "$RESPONSE_TEXT" =~ /pull/([0-9]+)([^0-9]|$) ]]; then
+    PR_NUMBER="${BASH_REMATCH[1]}"
   fi
 fi
 
-# 3. Check for issue/PR number in tool response if not yet matched (e.g. #42)
 if [ -z "$PR_NUMBER" ]; then
-  if [[ "$RESPONSE_TEXT" =~ [[:space:]]#([0-9]+)([^0-9]|$) ]]; then
+  if [[ "$RESPONSE_TEXT" =~ pull[[:space:]]+request[[:space:]].*#([0-9]+)([^0-9]|$) ]]; then
     PR_NUMBER="${BASH_REMATCH[1]}"
   fi
 fi

@@ -6,12 +6,28 @@ Der Hook `scripts/hq-hook.sh` überwacht die von Claude Code im Terminal ausgef�
 
 ## 1. Registrierung in `~/.claude/settings.json`
 
-Der Hook wird als `PostToolUse`-Hook mit dem Matcher `"Bash"` in `~/.claude/settings.json` (oder projektbezogen in `.claude/settings.json`) hinterlegt:
+Der Hook muss für **beide** Hook-Events `PostToolUse` und `PostToolUseFailure` mit dem Matcher `"Bash"` registriert werden:
+
+- `PostToolUse` feuert nach erfolgreichen Tool-Aufrufen (Exit-Code 0).
+- `PostToolUseFailure` feuert bei fehlgeschlagenen Tool-Aufrufen (Exit-Code ≠ 0).
+
+In `~/.claude/settings.json` (oder projektbezogen in `.claude/settings.json`):
 
 ```json
 {
   "hooks": {
     "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTER/PFAD/ZU/agent-hq/scripts/hq-hook.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
       {
         "matcher": "Bash",
         "hooks": [
@@ -32,21 +48,25 @@ Der Hook wird als `PostToolUse`-Hook mit dem Matcher `"Bash"` in `~/.claude/sett
 
 ## 2. Kommando- und Event-Zuordnung
 
-| Kommando-Muster              | Event                             | Beschreibung                                         |
-| :--------------------------- | :-------------------------------- | :--------------------------------------------------- |
-| `gh pr create --draft`       | `DRAFT_PR_CREATED`                | Draft-Pull-Request wurde erstellt                    |
-| `gh pr diff` / `gh pr view`  | `REVIEW_START`                    | Review des PRs wurde gestartet                       |
-| `gh pr ready`                | `PR_READY`                        | PR wurde von Draft auf „Ready for Review“ geschaltet |
-| `gh pr checks` (Pass / Fail) | `CI_CHECK_PASS` / `CI_CHECK_FAIL` | CI-Pipeline-Status der Checks                        |
-| `gh pr merge`                | `MERGED`                          | PR wurde erfolgreich gemerged                        |
+| Kommando-Muster             | Hook-Event           | Bedingung                        | Event              | Beschreibung                                         |
+| :-------------------------- | :------------------- | :------------------------------- | :----------------- | :--------------------------------------------------- |
+| `gh pr create --draft`      | `PostToolUse`        | Erstellung erfolgreich           | `DRAFT_PR_CREATED` | Draft-Pull-Request wurde erstellt                    |
+| `gh pr diff` / `gh pr view` | `PostToolUse`        | Befehl erfolgreich               | `REVIEW_START`     | Review des PRs wurde gestartet                       |
+| `gh pr ready`               | `PostToolUse`        | Befehl erfolgreich               | `PR_READY`         | PR wurde von Draft auf „Ready for Review“ geschaltet |
+| `gh pr checks`              | `PostToolUse`        | Exit-Code 0                      | `CI_CHECK_PASS`    | Alle CI-Checks erfolgreich durchgelaufen             |
+| `gh pr checks`              | `PostToolUseFailure` | Exit-Code 1                      | `CI_CHECK_FAIL`    | Mindestens ein CI-Check fehlgeschlagen               |
+| `gh pr checks`              | `PostToolUseFailure` | Exit-Code 8 (pending) / sonstige | _(kein Event)_     | Checks laufen noch oder temporärer Fehler            |
+| `gh pr merge`               | `PostToolUse`        | Merge erfolgreich                | `MERGED`           | PR wurde erfolgreich gemerged                        |
 
-Befehle, die keinem dieser Muster entsprechen (z.B. `git status`, `npm test`), werden ignoriert und senden keine Events.
+Befehle, die keinem dieser Muster entsprechen (z.B. `git status`, `npm test`), oder fehlschlagende Operationen abseits von `gh pr checks` (z.B. ein abgelehnter `gh pr merge`), senden keine Events.
 
 ---
 
-## 3. PostToolUse-Eingabeformat & Exit-Code-Annahme
+## 3. Hook-Eingabeformat & Exit-Code-Verarbeitung
 
-Claude Code übergibt dem Hook auf `stdin` ein JSON-Objekt mit folgendem Aufbau:
+Gemäß der offiziellen Claude-Code-Dokumentation ([Hooks Reference](https://code.claude.com/docs/en/hooks)) liefert `PostToolUse` bei erfolgreicher Ausführung von `Bash` das Objekt `tool_response` mit `stdout`, `stderr`, `interrupted` und `isImage`, jedoch **keinen numerischen Exit-Code**. Schlägt ein Befehl fehl (Exit-Code ≠ 0), feuert stattdessen `PostToolUseFailure` mit dem Textfeld `error`.
+
+### Erfolgreicher Aufruf (`PostToolUse`)
 
 ```json
 {
@@ -58,7 +78,7 @@ Claude Code übergibt dem Hook auf `stdin` ein JSON-Objekt mit folgendem Aufbau:
     "command": "gh pr checks 42"
   },
   "tool_response": {
-    "stdout": "✓ build (push) pass 1m32s\n✕ test (push) fail 45s\n",
+    "stdout": "✓ build (push) pass 1m32s\n✓ test (push) pass 45s\n",
     "stderr": "",
     "interrupted": false,
     "isImage": false
@@ -66,26 +86,52 @@ Claude Code übergibt dem Hook auf `stdin` ein JSON-Objekt mit folgendem Aufbau:
 }
 ```
 
-### Analyse & Annahme zu `tool_response`
+Bei `hook_event_name == "PostToolUse"` und `gh pr checks` steht fest, dass der Befehl mit Exit-Code 0 beendet wurde. Der Hook meldet daher direkt `CI_CHECK_PASS`.
 
-Gemäß der offiziellen Claude-Code-Dokumentation ([Hooks Reference](https://code.claude.com/docs/en/hooks)) enthält das `tool_response`-Objekt des `Bash`-Tools die Felder `stdout`, `stderr`, `interrupted` und `isImage`, jedoch **keinen numerischen Exit-Code**.
+### Fehlgeschlagener Aufruf (`PostToolUseFailure`)
 
-**Ermittlung von `CI_CHECK_PASS` vs. `CI_CHECK_FAIL`:**
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "gh pr checks 42"
+  },
+  "error": "Exit code 1\n✕ build (push) fail 1m32s\n"
+}
+```
 
-1. Enthält `tool_response` ein explizites Feld `exitCode` bzw. `exit_code` (z.B. in Test-Mock-Umgebungen oder künftigen CLI-Versionen), wird dieses vorrangig ausgewertet (`exitCode ≠ 0` ➔ `CI_CHECK_FAIL`).
-2. Fehlt der Exit-Code, analysiert `hq-hook.sh` die Textausgabe (`stdout` und `stderr`):
-   - Finden sich darin Fehlerindikatoren (`fail`, `failure`, `error`, `✕` etc.), wird `CI_CHECK_FAIL` gemeldet (Fehler haben Vorrang bei gemischten Zeilen).
-   - Finden sich Erfolgsindikatoren (`pass`, `passed`, `success`, `✓` etc.) und keine Fehler, wird `CI_CHECK_PASS` gemeldet.
-   - Wurden keine Fehler festgestellt, fällt die Bestimmung auf `CI_CHECK_PASS` zurück.
+Bei `hook_event_name == "PostToolUseFailure"` liest `hq-hook.sh` den Exit-Code `N` aus dem Feld `.error` (`Exit code N`):
+
+- `N = 1` bei `gh pr checks` ➔ `CI_CHECK_FAIL`.
+- `N = 8` (GitHub CLI Status für _pending checks_) oder sonstige Exit-Codes ➔ kein Event.
+- Alle anderen `gh pr`-Kommandos unter `PostToolUseFailure` ➔ kein Event (ein fehlschlagender Merge darf kein `MERGED`-Event auslösen).
 
 ---
 
-## 4. PR-Nummern-Extraktion
+## 4. Bekannte Heuristiken & PR-Nummern-Extraktion
 
-Die PR-Nummer wird automatisch ermittelt und als numerischer Wert in `data.prNumber` übermittelt:
+### Heuristik für Draft-PR-Erkennung (`-d`)
 
-1. **Aus URLs**: Findet sich ein Muster `/pull/<nummer>` in `tool_response` (z.B. die von `gh pr create` zurückgegebene PR-URL) oder im Befehl selbst, wird diese Nummer extrahiert.
-2. **Aus Befehlsargumenten**: Bei Befehlen wie `gh pr view 8`, `gh pr ready #42` oder `gh pr merge 42 --squash` wird das Zahlenargument ausgewertet.
+Das Erkennen von Draft-PRs bei `gh pr create` prüft per Regex auf die Flags `--draft` oder `-d` (`(^|[[:space:]])(--draft|-d)([[:space:]]|$)`). Dies ist eine bewusste Heuristik:
+
+- Falls Parameter Werte enthalten, die isoliert `-d` gleichen, könnte dies als Draft interpretiert werden.
+- In normalen GitHub-CLI-Aufrufen ist `-d` jedoch das Standard-Kurzflag für `--draft`.
+
+### Reihenfolge der PR-Nummern-Extraktion
+
+Die PR-Nummer wird nach folgender Priorität ermittelt und als numerischer Wert in `data.prNumber` übermittelt:
+
+1. **Vorrangig aus dem CLI-Befehl (`COMMAND`)**:
+   - URL im Befehl (z.B. `gh pr diff https://github.com/.../pull/15`).
+   - Explizites Argument im Befehl (z.B. `gh pr view 28 --json body`, `gh pr checks 42`, `gh pr merge 42 --squash`).
+   - Dadurch wird verhindert, dass in der Befehlsausgabe zitierte fremde PR-Nummern (wie Links in Ticket-Beschreibungen) die eigentliche Ziel-PR-Nummer überschreiben.
+2. **Aus URLs in der Befehlsausgabe (`tool_response`)**:
+   - Wenn der Befehl selbst keine PR-Nummer enthielt (z.B. bei `gh pr create --draft`), wird nach `/pull/<nummer>` in `tool_response.stdout` gesucht.
+3. **Fallback auf Merge-Ausgabeformat**:
+   - Beim Mergen ohne explizite PR-Nummer (`gh pr merge --squash`) gibt die GitHub-CLI Meldungen wie `Merged pull request #42` aus. Der Fallback sucht gezielt nach `pull request .*#<nummer>`, um falsch-positive Treffer aus allgemeinen Issue-Referenzen (`#<nummer>`) auszuschließen.
 
 Kann keine PR-Nummer ermittelt werden (z.B. bei `gh pr view` ohne Argumente auf einem Branch ohne gemeldeten Link), bleibt `data.prNumber` leer (`data: {}`).
 
