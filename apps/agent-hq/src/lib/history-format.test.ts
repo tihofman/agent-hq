@@ -71,49 +71,51 @@ describe('history-format', () => {
   });
 
   describe('getPrInfo', () => {
-    it('returns null when data or prNumber is missing', () => {
+    it('returns null when data or prNumber is missing or not a positive integer', () => {
       expect(getPrInfo(null)).toBeNull();
       expect(getPrInfo(undefined)).toBeNull();
       expect(getPrInfo({})).toBeNull();
       expect(getPrInfo({ prNumber: 0 })).toBeNull();
       expect(getPrInfo({ prNumber: -5 })).toBeNull();
-      expect(getPrInfo({ prNumber: 'invalid' })).toBeNull();
+      expect(getPrInfo({ prNumber: 1.5 })).toBeNull();
     });
 
-    it('returns label and GitHub URL when repo and prNumber are present', () => {
-      const info = getPrInfo({ repo: 'tihofman/agent-hq', prNumber: 18 });
+    it('returns label with null URL when prUrl is not provided', () => {
+      // Realistic data: data.repo is just 'agent-hq' without owner, no client-side URL building
+      const info = getPrInfo({ repo: 'agent-hq', prNumber: 7 });
       expect(info).toEqual({
+        prNumber: 7,
+        label: 'PR #7',
+        url: null,
+      });
+
+      const infoWithoutRepo = getPrInfo({ prNumber: 13 });
+      expect(infoWithoutRepo).toEqual({
+        prNumber: 13,
+        label: 'PR #13',
+        url: null,
+      });
+    });
+
+    it('returns label and URL when prUrl is provided via second arg or property', () => {
+      const infoArg = getPrInfo(
+        { repo: 'agent-hq', prNumber: 18 },
+        'https://github.com/tihofman/agent-hq/pull/18',
+      );
+      expect(infoArg).toEqual({
         prNumber: 18,
         label: 'PR #18',
         url: 'https://github.com/tihofman/agent-hq/pull/18',
       });
-    });
 
-    it('handles full https github url in repo string', () => {
-      const info = getPrInfo({
-        repo: 'https://github.com/tihofman/agent-hq/',
-        prNumber: '42',
+      const infoProp = getPrInfo({
+        prNumber: 42,
+        prUrl: 'https://github.com/tihofman/agent-hq/pull/42',
       });
-      expect(info).toEqual({
+      expect(infoProp).toEqual({
         prNumber: 42,
         label: 'PR #42',
         url: 'https://github.com/tihofman/agent-hq/pull/42',
-      });
-    });
-
-    it('returns label with null URL when repo is missing or empty', () => {
-      const info = getPrInfo({ prNumber: 13 });
-      expect(info).toEqual({
-        prNumber: 13,
-        label: 'PR #13',
-        url: null,
-      });
-
-      const infoEmptyRepo = getPrInfo({ prNumber: 13, repo: '   ' });
-      expect(infoEmptyRepo).toEqual({
-        prNumber: 13,
-        label: 'PR #13',
-        url: null,
       });
     });
   });

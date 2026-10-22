@@ -3,6 +3,7 @@ import type { HistoryRun } from './server/history';
 
 export interface HistoryRunItem extends HistoryRun {
   logExists: boolean;
+  prUrl?: string | null;
 }
 
 export interface PrInfo {
@@ -75,41 +76,30 @@ export function formatStatusLabel(
 }
 
 /**
- * Extracts PR info and constructs a GitHub URL if repo and prNumber are known.
- * If repo is missing, url is null and only label is set.
+ * Extracts PR info and uses the server-resolved prUrl.
+ * If prNumber is missing/invalid, returns null. If prUrl is missing, url is null.
  */
 export function getPrInfo(
-  data?: EventData | Record<string, unknown> | null,
+  data?:
+    ((EventData | Record<string, unknown>) & { prUrl?: string | null }) | null,
+  prUrl?: string | null,
 ): PrInfo | null {
   if (!data) return null;
   const rawPr = data.prNumber;
-  let prNumber: number | null = null;
-  if (typeof rawPr === 'number' && Number.isInteger(rawPr) && rawPr > 0) {
-    prNumber = rawPr;
-  } else if (typeof rawPr === 'string' && /^\d+$/.test(rawPr.trim())) {
-    const parsed = parseInt(rawPr.trim(), 10);
-    if (parsed > 0) prNumber = parsed;
+  if (typeof rawPr !== 'number' || !Number.isInteger(rawPr) || rawPr <= 0) {
+    return null;
   }
 
-  if (prNumber === null) return null;
-
-  const label = `PR #${prNumber}`;
-  const repo = typeof data.repo === 'string' ? data.repo.trim() : '';
-  if (repo) {
-    const cleanRepo = repo
-      .replace(/^https?:\/\/github\.com\//, '')
-      .replace(/\/$/, '');
-    return {
-      prNumber,
-      url: `https://github.com/${cleanRepo}/pull/${prNumber}`,
-      label,
-    };
-  }
+  const resolvedUrl =
+    prUrl ??
+    (typeof (data as { prUrl?: unknown }).prUrl === 'string'
+      ? (data as { prUrl: string }).prUrl
+      : null);
 
   return {
-    prNumber,
-    url: null,
-    label,
+    prNumber: rawPr,
+    url: resolvedUrl?.trim() || null,
+    label: `PR #${rawPr}`,
   };
 }
 
@@ -151,8 +141,6 @@ export function getStatusBadgeClass(status: string): string {
       return 'bg-blue-950/80 text-blue-300 border-blue-700/60';
     case 'handover':
       return 'bg-purple-950/80 text-purple-300 border-purple-700/60';
-    case 'cooldown':
-      return 'bg-slate-800 text-slate-300 border-slate-700';
     default:
       return 'bg-slate-800 text-slate-300 border-slate-700';
   }

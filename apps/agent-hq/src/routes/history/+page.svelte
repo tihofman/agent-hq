@@ -50,7 +50,7 @@
 
   async function copyToClipboard(text: string) {
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      if (navigator.clipboard) {
         await navigator.clipboard.writeText(text);
         copiedPath = text;
         setTimeout(() => {
@@ -72,7 +72,7 @@
 </svelte:head>
 
 <div
-  class="flex min-h-screen w-full min-w-[1280px] flex-col bg-slate-950 text-slate-100 font-sans select-none"
+  class="flex min-h-screen w-full flex-col bg-slate-950 text-slate-100 font-sans"
   data-testid="history-page"
 >
   <!-- Top Navigation Bar -->
@@ -206,7 +206,7 @@
           </thead>
           <tbody class="divide-y divide-slate-800/80 bg-slate-900/30">
             {#each runs as run (run.runId)}
-              {@const prInfo = getPrInfo(run.data)}
+              {@const prInfo = getPrInfo(run.data, run.prUrl)}
               <tr
                 class="hover:bg-slate-800/40 transition-colors {isExpanded(
                   run.runId,
@@ -258,18 +258,16 @@
                   </span>
                 </td>
 
-                <!-- Log-Link -->
+                <!-- Log-Datei -->
                 <td class="py-3 px-4">
                   {#if run.logExists && run.logFile}
                     <div class="flex items-center gap-1.5" title={run.logFile}>
-                      <a
-                        href="file://{run.logFile}"
-                        rel="external noopener noreferrer"
-                        class="text-indigo-400 hover:text-indigo-300 underline max-w-[200px] truncate"
-                        data-testid="log-link-{run.runId}"
+                      <span
+                        class="text-slate-300 font-mono text-xs max-w-[200px] truncate"
+                        data-testid="log-path-{run.runId}"
                       >
                         {run.logFile.split('/').pop() || run.logFile}
-                      </a>
+                      </span>
                       <button
                         type="button"
                         onclick={() => copyToClipboard(run.logFile ?? '')}
