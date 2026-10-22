@@ -1,6 +1,6 @@
 <script lang="ts">
   import { liveStore } from '../../live.svelte';
-  import type { HQEvent } from '../../server/state';
+  import type { HQEvent, InternalAction } from '../../server/state';
   import type { TicketData } from '../../server/ticket';
   import { getCurrentRun, hasReloadEvent } from './run';
 
@@ -12,7 +12,7 @@
 
   let lastRunId: string | undefined = undefined;
   let lastTicketId: string | undefined = undefined;
-  let lastSeenEvent: HQEvent | undefined = undefined;
+  let lastSeenEvent: HQEvent | InternalAction | undefined = undefined;
   let abortController: AbortController | null = null;
 
   async function loadTicket(runId: string) {

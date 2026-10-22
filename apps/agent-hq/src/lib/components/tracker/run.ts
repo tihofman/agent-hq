@@ -1,4 +1,6 @@
-import type { Run, HQEvent } from '../../server/state';
+import type { Run, HQEvent, InternalAction } from '../../server/state';
+
+type FeedEntry = HQEvent | InternalAction;
 
 export const RELOAD_EVENTS = new Set([
   'TASK_HANDOVER',
@@ -8,15 +10,15 @@ export const RELOAD_EVENTS = new Set([
 ]);
 
 export function hasReloadEvent(
-  feed: readonly HQEvent[],
-  lastSeen?: HQEvent,
+  feed: readonly FeedEntry[],
+  lastSeen?: FeedEntry,
 ): boolean {
   for (let i = feed.length - 1; i >= 0; i--) {
     const ev = feed[i];
     if (ev === lastSeen) {
       break;
     }
-    if (RELOAD_EVENTS.has(ev.event)) {
+    if ('event' in ev && RELOAD_EVENTS.has(ev.event)) {
       return true;
     }
   }
