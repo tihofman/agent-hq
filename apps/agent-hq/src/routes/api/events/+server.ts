@@ -1,24 +1,24 @@
-import { json, type RequestEvent } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { parseEvent } from '../../../lib/server/state';
 import { dispatch } from '../../../lib/server/store';
 
-function isOriginAllowed(request: Request): boolean {
+function isOriginAllowed(request: Request, url: URL): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return true;
-  const port = process.env.PORT || '3333';
-  return (
-    origin === `http://127.0.0.1:${port}` ||
-    origin === `http://localhost:${port}`
-  );
+
+  try {
+    const originUrl = new URL(origin);
+    const isAllowedHost =
+      originUrl.hostname === '127.0.0.1' || originUrl.hostname === 'localhost';
+    const isSamePort = originUrl.port === url.port;
+    return isAllowedHost && isSamePort;
+  } catch {
+    return false;
+  }
 }
 
-export const POST = async (
-  eventOrRequest: RequestEvent | Request,
-): Promise<Response> => {
-  const request: Request =
-    eventOrRequest instanceof Request ? eventOrRequest : eventOrRequest.request;
-
-  if (!isOriginAllowed(request)) {
+export const POST: RequestHandler = async ({ request, url }) => {
+  if (!isOriginAllowed(request, url)) {
     return json({ error: 'Forbidden origin' }, { status: 403 });
   }
 

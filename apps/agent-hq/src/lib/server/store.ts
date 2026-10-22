@@ -18,7 +18,11 @@ export function getState(): State {
 export function dispatch(event: HQEvent | InternalAction): State {
   currentState = reduce(currentState, event);
   for (const fn of [...subscribers]) {
-    fn(currentState, event);
+    try {
+      fn(currentState, event);
+    } catch (err) {
+      console.error('Store subscriber error:', err);
+    }
   }
   return currentState;
 }

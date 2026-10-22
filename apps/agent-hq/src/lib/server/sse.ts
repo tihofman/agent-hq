@@ -22,36 +22,19 @@ export function createEventStream(
 
   const stream = new ReadableStream({
     start(controller) {
-      let isClosed = false;
-
-      const send = (text: string) => {
-        if (isClosed) return;
-        try {
-          controller.enqueue(encoder.encode(text));
-        } catch {
-          teardown();
-        }
+      const subscription = {
+        isClosed: false,
+        unsubscribe: undefined as (() => void) | undefined,
+        heartbeatTimer: undefined as ReturnType<typeof setInterval> | undefined,
       };
 
-      // 1. Initial event is INIT_STATE with full current state
-      send(formatSSE('INIT_STATE', getState()));
-
-      // 2. Subscribe to store for live state changes
-      const unsubscribe = subscribe((_state, event) => {
-        const eventType = 'event' in event ? event.event : event.type;
-        send(formatSSE(eventType, event));
-      });
-
-      // 3. Heartbeat comment every 30s (or heartbeatMs)
-      const heartbeatTimer = setInterval(() => {
-        send(formatComment('heartbeat'));
-      }, heartbeatMs);
-
       const teardown = () => {
-        if (isClosed) return;
-        isClosed = true;
-        clearInterval(heartbeatTimer);
-        unsubscribe();
+        if (subscription.isClosed) return;
+        subscription.isClosed = true;
+        if (subscription.heartbeatTimer !== undefined) {
+          clearInterval(subscription.heartbeatTimer);
+        }
+        subscription.unsubscribe?.();
         try {
           controller.close();
         } catch {
@@ -59,7 +42,31 @@ export function createEventStream(
         }
       };
 
+      const send = (text: string) => {
+        if (subscription.isClosed) return;
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          teardown();
+        }
+      };
+
       cleanup = teardown;
+
+      // 1. Initial event is INIT_STATE with full current state
+      send(formatSSE('INIT_STATE', getState()));
+      if (subscription.isClosed) return;
+
+      // 2. Subscribe to store for live state changes
+      subscription.unsubscribe = subscribe((state, event) => {
+        const eventType = 'event' in event ? event.event : event.type;
+        send(formatSSE(eventType, { event, state }));
+      });
+
+      // 3. Heartbeat comment every 30s (or heartbeatMs)
+      subscription.heartbeatTimer = setInterval(() => {
+        send(formatComment('heartbeat'));
+      }, heartbeatMs);
     },
     cancel() {
       cleanup?.();

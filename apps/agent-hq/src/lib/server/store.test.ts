@@ -65,4 +65,33 @@ describe('store', () => {
     dispatch(event);
     expect(subscriber).toHaveBeenCalledTimes(1);
   });
+
+  it('does not block other subscribers if one subscriber throws', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const throwingSubscriber = vi.fn().mockImplementation(() => {
+      throw new Error('Subscriber error');
+    });
+    const healthySubscriber = vi.fn();
+
+    subscribe(throwingSubscriber);
+    subscribe(healthySubscriber);
+
+    const event = parseEvent({
+      event: 'TASK_START',
+      agent: 'codex',
+      runId: 'run-throw-test',
+    });
+
+    let nextState: ReturnType<typeof dispatch> | undefined;
+    expect(() => {
+      nextState = dispatch(event);
+    }).not.toThrow();
+
+    expect(throwingSubscriber).toHaveBeenCalledTimes(1);
+    expect(healthySubscriber).toHaveBeenCalledTimes(1);
+    expect(healthySubscriber).toHaveBeenCalledWith(nextState, event);
+    expect(errorSpy).toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
 });
