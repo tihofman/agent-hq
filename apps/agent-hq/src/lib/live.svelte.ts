@@ -21,9 +21,6 @@ export const liveStore = $state<LiveStore>({
   feed: [],
   connected: false,
 });
-export const store = liveStore;
-export const live = liveStore;
-export default liveStore;
 
 let currentEs: EventSource | undefined;
 

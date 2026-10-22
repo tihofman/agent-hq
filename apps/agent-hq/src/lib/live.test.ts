@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { liveStore, store, live, connect, resetLiveStore } from './live.svelte';
+import { liveStore, connect, resetLiveStore } from './live.svelte';
 import type { State, HQEvent } from './server/state';
 
 class MockEventSource {
@@ -57,11 +57,6 @@ describe('liveStore & connect', () => {
       originalEventSource;
     resetLiveStore();
     vi.restoreAllMocks();
-  });
-
-  it('exports aliases pointing to the same reactive store', () => {
-    expect(store).toBe(liveStore);
-    expect(live).toBe(liveStore);
   });
 
   it('initializes with default state, empty feed and disconnected', () => {
