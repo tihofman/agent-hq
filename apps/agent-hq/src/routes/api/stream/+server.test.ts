@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import { GET } from './+server';
 import { POST } from '../events/+server';
@@ -29,13 +32,24 @@ async function readSSEMessage(
 }
 
 describe('GET /api/stream', () => {
-  beforeEach(() => {
+  let tempDir: string;
+  const originalEnv = process.env.AGENT_HQ_HOME;
+
+  beforeEach(async () => {
     resetStore();
     vi.restoreAllMocks();
+    tempDir = await mkdtemp(join(tmpdir(), 'hq-stream-test-'));
+    process.env.AGENT_HQ_HOME = tempDir;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
+    if (originalEnv !== undefined) {
+      process.env.AGENT_HQ_HOME = originalEnv;
+    } else {
+      delete process.env.AGENT_HQ_HOME;
+    }
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   it('returns text/event-stream content type and streaming headers', async () => {

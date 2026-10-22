@@ -1,4 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
+import { appendHistory } from '../../../lib/server/history';
 import { parseEvent } from '../../../lib/server/state';
 import { dispatch } from '../../../lib/server/store';
 
@@ -39,6 +40,11 @@ export const POST: RequestHandler = async ({ request, url }) => {
   }
 
   dispatch(event);
+  try {
+    await appendHistory(event);
+  } catch (err) {
+    console.error('Failed to append event to history:', err);
+  }
 
   return json({ ok: true }, { status: 202 });
 };

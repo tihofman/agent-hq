@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import { POST } from './+server';
 import { getState, resetStore } from '../../../lib/server/store';
+import { getHistoryPath } from '../../../lib/server/history';
+import * as historyModule from '../../../lib/server/history';
 
 function createEvent(request: Request): RequestEvent {
   return {
@@ -11,8 +16,23 @@ function createEvent(request: Request): RequestEvent {
 }
 
 describe('POST /api/events', () => {
-  beforeEach(() => {
+  let tempDir: string;
+  const originalEnv = process.env.AGENT_HQ_HOME;
+
+  beforeEach(async () => {
     resetStore();
+    tempDir = await mkdtemp(join(tmpdir(), 'hq-events-test-'));
+    process.env.AGENT_HQ_HOME = tempDir;
+  });
+
+  afterEach(async () => {
+    if (originalEnv !== undefined) {
+      process.env.AGENT_HQ_HOME = originalEnv;
+    } else {
+      delete process.env.AGENT_HQ_HOME;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   it('accepts valid event and responds with 202', async () => {
@@ -238,5 +258,55 @@ describe('POST /api/events', () => {
 
     expect(response.status).toBe(202);
     expect(duration).toBeLessThan(50);
+  });
+
+  it('appends event as a JSON line to history upon successful POST', async () => {
+    const request = new Request('http://localhost:3333/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-post-history',
+        ticketId: '6',
+      }),
+    });
+
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(202);
+
+    const historyFile = getHistoryPath();
+    const content = await readFile(historyFile, 'utf8');
+    const lines = content.trim().split('\n');
+    expect(lines).toHaveLength(1);
+
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.event).toBe('TASK_START');
+    expect(parsed.agent).toBe('agy');
+    expect(parsed.runId).toBe('run-post-history');
+    expect(parsed.ticketId).toBe('6');
+  });
+
+  it('still responds with 202 when history writing fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(historyModule, 'appendHistory').mockRejectedValueOnce(
+      new Error('Disk write failure'),
+    );
+
+    const request = new Request('http://localhost:3333/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'TASK_START',
+        agent: 'codex',
+        runId: 'run-disk-error',
+      }),
+    });
+
+    // Even if appendHistory throws, POST catches or appendHistory catches internally, so 202 is returned
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(202);
+
+    errorSpy.mockRestore();
   });
 });
