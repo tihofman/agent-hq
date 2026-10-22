@@ -1,0 +1,527 @@
+{
+  "name": "office_tiles",
+  "tileWidth": 32,
+  "tileHeight": 32,
+  "columns": 8,
+  "rows": 8,
+  "totalTiles": 64,
+  "palette": "Endesga 32 (EDG32)",
+  "license": "MIT (self-created procedural pixel-art)",
+  "tiles": [
+    {
+      "id": 0,
+      "name": "floor_parquet_light",
+      "category": "floor",
+      "col": 0,
+      "row": 0
+    },
+    {
+      "id": 1,
+      "name": "floor_parquet_dark",
+      "category": "floor",
+      "col": 1,
+      "row": 0
+    },
+    {
+      "id": 2,
+      "name": "floor_carpet_dev",
+      "category": "floor",
+      "col": 2,
+      "row": 0
+    },
+    {
+      "id": 3,
+      "name": "floor_carpet_hall",
+      "category": "floor",
+      "col": 3,
+      "row": 0
+    },
+    {
+      "id": 4,
+      "name": "floor_tile_lounge",
+      "category": "floor",
+      "col": 4,
+      "row": 0
+    },
+    {
+      "id": 5,
+      "name": "floor_tech_raised",
+      "category": "floor",
+      "col": 5,
+      "row": 0
+    },
+    {
+      "id": 6,
+      "name": "floor_transition_h",
+      "category": "floor",
+      "col": 6,
+      "row": 0
+    },
+    {
+      "id": 7,
+      "name": "floor_welcome_mat",
+      "category": "floor",
+      "col": 7,
+      "row": 0
+    },
+    {
+      "id": 8,
+      "name": "wall_top_molding",
+      "category": "wall",
+      "col": 0,
+      "row": 1
+    },
+    {
+      "id": 9,
+      "name": "wall_drywall_mid",
+      "category": "wall",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "id": 10,
+      "name": "wall_baseboard",
+      "category": "wall",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "id": 11,
+      "name": "wall_brick_accent",
+      "category": "wall",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "id": 12,
+      "name": "wall_glass_top",
+      "category": "wall",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "id": 13,
+      "name": "wall_glass_bottom",
+      "category": "wall",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "id": 14,
+      "name": "wall_corner_left",
+      "category": "wall",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "id": 15,
+      "name": "wall_corner_right",
+      "category": "wall",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "id": 16,
+      "name": "desk_wood_left",
+      "category": "desk",
+      "col": 0,
+      "row": 2
+    },
+    {
+      "id": 17,
+      "name": "desk_wood_center",
+      "category": "desk",
+      "col": 1,
+      "row": 2
+    },
+    {
+      "id": 18,
+      "name": "desk_wood_right",
+      "category": "desk",
+      "col": 2,
+      "row": 2
+    },
+    {
+      "id": 19,
+      "name": "desk_tech_monitors",
+      "category": "desk",
+      "col": 3,
+      "row": 2
+    },
+    {
+      "id": 20,
+      "name": "desk_laptop_coffee",
+      "category": "desk",
+      "col": 4,
+      "row": 2
+    },
+    {
+      "id": 21,
+      "name": "chair_ergonomic_front",
+      "category": "furniture",
+      "col": 5,
+      "row": 2
+    },
+    {
+      "id": 22,
+      "name": "chair_ergonomic_back",
+      "category": "furniture",
+      "col": 6,
+      "row": 2
+    },
+    {
+      "id": 23,
+      "name": "workstation_pc_tower",
+      "category": "tech",
+      "col": 7,
+      "row": 2
+    },
+    {
+      "id": 24,
+      "name": "whiteboard_top_left",
+      "category": "whiteboard",
+      "col": 0,
+      "row": 3
+    },
+    {
+      "id": 25,
+      "name": "whiteboard_top_right",
+      "category": "whiteboard",
+      "col": 1,
+      "row": 3
+    },
+    {
+      "id": 26,
+      "name": "whiteboard_bottom_left",
+      "category": "whiteboard",
+      "col": 2,
+      "row": 3
+    },
+    {
+      "id": 27,
+      "name": "whiteboard_bottom_right",
+      "category": "whiteboard",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "id": 28,
+      "name": "bookshelf_top",
+      "category": "furniture",
+      "col": 4,
+      "row": 3
+    },
+    {
+      "id": 29,
+      "name": "bookshelf_bottom",
+      "category": "furniture",
+      "col": 5,
+      "row": 3
+    },
+    {
+      "id": 30,
+      "name": "filing_cabinet",
+      "category": "furniture",
+      "col": 6,
+      "row": 3
+    },
+    {
+      "id": 31,
+      "name": "office_wastebin",
+      "category": "props",
+      "col": 7,
+      "row": 3
+    },
+    {
+      "id": 32,
+      "name": "couch_left",
+      "category": "couch",
+      "col": 0,
+      "row": 4
+    },
+    {
+      "id": 33,
+      "name": "couch_center",
+      "category": "couch",
+      "col": 1,
+      "row": 4
+    },
+    {
+      "id": 34,
+      "name": "couch_right",
+      "category": "couch",
+      "col": 2,
+      "row": 4
+    },
+    {
+      "id": 35,
+      "name": "coffee_table",
+      "category": "furniture",
+      "col": 3,
+      "row": 4
+    },
+    {
+      "id": 36,
+      "name": "coffee_counter_machine",
+      "category": "kitchen",
+      "col": 4,
+      "row": 4
+    },
+    {
+      "id": 37,
+      "name": "coffee_counter_base",
+      "category": "kitchen",
+      "col": 5,
+      "row": 4
+    },
+    {
+      "id": 38,
+      "name": "water_cooler",
+      "category": "kitchen",
+      "col": 6,
+      "row": 4
+    },
+    {
+      "id": 39,
+      "name": "potted_plant_monstera",
+      "category": "plant",
+      "col": 7,
+      "row": 4
+    },
+    {
+      "id": 40,
+      "name": "server_rack_top",
+      "category": "server",
+      "col": 0,
+      "row": 5
+    },
+    {
+      "id": 41,
+      "name": "server_rack_bottom",
+      "category": "server",
+      "col": 1,
+      "row": 5
+    },
+    {
+      "id": 42,
+      "name": "qa_dashboard_wall_top",
+      "category": "qa",
+      "col": 2,
+      "row": 5
+    },
+    {
+      "id": 43,
+      "name": "qa_dashboard_wall_bottom",
+      "category": "qa",
+      "col": 3,
+      "row": 5
+    },
+    {
+      "id": 44,
+      "name": "potted_plant_succulent",
+      "category": "plant",
+      "col": 4,
+      "row": 5
+    },
+    {
+      "id": 45,
+      "name": "wall_clock",
+      "category": "props",
+      "col": 5,
+      "row": 5
+    },
+    {
+      "id": 46,
+      "name": "framed_architecture",
+      "category": "props",
+      "col": 6,
+      "row": 5
+    },
+    {
+      "id": 47,
+      "name": "drink_fridge",
+      "category": "kitchen",
+      "col": 7,
+      "row": 5
+    },
+    {
+      "id": 48,
+      "name": "door_frame_top",
+      "category": "door",
+      "col": 0,
+      "row": 6
+    },
+    {
+      "id": 49,
+      "name": "door_frame_bottom",
+      "category": "door",
+      "col": 1,
+      "row": 6
+    },
+    {
+      "id": 50,
+      "name": "floor_cable_bridge",
+      "category": "floor",
+      "col": 2,
+      "row": 6
+    },
+    {
+      "id": 51,
+      "name": "hallway_sign",
+      "category": "props",
+      "col": 3,
+      "row": 6
+    },
+    {
+      "id": 52,
+      "name": "meeting_table_tl",
+      "category": "furniture",
+      "col": 4,
+      "row": 6
+    },
+    {
+      "id": 53,
+      "name": "meeting_table_tr",
+      "category": "furniture",
+      "col": 5,
+      "row": 6
+    },
+    {
+      "id": 54,
+      "name": "meeting_table_bl",
+      "category": "furniture",
+      "col": 6,
+      "row": 6
+    },
+    {
+      "id": 55,
+      "name": "meeting_table_br",
+      "category": "furniture",
+      "col": 7,
+      "row": 6
+    },
+    {
+      "id": 56,
+      "name": "pizza_box_open",
+      "category": "props",
+      "col": 0,
+      "row": 7
+    },
+    {
+      "id": 57,
+      "name": "donut_box",
+      "category": "props",
+      "col": 1,
+      "row": 7
+    },
+    {
+      "id": 58,
+      "name": "retro_crt_terminal",
+      "category": "tech",
+      "col": 2,
+      "row": 7
+    },
+    {
+      "id": 59,
+      "name": "trophy_shelf",
+      "category": "props",
+      "col": 3,
+      "row": 7
+    },
+    {
+      "id": 60,
+      "name": "window_skyline_day",
+      "category": "window",
+      "col": 4,
+      "row": 7
+    },
+    {
+      "id": 61,
+      "name": "window_skyline_night",
+      "category": "window",
+      "col": 5,
+      "row": 7
+    },
+    {
+      "id": 62,
+      "name": "exit_sign",
+      "category": "props",
+      "col": 6,
+      "row": 7
+    },
+    {
+      "id": 63,
+      "name": "ambient_occlusion_shadow",
+      "category": "shadow",
+      "col": 7,
+      "row": 7
+    }
+  ],
+  "categories": {
+    "floor": [0, 1, 2, 3, 4, 5, 6, 7, 50],
+    "wall": [8, 9, 10, 11, 12, 13, 14, 15],
+    "desk": [16, 17, 18, 19, 20],
+    "furniture": [21, 22, 28, 29, 30, 35, 52, 53, 54, 55],
+    "tech": [23, 58],
+    "whiteboard": [24, 25, 26, 27],
+    "props": [31, 45, 46, 51, 56, 57, 59, 62],
+    "couch": [32, 33, 34],
+    "kitchen": [36, 37, 38, 47],
+    "plant": [39, 44],
+    "server": [40, 41],
+    "qa": [42, 43],
+    "door": [48, 49],
+    "window": [60, 61],
+    "shadow": [63]
+  },
+  "compositeObjects": {
+    "whiteboard_full": {
+      "width": 2,
+      "height": 2,
+      "description": "2x2 architectural diagram whiteboard with sticky notes and markers",
+      "tiles": [
+        [24, 25],
+        [26, 27]
+      ]
+    },
+    "server_rack": {
+      "width": 1,
+      "height": 2,
+      "description": "1x2 42U server rack with blinking LEDs and storage blades",
+      "tiles": [[40], [41]]
+    },
+    "bookshelf": {
+      "width": 1,
+      "height": 2,
+      "description": "1x2 executive wooden bookshelf with books and binders",
+      "tiles": [[28], [29]]
+    },
+    "couch": {
+      "width": 3,
+      "height": 1,
+      "description": "3x1 plush modular lounge couch with accent pillow",
+      "tiles": [[32, 33, 34]]
+    },
+    "qa_dashboard": {
+      "width": 1,
+      "height": 2,
+      "description": "1x2 CI/CD wall-mounted monitor with green test checkmarks",
+      "tiles": [[42], [43]]
+    },
+    "coffee_counter": {
+      "width": 1,
+      "height": 2,
+      "description": "1x2 kitchen counter with espresso machine and lower cabinets",
+      "tiles": [[36], [37]]
+    },
+    "meeting_table_round": {
+      "width": 2,
+      "height": 2,
+      "description": "2x2 round conference table with walnut finish",
+      "tiles": [
+        [52, 53],
+        [54, 55]
+      ]
+    }
+  }
+}
