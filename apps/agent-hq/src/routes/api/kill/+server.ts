@@ -1,3 +1,6 @@
+import { open, realpath, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { json, type RequestHandler } from '@sveltejs/kit';
@@ -68,6 +71,16 @@ export const POST: RequestHandler = async ({ request, url }) => {
   ) {
     return json({ error: 'runId must be a non-empty string' }, { status: 400 });
   }
+  if (
+    body.message !== undefined &&
+    (typeof body.message !== 'string' || body.message.length > 4000)
+  ) {
+    return json(
+      { error: 'message must be a string of at most 4000 characters' },
+      { status: 400 },
+    );
+  }
+  const message = body.message?.trim();
   const run = Object.hasOwn(getState().runs, body.runId)
     ? getState().runs[body.runId]
     : undefined;
@@ -82,6 +95,26 @@ export const POST: RequestHandler = async ({ request, url }) => {
   if (pid <= 1 || pid === process.pid || pid === process.ppid) {
     return json({ error: 'Refusing to kill protected pid' }, { status: 409 });
   }
+  let messageFile: string | undefined;
+  let messageWritten = false;
+  if (message) {
+    const log = run.logFile;
+    try {
+      const logDir = await realpath(
+        process.env.AGENT_HQ_LOG_DIR || join(tmpdir(), 'agent-hq'),
+      );
+      if (
+        !log ||
+        !log.endsWith('.log') ||
+        (await realpath(dirname(resolve(log)))) !== logDir
+      ) {
+        return json({ error: 'Invalid run log path' }, { status: 400 });
+      }
+      messageFile = join(logDir, basename(log).replace(/\.log$/, '.msg'));
+    } catch {
+      return json({ error: 'Invalid run log path' }, { status: 400 });
+    }
+  }
   try {
     if (!(await assertWorker(pid))) {
       throw new WorkerConflict('Process is no longer a delegate.sh worker');
@@ -94,6 +127,16 @@ export const POST: RequestHandler = async ({ request, url }) => {
       .map(Number);
     if (!(await assertWorker(pid))) {
       throw new WorkerConflict('Process is no longer a delegate.sh worker');
+    }
+    if (messageFile) {
+      // Exclusive creation also refuses symlinks and concurrent instructions.
+      const file = await open(messageFile, 'wx', 0o600);
+      messageWritten = true;
+      try {
+        await file.writeFile(message);
+      } finally {
+        await file.close();
+      }
     }
     await childrenCommand('pkill', ['-TERM', '-P', String(pid)]);
     await signal(pid, pid, 'SIGTERM');
@@ -120,6 +163,10 @@ export const POST: RequestHandler = async ({ request, url }) => {
     }, 1500);
     timer.unref();
   } catch (error) {
+    if (messageWritten) await unlink(messageFile!).catch(() => {});
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return json({ error: 'Instruction already exists' }, { status: 409 });
+    }
     if (error instanceof WorkerConflict) {
       return json({ error: error.message }, { status: 409 });
     }

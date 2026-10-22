@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 
 const { exec } = vi.hoisted(() => ({ exec: vi.fn() }));
@@ -11,13 +14,19 @@ import { POST } from './+server';
 import { dispatch, getState, resetStore } from '../../../lib/server/store';
 import { parseEvent } from '../../../lib/server/state';
 
-function request(pid: number) {
+function request(pid: number, message?: unknown, logFile?: string) {
   dispatch(
-    parseEvent({ event: 'TASK_START', agent: 'agy', runId: 'test', pid }),
+    parseEvent({
+      event: 'TASK_START',
+      agent: 'agy',
+      runId: 'test',
+      pid,
+      data: { logFile },
+    }),
   );
   const request = new Request('http://localhost:3333/api/kill', {
     method: 'POST',
-    body: JSON.stringify({ runId: 'test' }),
+    body: JSON.stringify({ runId: 'test', message }),
   });
   return POST({ request, url: new URL(request.url) } as RequestEvent);
 }
@@ -117,4 +126,87 @@ it('checks identity again between TERM to children and TERM to worker', async ()
     error: 'Process is no longer a delegate.sh worker',
   });
   expect(process.kill).not.toHaveBeenCalled();
+});
+
+it('writes the instruction before signalling in the configured log directory', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hq-message-'));
+  vi.stubEnv('AGENT_HQ_LOG_DIR', dir);
+  try {
+    exec.mockImplementation(async (command, args) => {
+      if (command === 'pkill')
+        expect(await readFile(join(dir, 'run.msg'), 'utf8')).toBe(
+          'correct this',
+        );
+      return {
+        stdout:
+          command === 'ps'
+            ? args[1] === 'ppid='
+              ? '456'
+              : 'bash delegate.sh'
+            : '',
+      };
+    });
+    expect(
+      (await request(12345, 'correct this', join(dir, 'run.log'))).status,
+    ).toBe(202);
+    expect(await readFile(join(dir, 'run.msg'), 'utf8')).toBe('correct this');
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+it.each([42, 'x'.repeat(4001)])(
+  'rejects invalid instructions before signalling',
+  async (message) => {
+    expect((await request(12345, message)).status).toBe(400);
+    expect(process.kill).not.toHaveBeenCalled();
+  },
+);
+it('rejects paths outside the log directory and message symlinks', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hq-message-'));
+  vi.stubEnv('AGENT_HQ_LOG_DIR', dir);
+  try {
+    for (const path of [
+      undefined,
+      join(tmpdir(), 'outside.log'),
+      join(dir, '..', 'outside.log'),
+      join(dir, 'run.txt'),
+    ]) {
+      expect((await request(12345, 'correct', path)).status).toBe(400);
+    }
+    await writeFile(join(dir, 'target'), 'untouched');
+    await symlink(join(dir, 'target'), join(dir, 'run.msg'));
+    expect((await request(12345, 'correct', join(dir, 'run.log'))).status).toBe(
+      409,
+    );
+    expect(await readFile(join(dir, 'target'), 'utf8')).toBe('untouched');
+    expect(process.kill).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it('removes an unconsumed instruction after EPERM and leaves the run active', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'hq-message-'));
+  vi.stubEnv('AGENT_HQ_LOG_DIR', dir);
+  vi.mocked(process.kill).mockImplementation(() => {
+    throw Object.assign(new Error('denied'), { code: 'EPERM' });
+  });
+  try {
+    expect((await request(12345, 'correct', join(dir, 'run.log'))).status).toBe(
+      409,
+    );
+    await expect(readFile(join(dir, 'run.msg'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect(getState().runs.test.status).toBe('running');
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+it('keeps plain cancellation behavior for whitespace instructions without a log path', async () => {
+  expect((await request(12345, '  \n ')).status).toBe(202);
+  expect(getState().runs.test.status).toBe('aborted');
 });
