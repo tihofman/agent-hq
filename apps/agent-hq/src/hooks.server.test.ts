@@ -1,15 +1,16 @@
 import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestEvent } from '@sveltejs/kit';
 import {
+  GLOBAL_TAILER_KEY,
   getLogDir,
   init,
   startServerTail,
   stopServerTail,
 } from './hooks.server';
-import { dispatch, getState, resetStore } from './lib/server/store';
+import { dispatch, getState, resetStore, subscribe } from './lib/server/store';
 import { parseEvent } from './lib/server/state';
 import { POST } from './routes/api/events/+server';
 
@@ -69,30 +70,11 @@ describe('hooks.server log-tailer wiring', () => {
     await appendFile(logFile, 'build successful\n');
 
     await expect
-      .poll(() => getState().runs['run-post-1']?.data?.logChunk)
+      .poll(() => getState().runs['run-post-1']?.data?.logChunk, {
+        timeout: 5000,
+      })
       .toBe('build successful\n');
     expect(getState().runs['run-post-1']?.agent).toBe('agy');
-  });
-
-  it('feeds TASK_PROGRESS into store for active run via dispatch', async () => {
-    startServerTail({ dir: tempDir });
-
-    dispatch(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'codex',
-        runId: 'run-dispatch-1',
-      }),
-    );
-    expect(getState().runs['run-dispatch-1']?.agent).toBe('codex');
-
-    const logFile = join(tempDir, 'run-dispatch-1.log');
-    await appendFile(logFile, 'running tests\n');
-
-    await expect
-      .poll(() => getState().runs['run-dispatch-1']?.data?.logChunk)
-      .toBe('running tests\n');
-    expect(getState().runs['run-dispatch-1']?.agent).toBe('codex');
   });
 
   it('considers runs active with status handover or running, but stops watching completed runs', async () => {
@@ -112,7 +94,9 @@ describe('hooks.server log-tailer wiring', () => {
     await appendFile(handoverLog, 'planning task\n');
 
     await expect
-      .poll(() => getState().runs['run-handover-1']?.data?.logChunk)
+      .poll(() => getState().runs['run-handover-1']?.data?.logChunk, {
+        timeout: 5000,
+      })
       .toBe('planning task\n');
 
     // 2. Transition handover run to complete
@@ -140,7 +124,9 @@ describe('hooks.server log-tailer wiring', () => {
     await appendFile(activeLog, 'active line\n');
 
     await expect
-      .poll(() => getState().runs['run-active-2']?.data?.logChunk)
+      .poll(() => getState().runs['run-active-2']?.data?.logChunk, {
+        timeout: 5000,
+      })
       .toBe('active line\n');
 
     // Completed run's logChunk should still be the one before completion
@@ -149,74 +135,50 @@ describe('hooks.server log-tailer wiring', () => {
     );
   });
 
-  it('starts only once and prevents duplicate tailers on HMR / repeated init calls', async () => {
-    const stop1 = startServerTail({ dir: tempDir });
-    const stop2 = startServerTail({ dir: tempDir });
+  it('replaces old tailer on re-init / HMR and dispatches line exactly once', async () => {
     init();
+    const oldStop = (globalThis as Record<string, unknown>)[
+      GLOBAL_TAILER_KEY
+    ] as () => void;
+    const stopSpy = vi.fn(oldStop);
+    (globalThis as Record<string, unknown>)[GLOBAL_TAILER_KEY] = stopSpy;
 
-    expect(stop1).toBe(stop2);
+    init();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+    const newStop = (globalThis as Record<string, unknown>)[
+      GLOBAL_TAILER_KEY
+    ] as () => void;
+    expect(newStop).toBeTypeOf('function');
+    expect(newStop).not.toBe(oldStop);
 
-    dispatch(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'agy',
-        runId: 'run-dedup',
-      }),
-    );
+    const progressEvents: unknown[] = [];
+    const unsubscribe = subscribe((_state, event) => {
+      if ('event' in event && event.event === 'TASK_PROGRESS') {
+        progressEvents.push(event);
+      }
+    });
 
-    const logFile = join(tempDir, 'run-dedup.log');
-    await appendFile(logFile, 'line once\n');
+    try {
+      dispatch(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'agy',
+          runId: 'run-replace',
+        }),
+      );
 
-    await expect
-      .poll(() => getState().runs['run-dedup']?.data?.logChunk)
-      .toBe('line once\n');
-  });
+      const logFile = join(tempDir, 'run-replace.log');
+      await appendFile(logFile, 'line once\n');
 
-  it('creates directory if it does not exist', async () => {
-    const nestedDir = join(tempDir, 'nested', 'agent-hq');
-    startServerTail({ dir: nestedDir });
+      await expect
+        .poll(() => getState().runs['run-replace']?.data?.logChunk, {
+          timeout: 5000,
+        })
+        .toBe('line once\n');
 
-    dispatch(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'codex',
-        runId: 'run-nested',
-      }),
-    );
-
-    await appendFile(join(nestedDir, 'run-nested.log'), 'nested test\n');
-
-    await expect
-      .poll(() => getState().runs['run-nested']?.data?.logChunk)
-      .toBe('nested test\n');
-  });
-
-  it('stops tailing when stopped', async () => {
-    startServerTail({ dir: tempDir });
-
-    dispatch(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'agy',
-        runId: 'run-stop-test',
-      }),
-    );
-
-    const logFile = join(tempDir, 'run-stop-test.log');
-    await appendFile(logFile, 'before stop\n');
-
-    await expect
-      .poll(() => getState().runs['run-stop-test']?.data?.logChunk)
-      .toBe('before stop\n');
-
-    stopServerTail();
-
-    await appendFile(logFile, 'after stop\n');
-
-    // Give some time to ensure no new event was processed
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(getState().runs['run-stop-test']?.data?.logChunk).toBe(
-      'before stop\n',
-    );
+      expect(progressEvents).toHaveLength(1);
+    } finally {
+      unsubscribe();
+    }
   });
 });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { dispatch, getState } from './lib/server/store';
 import { startTail } from './lib/server/tail';
 
-const GLOBAL_TAILER_KEY = '__agent_hq_tailer__';
+export const GLOBAL_TAILER_KEY = '__agent_hq_tailer__';
 
 type TailerGlobal = typeof globalThis & {
   [GLOBAL_TAILER_KEY]?: () => void;
@@ -16,9 +16,7 @@ export function getLogDir(): string {
 
 export function startServerTail(options?: { dir?: string }): () => void {
   const globalRef = globalThis as TailerGlobal;
-  if (globalRef[GLOBAL_TAILER_KEY]) {
-    return globalRef[GLOBAL_TAILER_KEY]!;
-  }
+  globalRef[GLOBAL_TAILER_KEY]?.();
 
   const dir = options?.dir ?? getLogDir();
 
@@ -36,22 +34,18 @@ export function startServerTail(options?: { dir?: string }): () => void {
 
   const stop = () => {
     stopTail();
-    process.removeListener('exit', stop);
     if (globalRef[GLOBAL_TAILER_KEY] === stop) {
       delete globalRef[GLOBAL_TAILER_KEY];
     }
   };
 
-  process.once('exit', stop);
   globalRef[GLOBAL_TAILER_KEY] = stop;
   return stop;
 }
 
 export function stopServerTail(): void {
   const globalRef = globalThis as TailerGlobal;
-  if (globalRef[GLOBAL_TAILER_KEY]) {
-    globalRef[GLOBAL_TAILER_KEY]!();
-  }
+  globalRef[GLOBAL_TAILER_KEY]?.();
 }
 
 export const init: ServerInit = () => {
