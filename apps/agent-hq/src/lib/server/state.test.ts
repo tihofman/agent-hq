@@ -54,7 +54,7 @@ describe('parseEvent', () => {
       }).pid,
     ).toBeNull();
   });
-  it.each([
+  it.each<[unknown, string]>([
     [null, 'object'],
     [[], 'object'],
     [{}, 'event'],
@@ -68,7 +68,7 @@ describe('parseEvent', () => {
       cwd: 42,
       ticketId: 12,
       data: [],
-    }).map(([key, value]) => [
+    }).map(([key, value]): [unknown, string] => [
       { event: 'TASK_START', agent: 'codex', [key]: value },
       key,
     ]),
@@ -82,7 +82,7 @@ describe('parseEvent', () => {
       criteriaTotal: -1,
       criteriaCompleted: NaN,
       cooldownUntil: 'later',
-    }).map(([key, value]) => [
+    }).map(([key, value]): [unknown, string] => [
       { event: 'TASK_START', agent: 'codex', data: { [key]: value } },
       `data.${key}`,
     ]),
