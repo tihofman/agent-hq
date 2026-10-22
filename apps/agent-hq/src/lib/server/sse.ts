@@ -59,8 +59,7 @@ export function createEventStream(
 
       // 2. Subscribe to store for live state changes
       subscription.unsubscribe = subscribe((state, event) => {
-        const eventType = 'event' in event ? event.event : event.type;
-        send(formatSSE(eventType, { event, state }));
+        send(formatSSE('UPDATE', { event, state }));
       });
 
       // 3. Heartbeat comment every 30s (or heartbeatMs)

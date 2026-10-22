@@ -160,10 +160,10 @@ describe('GET /api/stream', () => {
     const msg1 = await readSSEMessage(reader1);
     const msg2 = await readSSEMessage(reader2);
 
-    expect(msg1).toContain('event: TASK_START');
+    expect(msg1).toContain('event: UPDATE');
     expect(msg1).toContain('"runId":"run-dual"');
 
-    expect(msg2).toContain('event: TASK_START');
+    expect(msg2).toContain('event: UPDATE');
     expect(msg2).toContain('"runId":"run-dual"');
 
     await reader1.cancel();
@@ -197,7 +197,7 @@ describe('GET /api/stream', () => {
 
     // 3. Receive update
     const updateMsg = await readSSEMessage(reader);
-    expect(updateMsg).toContain('event: TASK_START');
+    expect(updateMsg).toContain('event: UPDATE');
 
     const dataLine = updateMsg
       .split('\n')
