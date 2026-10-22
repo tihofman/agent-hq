@@ -3,6 +3,7 @@
   import { connect } from '../lib/live.svelte';
   import TopBar from '../lib/components/TopBar.svelte';
   import OfficeFloor from '../lib/components/office/OfficeFloor.svelte';
+  import LogViewer from '../lib/components/feed/LogViewer.svelte';
   import type { RoomId } from '../lib/office/layout';
 
   // Integer scaling: 1x or 2x
@@ -132,13 +133,7 @@
         </span>
       </div>
 
-      <div class="flex flex-1 items-center justify-center p-6">
-        <div
-          class="w-full rounded border border-dashed border-slate-800 p-6 text-center text-slate-500 text-xs"
-        >
-          Live-Feed – folgt
-        </div>
-      </div>
+      <LogViewer />
     </aside>
   </div>
 

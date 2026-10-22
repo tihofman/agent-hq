@@ -1,4 +1,4 @@
-import type { State, HQEvent } from './server/state';
+import type { State, HQEvent, InternalAction } from './server/state';
 
 const initial = (): State => ({
   agents: {
@@ -12,7 +12,7 @@ const initial = (): State => ({
 
 export interface LiveStore {
   state: State;
-  feed: HQEvent[];
+  feed: (HQEvent | InternalAction)[];
   connected: boolean;
 }
 
@@ -42,7 +42,7 @@ export function connect(url = '/api/stream'): () => void {
   });
   es.addEventListener('UPDATE', (e) => {
     const { event, state } = JSON.parse((e as MessageEvent).data) as {
-      event: HQEvent;
+      event: HQEvent | InternalAction;
       state: State;
     };
     liveStore.state = state;
