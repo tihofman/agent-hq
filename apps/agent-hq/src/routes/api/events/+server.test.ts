@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import { POST } from './+server';
+import { clearGitCache } from '../../../lib/server/git';
 import { getState, resetStore } from '../../../lib/server/store';
 import { getHistoryPath } from '../../../lib/server/history';
 
@@ -19,12 +21,14 @@ describe('POST /api/events', () => {
   const originalEnv = process.env.AGENT_HQ_HOME;
 
   beforeEach(async () => {
+    clearGitCache();
     resetStore();
     tempDir = await mkdtemp(join(tmpdir(), 'hq-events-test-'));
     process.env.AGENT_HQ_HOME = tempDir;
   });
 
   afterEach(async () => {
+    clearGitCache();
     if (originalEnv !== undefined) {
       process.env.AGENT_HQ_HOME = originalEnv;
     } else {
@@ -284,5 +288,164 @@ describe('POST /api/events', () => {
     expect(parsed.agent).toBe('agy');
     expect(parsed.runId).toBe('run-post-history');
     expect(parsed.ticketId).toBe('6');
+  });
+
+  it('automatically resolves repo and branch when cwd points to a git repository', async () => {
+    const repoPath = join(tempDir, 'sample-app');
+    execFileSync('git', ['init', '-b', 'main', repoPath]);
+    execFileSync('git', ['-C', repoPath, 'config', 'user.name', 'Tester']);
+    execFileSync('git', [
+      '-C',
+      repoPath,
+      'config',
+      'user.email',
+      'tester@example.com',
+    ]);
+    execFileSync('git', [
+      '-C',
+      repoPath,
+      'commit',
+      '--allow-empty',
+      '-m',
+      'init',
+    ]);
+
+    const request = new Request('http://localhost:3333/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'TASK_START',
+        agent: 'codex',
+        runId: 'run-git-1',
+        cwd: repoPath,
+      }),
+    });
+
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(202);
+
+    const run = getState().runs['run-git-1'];
+    expect(run).toBeDefined();
+    expect(run.data.repo).toBe('sample-app');
+    expect(run.data.branch).toBe('main');
+  });
+
+  it('resolves main repo name and feature branch for a git worktree cwd', async () => {
+    const mainRepoPath = join(tempDir, 'main-repo');
+    const worktreePath = join(tempDir, 'worktree-feat-13');
+    execFileSync('git', ['init', '-b', 'main', mainRepoPath]);
+    execFileSync('git', ['-C', mainRepoPath, 'config', 'user.name', 'Tester']);
+    execFileSync('git', [
+      '-C',
+      mainRepoPath,
+      'config',
+      'user.email',
+      'tester@example.com',
+    ]);
+    execFileSync('git', [
+      '-C',
+      mainRepoPath,
+      'commit',
+      '--allow-empty',
+      '-m',
+      'init',
+    ]);
+    execFileSync('git', [
+      '-C',
+      mainRepoPath,
+      'worktree',
+      'add',
+      '-b',
+      'feat/13-test',
+      worktreePath,
+    ]);
+
+    const request = new Request('http://localhost:3333/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-wt-1',
+        cwd: worktreePath,
+      }),
+    });
+
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(202);
+
+    const run = getState().runs['run-wt-1'];
+    expect(run).toBeDefined();
+    expect(run.data.repo).toBe('main-repo');
+    expect(run.data.branch).toBe('feat/13-test');
+  });
+
+  it('accepts event with invalid/non-git cwd, returning 202 without setting repo/branch', async () => {
+    const nonGitPath = join(tempDir, 'not-a-git-repo');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(nonGitPath);
+
+    const request = new Request('http://localhost:3333/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'TASK_START',
+        agent: 'codex',
+        runId: 'run-nongit-1',
+        cwd: nonGitPath,
+      }),
+    });
+
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(202);
+
+    const run = getState().runs['run-nongit-1'];
+    expect(run).toBeDefined();
+    expect(run.data.repo).toBeUndefined();
+    expect(run.data.branch).toBeUndefined();
+  });
+
+  it('preserves explicitly supplied repo and branch without overriding from cwd', async () => {
+    const repoPath = join(tempDir, 'explicit-repo');
+    execFileSync('git', ['init', '-b', 'main', repoPath]);
+    execFileSync('git', ['-C', repoPath, 'config', 'user.name', 'Tester']);
+    execFileSync('git', [
+      '-C',
+      repoPath,
+      'config',
+      'user.email',
+      'tester@example.com',
+    ]);
+    execFileSync('git', [
+      '-C',
+      repoPath,
+      'commit',
+      '--allow-empty',
+      '-m',
+      'init',
+    ]);
+
+    const request = new Request('http://localhost:3333/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'TASK_START',
+        agent: 'codex',
+        runId: 'run-explicit-1',
+        cwd: repoPath,
+        data: {
+          repo: 'custom-repo',
+          branch: 'custom-branch',
+        },
+      }),
+    });
+
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(202);
+
+    const run = getState().runs['run-explicit-1'];
+    expect(run).toBeDefined();
+    expect(run.data.repo).toBe('custom-repo');
+    expect(run.data.branch).toBe('custom-branch');
   });
 });

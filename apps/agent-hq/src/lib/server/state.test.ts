@@ -82,6 +82,8 @@ describe('parseEvent', () => {
       criteriaTotal: -1,
       criteriaCompleted: NaN,
       cooldownUntil: 'later',
+      repo: 1,
+      branch: false,
     }).map(([key, value]): [unknown, string] => [
       { event: 'TASK_START', agent: 'codex', data: { [key]: value } },
       `data.${key}`,
@@ -100,6 +102,15 @@ describe('parseEvent', () => {
     input.data.logChunk = 'changed';
     expect(parsed.data.logChunk).toBe('hello');
     expect(() => JSON.stringify(parsed)).not.toThrow();
+  });
+  it('validates and preserves optional repo and branch in data', () => {
+    const parsed = parseEvent({
+      event: 'TASK_START',
+      agent: 'agy',
+      data: { repo: 'agent-hq', branch: 'feat/13-repo-branch' },
+    });
+    expect(parsed.data.repo).toBe('agent-hq');
+    expect(parsed.data.branch).toBe('feat/13-repo-branch');
   });
 });
 
@@ -212,5 +223,20 @@ describe('reduce', () => {
     const failed = apply(progress, 'CI_CHECK_FAIL', { data: { prNumber: 34 } });
     expect(failed.activePR?.ci).toBe('fail');
     expect(apply(failed, 'CI_CHECK_PASS').activePR?.ci).toBe('pass');
+  });
+  it('merges and preserves repo and branch in run data', () => {
+    const started = apply(initialState, 'TASK_START', {
+      data: { repo: 'agent-hq', branch: 'feat/13-repo-branch' },
+    });
+    expect(started.runs['run-1'].data.repo).toBe('agent-hq');
+    expect(started.runs['run-1'].data.branch).toBe('feat/13-repo-branch');
+
+    const progressed = reduce(
+      started,
+      event('TASK_PROGRESS', { data: { statusText: 'Building' } }),
+    );
+    expect(progressed.runs['run-1'].data.repo).toBe('agent-hq');
+    expect(progressed.runs['run-1'].data.branch).toBe('feat/13-repo-branch');
+    expect(progressed.runs['run-1'].data.statusText).toBe('Building');
   });
 });

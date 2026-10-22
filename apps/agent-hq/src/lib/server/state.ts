@@ -27,6 +27,8 @@ export interface EventData {
   criteriaCompleted?: number;
   cooldownUntil?: string;
   logChunk?: string;
+  repo?: string;
+  branch?: string;
 }
 export type HQEvent = {
   [T in EventType]: {
@@ -108,6 +110,8 @@ export function parseEvent(
     'logFile',
     'logChunk',
     'cooldownUntil',
+    'repo',
+    'branch',
   ] as const) {
     const value = data[field];
     if (value !== undefined) {

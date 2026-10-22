@@ -1,20 +1,20 @@
 <script lang="ts">
+  import { liveStore } from '../live.svelte';
   import KillSwitch from './KillSwitch.svelte';
+
   interface Props {
     repo?: string;
     branch?: string;
     statusText?: string;
     isBusy?: boolean;
-    activeRunId?: string | null;
     onToggleAudio?: (enabled: boolean) => void;
   }
 
   let {
-    repo = '—',
-    branch = '—',
-    statusText = 'Bereit • Keine aktiven Subagenten',
-    isBusy = false,
-    activeRunId = null,
+    repo: propRepo,
+    branch: propBranch,
+    statusText: propStatusText,
+    isBusy: propIsBusy,
     onToggleAudio,
   }: Props = $props();
 
@@ -24,6 +24,40 @@
     audioEnabled = !audioEnabled;
     onToggleAudio?.(audioEnabled);
   }
+
+  const activeRun = $derived.by(() => {
+    const runs = Object.values(liveStore.state.runs).filter(
+      (r) => r.status === 'handover' || r.status === 'running',
+    );
+    if (runs.length === 0) return null;
+    return runs.reduce((latest, current) =>
+      Date.parse(current.timestamp) > Date.parse(latest.timestamp)
+        ? current
+        : latest,
+    );
+  });
+
+  const displayRepo = $derived(activeRun?.data.repo ?? propRepo ?? '—');
+  const displayBranch = $derived(activeRun?.data.branch ?? propBranch ?? '—');
+  const displayIsBusy = $derived(propIsBusy ?? activeRun !== null);
+
+  const displayStatusText = $derived.by(() => {
+    if (propStatusText !== undefined) return propStatusText;
+    if (!activeRun) return 'Bereit';
+    if (activeRun.ticketId) {
+      const ticket = activeRun.ticketId.startsWith('#')
+        ? activeRun.ticketId
+        : `#${activeRun.ticketId}`;
+      return `${activeRun.agent} arbeitet an ${ticket}`;
+    }
+    if (activeRun.data.title) {
+      return `${activeRun.agent} arbeitet an ${activeRun.data.title}`;
+    }
+    if (activeRun.data.statusText) {
+      return `${activeRun.agent}: ${activeRun.data.statusText}`;
+    }
+    return `${activeRun.agent} arbeitet`;
+  });
 </script>
 
 <header
@@ -59,7 +93,7 @@
           d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
         />
       </svg>
-      <span class="font-medium text-slate-200">{repo}</span>
+      <span class="font-medium text-slate-200">{displayRepo}</span>
       <span class="text-slate-500">:</span>
       <span class="flex items-center gap-1 text-emerald-400">
         <svg
@@ -75,7 +109,7 @@
             d="M7 7h.01M7 3a5 5 0 00-5 5v12a2 2 0 002 2h16a2 2 0 002-2V8a5 5 0 00-5-5H7z"
           />
         </svg>
-        {branch}
+        {displayBranch}
       </span>
     </div>
   </div>
@@ -86,7 +120,7 @@
     data-testid="system-status"
   >
     <span class="relative flex h-2 w-2">
-      {#if isBusy}
+      {#if displayIsBusy}
         <span
           class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"
         ></span>
@@ -101,7 +135,7 @@
       {/if}
     </span>
     <span class="font-sans text-xs text-slate-300 font-medium">
-      {statusText}
+      {displayStatusText}
     </span>
   </div>
 
@@ -126,6 +160,6 @@
       {/if}
     </button>
 
-    <KillSwitch runId={activeRunId} />
+    <KillSwitch runId={activeRun?.runId ?? null} />
   </div>
 </header>
