@@ -198,7 +198,7 @@ describe('liveStore & connect', () => {
       });
     }
     expect(liveStore.feed).toHaveLength(1000);
-    expect(liveStore.feed[0].data.statusText).toBe('event-0');
+    expect((liveStore.feed[0] as HQEvent).data.statusText).toBe('event-0');
 
     // Emit 1001st event
     const newestEvent: HQEvent = {
@@ -211,8 +211,8 @@ describe('liveStore & connect', () => {
     es.emit('UPDATE', { event: newestEvent, state: dummyState });
 
     expect(liveStore.feed).toHaveLength(1000);
-    expect(liveStore.feed[0].data.statusText).toBe('event-1');
-    expect(liveStore.feed[999].data.statusText).toBe('event-1000');
+    expect((liveStore.feed[0] as HQEvent).data.statusText).toBe('event-1');
+    expect((liveStore.feed[999] as HQEvent).data.statusText).toBe('event-1000');
   });
 
   it('closes existing EventSource when connect() is called again', () => {
