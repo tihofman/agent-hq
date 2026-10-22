@@ -21,7 +21,8 @@ function createRequestEvent(request: Request): RequestEvent {
   } as unknown as RequestEvent;
 }
 
-describe('hooks.server log-tailer wiring', () => {
+// fs.watch polls wait up to 5 s; the test timeout must exceed that under load.
+describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
   let tempDir: string;
   let originalEnv: string | undefined;
 
