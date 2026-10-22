@@ -1,5 +1,6 @@
 import {
   closeSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -29,6 +30,7 @@ export function startTail(options: {
       decoder: StringDecoder;
       pending: string;
       testing: boolean;
+      prCreated: boolean;
     }
   >();
   const finished = new Set<string>();
@@ -54,6 +56,7 @@ export function startTail(options: {
           decoder: new StringDecoder('utf8'),
           pending: '',
           testing: false,
+          prCreated: false,
         };
         runs.set(runId, run);
       }
@@ -68,6 +71,11 @@ export function startTail(options: {
       // Close before callbacks, including when stop() is called from onEvent.
       let text = '';
       try {
+        if (fstatSync(fd).size < run.position) {
+          run.position = 0;
+          run.pending = '';
+          run.decoder = new StringDecoder('utf8');
+        }
         const buffer = Buffer.alloc(64 * 1024);
         let bytes: number;
         while (
@@ -100,7 +108,9 @@ export function startTail(options: {
         const plain = stripVTControlCharacters(line);
         if (
           !run.testing &&
-          /\b(?:nx\s+test|vitest|pytest|jest)\b/i.test(plain)
+          /(?:^|[>$])\s*(?:npx\s+|nx\s+run\s+\S*:\s*)?(?:nx\s+test|vitest(?:\s+run)?|pytest|jest)(?=\s|$)/i.test(
+            plain,
+          )
         ) {
           run.testing = true;
           options.onEvent({ type: 'TEST_STARTED', agent });
@@ -108,16 +118,19 @@ export function startTail(options: {
         if (stopped) break;
         if (
           run.testing &&
-          /\b(?:\d+\s+(?:passed|failed)|FAIL|PASS)\b/.test(plain)
+          /^\s*(?:(?:Test Files|Tests)\s+.*\b(?:passed|failed)\b|Tests:\s+.*\b(?:passed|failed)\b|=+\s+\d+\s+(?:passed|failed)\b)/.test(
+            plain,
+          )
         ) {
           run.testing = false;
           options.onEvent({ type: 'TEST_FINISHED', agent });
         }
         if (stopped) break;
         const pr = plain.match(
-          /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/([1-9]\d*)\b/,
+          /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/([1-9]\d*)\s*$/,
         );
-        if (pr && Number.isSafeInteger(Number(pr[1]))) {
+        if (!run.prCreated && pr && Number.isSafeInteger(Number(pr[1]))) {
+          run.prCreated = true;
           options.onEvent(
             parseEvent({
               event: 'DRAFT_PR_CREATED',
@@ -132,7 +145,16 @@ export function startTail(options: {
   }
 
   mkdirSync(options.dir, { recursive: true });
-  const watcher = watch(options.dir, scan);
+  const watcher = watch(options.dir, () => {
+    try {
+      scan();
+    } catch (error) {
+      console.error('Log tail scan failed:', error);
+    }
+  });
+  watcher.on('error', (error) => {
+    console.error('Log tail watcher failed:', error);
+  });
   try {
     scan();
   } catch (error) {
