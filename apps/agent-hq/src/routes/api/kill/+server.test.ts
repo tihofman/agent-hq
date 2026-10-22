@@ -83,86 +83,94 @@ describe('POST /api/kill', () => {
     }
   });
 
-  it('kills delegate worker and child, broadcasts abort, and returns before escalation', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'hq-kill-'));
-    const pidsFile = join(dir, 'pids');
-    await writeFile(
-      join(dir, 'agy'),
-      `#!/usr/bin/env bash\nsleep 30 &\nchild=$!\nprintf '%s %s' "$$" "$child" > "$KILL_TEST_PIDS"\nwait "$child"\n`,
-      { mode: 0o755 },
-    );
-    const delegate = spawn(
-      'bash',
-      [
-        fileURLToPath(
-          new URL('../../../../../../scripts/delegate.sh', import.meta.url),
-        ),
-        'agy',
-        'test',
-      ],
-      {
-        env: {
-          ...process.env,
-          PATH: `${dir}:${process.env.PATH}`,
-          TMPDIR: dir,
-          KILL_TEST_PIDS: pidsFile,
-          AGENT_HQ_URL: 'http://127.0.0.1:1',
+  it.each([
+    ['a plain child', 'sleep 30 &'],
+    // Ignored signals survive exec, so this child only dies by SIGKILL after the worker is gone.
+    ['a TERM-ignoring child', `bash -c 'trap "" TERM; exec sleep 30' &`],
+  ])(
+    'kills delegate worker and %s, broadcasts abort, and returns before escalation',
+    async (_name, spawnChild) => {
+      const dir = await mkdtemp(join(tmpdir(), 'hq-kill-'));
+      const pidsFile = join(dir, 'pids');
+      await writeFile(
+        join(dir, 'agy'),
+        `#!/usr/bin/env bash\n${spawnChild}\nchild=$!\nprintf '%s %s' "$$" "$child" > "$KILL_TEST_PIDS"\nwait "$child"\n`,
+        { mode: 0o755 },
+      );
+      const delegate = spawn(
+        'bash',
+        [
+          fileURLToPath(
+            new URL('../../../../../../scripts/delegate.sh', import.meta.url),
+          ),
+          'agy',
+          'test',
+        ],
+        {
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH}`,
+            TMPDIR: dir,
+            KILL_TEST_PIDS: pidsFile,
+            AGENT_HQ_URL: 'http://127.0.0.1:1',
+          },
+          stdio: ['ignore', 'ignore', 'inherit'],
         },
-        stdio: ['ignore', 'ignore', 'inherit'],
-      },
-    );
-    const exited = new Promise<number | null>((resolve) =>
-      delegate.once('exit', resolve),
-    );
-    let pids: number[] = [];
-    try {
-      await vi.waitFor(async () => {
-        pids = (await readFile(pidsFile, 'utf8')).split(' ').map(Number);
-        expect(pids).toHaveLength(2);
-      });
-      const [worker, child] = pids;
-      dispatch(
-        parseEvent({
-          event: 'TASK_START',
-          agent: 'agy',
-          runId: 'test',
-          pid: worker,
-        }),
       );
-      const listener = vi.fn();
-      subscribe(listener);
-      const start = performance.now();
-      // A supplied PID must never override the registered worker.
-      expect((await request({ runId: 'test', pid: process.pid })).status).toBe(
-        202,
+      const exited = new Promise<number | null>((resolve) =>
+        delegate.once('exit', resolve),
       );
-      expect(performance.now() - start).toBeLessThan(1500);
-      expect(getState().runs.test.status).toBe('aborted');
-      expect(listener.mock.calls[0][1].event).toBe('TASK_ABORTED');
-      expect(await exited).not.toBe(0);
-      await vi.waitFor(
-        () => {
-          expect(() => process.kill(worker, 0)).toThrow();
-          expect(() => process.kill(child, 0)).toThrow();
-        },
-        { timeout: 4000 },
-      );
-      expect((await request({ runId: 'test' })).status).toBe(404);
-      dispatch(
-        parseEvent({ event: 'TASK_FAILED', agent: 'agy', runId: 'test' }),
-      );
-      expect(getState().runs.test.status).toBe('aborted');
-      await new Promise((resolve) => setTimeout(resolve, 1600));
-    } finally {
-      for (const pid of pids) {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          /* exited */
+      let pids: number[] = [];
+      try {
+        await vi.waitFor(async () => {
+          pids = (await readFile(pidsFile, 'utf8')).split(' ').map(Number);
+          expect(pids).toHaveLength(2);
+        });
+        const [worker, child] = pids;
+        dispatch(
+          parseEvent({
+            event: 'TASK_START',
+            agent: 'agy',
+            runId: 'test',
+            pid: worker,
+          }),
+        );
+        const listener = vi.fn();
+        subscribe(listener);
+        const start = performance.now();
+        // A supplied PID must never override the registered worker.
+        expect(
+          (await request({ runId: 'test', pid: process.pid })).status,
+        ).toBe(202);
+        expect(performance.now() - start).toBeLessThan(1500);
+        expect(getState().runs.test.status).toBe('aborted');
+        expect(listener.mock.calls[0][1].event).toBe('TASK_ABORTED');
+        expect(await exited).not.toBe(0);
+        await vi.waitFor(
+          () => {
+            expect(() => process.kill(worker, 0)).toThrow();
+            expect(() => process.kill(child, 0)).toThrow();
+          },
+          { timeout: 4000 },
+        );
+        expect((await request({ runId: 'test' })).status).toBe(404);
+        dispatch(
+          parseEvent({ event: 'TASK_FAILED', agent: 'agy', runId: 'test' }),
+        );
+        expect(getState().runs.test.status).toBe('aborted');
+        await new Promise((resolve) => setTimeout(resolve, 1600));
+      } finally {
+        for (const pid of pids) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            /* exited */
+          }
         }
+        delegate.kill('SIGKILL');
+        await rm(dir, { recursive: true, force: true });
       }
-      delegate.kill('SIGKILL');
-      await rm(dir, { recursive: true, force: true });
-    }
-  }, 10000);
+    },
+    10000,
+  );
 });

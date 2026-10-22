@@ -99,8 +99,13 @@ export const POST: RequestHandler = async ({ request, url }) => {
     await signal(pid, pid, 'SIGTERM');
     const timer = setTimeout(async () => {
       try {
+        // Children were verified at kill time; the worker may be gone by now, so skip its identity check.
         for (const child of children) {
-          if (await signal(pid, child, 0)) await signal(pid, child, 'SIGKILL');
+          try {
+            process.kill(child, 'SIGKILL');
+          } catch {
+            // already exited
+          }
         }
         if (await signal(pid, pid, 0)) {
           if (!(await assertWorker(pid))) return;
