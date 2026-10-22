@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { connect } from '../lib/live.svelte';
   import TopBar from '../lib/components/TopBar.svelte';
   import OfficeFloor from '../lib/components/office/OfficeFloor.svelte';
   import type { RoomId } from '../lib/office/layout';
@@ -7,6 +9,10 @@
   let zoomScale = $state<1 | 2>(1);
   let showWaypoints = $state(false);
   let selectedRoom = $state<RoomId | undefined>(undefined);
+
+  onMount(() => {
+    return connect();
+  });
 </script>
 
 <svelte:head>
