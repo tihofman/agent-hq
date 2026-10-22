@@ -100,6 +100,35 @@ Claude ruft das Delegationsskript in einem isolierten Subagent-Kontext auf:
   ```
 - Meldet die Draft-PR-URL zurück an Claude.
 
+### Schritt 3b: Sonderfälle während der Implementierung
+
+#### A. Blocker-Eskalation (High-Priority Ticket)
+
+Stößt der Subagent während der Bearbeitung auf einen fundamentalen Blocker, Architekturkonflikt oder unauflösbare Abhängigkeiten:
+
+1. **Kein unfertiger Draft PR**: Es wird unter keinen Umständen ein fehlerhafter oder unvollständiger PR erstellt.
+2. **High-Priority Blocker-Ticket anlegen**:
+   ```bash
+   gh issue create --title "fix(#<CURRENT_ID>): Blocker - <Kurzbeschreibung>" \
+     --label "bug,agent:claude" \
+     --body "## Blocker für Ticket #<CURRENT_ID>&#10;&#10;### Was ist blockiert?&#10;<Beschreibung>&#10;&#10;### Erste Analyse & Erkenntnisse&#10;<Was wurde versucht, wo liegt die Hürde>&#10;&#10;### Erforderliche Architekten-Entscheidung&#10;<Entscheidungsbedarf für Claude>"
+   ```
+3. **Abbruch & Eskalation**: Der Subagent beendet mit Exit-Code 1 (`TASK_FAILED`) und meldet die Blocker-Ticket-ID samt Erstanalyse an Claude.
+4. **Reaktion des Orchestrators**: Claude sichtet das Blocker-Ticket, klärt die Architekturfragen bzw. passt das Ticket an und startet die Delegation mit gelöstem Blocker neu.
+
+#### B. Entdeckte Technical Debt & Security Issues (Verbot von Drive-By-Fixes)
+
+Stößt der Subagent auf Mängel, veralteten Code oder Sicherheitsrisiken außerhalb des aktuellen Scopes:
+
+1. **Striktes Fix-Verbot im laufenden Task**: Niemals unaufgefordert im aktuellen Ticket beheben (Scope Creep / Bruch der Testabgrenzung).
+2. **Follow-Up Ticket anlegen**:
+   ```bash
+   gh issue create --title "<bug|enhancement>: <Titel>" \
+     --label "<bug|enhancement>,agent:<claude|agy|codex>" \
+     --body "## Gefundener Mangel (Technical Debt / Security)&#10;&#10;Entdeckt während der Bearbeitung von Ticket #<CURRENT_ID>.&#10;&#10;### Analyse & Risikoeinschätzung&#10;<Beschreibung>"
+   ```
+3. **Meldung an den Lead Architect**: Das Ticket wird in der Abschlussmeldung übergeben, damit Claude es priorisieren und regulär einplanen kann.
+
 ### Schritt 4: Review gegen Akzeptanzkriterien via isoliertem Subagent (Claude – Pflicht-Gate)
 
 - **Isolierter Review-Subagent (Schutz vor Context-Bloat & Blockaden)**:
