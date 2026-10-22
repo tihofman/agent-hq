@@ -9,8 +9,8 @@
   }
 
   let {
-    repo = 'tihofman/agent-hq',
-    branch = 'feat/11-office-layout',
+    repo = '—',
+    branch = '—',
     statusText = 'Bereit • Keine aktiven Subagenten',
     isBusy = false,
     onKill,

@@ -7,9 +7,10 @@
     TILE_SIZE,
     TOTAL_WIDTH_PX,
     TOTAL_HEIGHT_PX,
+    tile,
+    tileBg,
     type RoomId,
   } from '../../office/layout';
-  import officeTilesUrl from '../../assets/tilesets/office_tiles.png';
 
   interface Props {
     scale?: number;
@@ -36,31 +37,39 @@
     const tiles: WallTile[] = [];
 
     // Top border (y=0, x=0..27)
-    tiles.push({ x: 0, y: 0, tileId: 14 }); // corner left
+    tiles.push({ x: 0, y: 0, tileId: tile('wall_corner_left') });
     for (let x = 1; x < GRID_WIDTH - 1; x++) {
-      tiles.push({ x, y: 0, tileId: 8 }); // top molding
+      tiles.push({ x, y: 0, tileId: tile('wall_top_molding') });
     }
-    tiles.push({ x: GRID_WIDTH - 1, y: 0, tileId: 15 }); // corner right
+    tiles.push({ x: GRID_WIDTH - 1, y: 0, tileId: tile('wall_corner_right') });
 
     // Bottom border (y=18, x=0..27)
     for (let x = 0; x < GRID_WIDTH; x++) {
-      tiles.push({ x, y: GRID_HEIGHT - 1, tileId: 10 }); // baseboard
+      tiles.push({ x, y: GRID_HEIGHT - 1, tileId: tile('wall_baseboard') });
     }
 
     // Left and right perimeter columns
     for (let y = 1; y < GRID_HEIGHT - 1; y++) {
-      tiles.push({ x: 0, y, tileId: 9 }); // drywall left
-      tiles.push({ x: GRID_WIDTH - 1, y, tileId: 9 }); // drywall right
+      tiles.push({ x: 0, y, tileId: tile('wall_drywall_mid') });
+      tiles.push({ x: GRID_WIDTH - 1, y, tileId: tile('wall_drywall_mid') });
     }
 
     // Vertical partition between left and right rooms (x=13, 14 at y=1..7 and y=11..17)
     for (let y = 1; y <= 7; y++) {
-      tiles.push({ x: 13, y, tileId: y === 1 ? 8 : y === 7 ? 10 : 9 });
-      tiles.push({ x: 14, y, tileId: y === 1 ? 8 : y === 7 ? 10 : 9 });
+      const tileId =
+        y === 1
+          ? tile('wall_top_molding')
+          : y === 7
+            ? tile('wall_baseboard')
+            : tile('wall_drywall_mid');
+      tiles.push({ x: 13, y, tileId });
+      tiles.push({ x: 14, y, tileId });
     }
     for (let y = 11; y <= 17; y++) {
-      tiles.push({ x: 13, y, tileId: y === 11 ? 9 : y === 17 ? 10 : 9 });
-      tiles.push({ x: 14, y, tileId: y === 11 ? 9 : y === 17 ? 10 : 9 });
+      const tileId =
+        y === 17 ? tile('wall_baseboard') : tile('wall_drywall_mid');
+      tiles.push({ x: 13, y, tileId });
+      tiles.push({ x: 14, y, tileId });
     }
 
     return tiles;
@@ -86,17 +95,12 @@
     "
   >
     <!-- Background building foundation & perimeter walls -->
-    {#each perimeterTiles as tile (tile.x + '-' + tile.y)}
+    {#each perimeterTiles as t (t.x + '-' + t.y)}
       <div
         class="pixel-tile perimeter-tile"
-        style="
-          left: {tile.x * TILE_SIZE}px;
-          top: {tile.y * TILE_SIZE}px;
-          background-image: url('{officeTilesUrl}');
-          background-position: -{(tile.tileId % 8) * TILE_SIZE}px -{Math.floor(
-          tile.tileId / 8,
-        ) * TILE_SIZE}px;
-        "
+        style="left: {t.x * TILE_SIZE}px; top: {t.y * TILE_SIZE}px; {tileBg(
+          t.tileId,
+        )}"
       ></div>
     {/each}
 
@@ -118,7 +122,7 @@
               class="absolute flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-emerald-400/80 shadow ring-1 ring-white"
               style="left: {wp.x * TILE_SIZE + 16}px; top: {wp.y * TILE_SIZE +
                 16}px;"
-              title="{wp.label} ({wp.x}, {wp.y})"
+              title="{wp.id} ({wp.x}, {wp.y})"
             ></div>
           {/each}
         {/each}
@@ -135,10 +139,11 @@
     image-rendering: crisp-edges;
   }
 
-  .pixel-tile {
+  :global(.pixel-tile) {
     position: absolute;
     width: 32px;
     height: 32px;
+    background-image: url('../../assets/tilesets/office_tiles.png');
     background-size: 256px 256px;
     background-repeat: no-repeat;
     image-rendering: pixelated;
@@ -148,5 +153,13 @@
 
   .perimeter-tile {
     z-index: 5;
+  }
+
+  :global(.floor-tile) {
+    z-index: 1;
+  }
+
+  :global(.object-tile) {
+    z-index: 10;
   }
 </style>

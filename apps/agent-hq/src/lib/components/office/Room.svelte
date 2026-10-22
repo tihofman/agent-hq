@@ -1,6 +1,5 @@
 <script lang="ts">
-  import type { RoomDefinition } from '../../office/layout';
-  import officeTilesUrl from '../../assets/tilesets/office_tiles.png';
+  import { TILE_SIZE, tileBg, type RoomDefinition } from '../../office/layout';
 
   interface Props {
     room: RoomDefinition;
@@ -9,8 +8,6 @@
   }
 
   let { room, showLabel = true, isHighlighted = false }: Props = $props();
-
-  const TILE_SIZE = 32;
 </script>
 
 <div
@@ -31,27 +28,16 @@
     <!-- Floor Tile -->
     <div
       class="pixel-tile floor-tile"
-      style="
-        left: {cell.localX * TILE_SIZE}px;
-        top: {cell.localY * TILE_SIZE}px;
-        background-image: url('{officeTilesUrl}');
-        background-position: -{(cell.floorTile % 8) * TILE_SIZE}px -{Math.floor(
-        cell.floorTile / 8,
-      ) * TILE_SIZE}px;
-      "
+      style="left: {cell.localX * TILE_SIZE}px; top: {cell.localY *
+        TILE_SIZE}px; {tileBg(cell.floorTile)}"
     ></div>
 
     <!-- Object / Furniture / Wall Overlay Tile -->
     {#if cell.objectTile !== undefined}
       <div
         class="pixel-tile object-tile"
-        style="
-          left: {cell.localX * TILE_SIZE}px;
-          top: {cell.localY * TILE_SIZE}px;
-          background-image: url('{officeTilesUrl}');
-          background-position: -{(cell.objectTile % 8) *
-          TILE_SIZE}px -{Math.floor(cell.objectTile / 8) * TILE_SIZE}px;
-        "
+        style="left: {cell.localX * TILE_SIZE}px; top: {cell.localY *
+          TILE_SIZE}px; {tileBg(cell.objectTile)}"
       ></div>
     {/if}
   {/each}
@@ -78,24 +64,5 @@
   .room-container {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
-  }
-
-  .pixel-tile {
-    position: absolute;
-    width: 32px;
-    height: 32px;
-    background-size: 256px 256px;
-    background-repeat: no-repeat;
-    image-rendering: pixelated;
-    image-rendering: -moz-crisp-edges;
-    image-rendering: crisp-edges;
-  }
-
-  .floor-tile {
-    z-index: 1;
-  }
-
-  .object-tile {
-    z-index: 10;
   }
 </style>

@@ -1,3 +1,5 @@
+import officeTilesData from '../assets/tilesets/office_tiles.json';
+
 export type RoomId = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
 
 export const ROOM_IDS: readonly RoomId[] = [
@@ -14,6 +16,41 @@ export const GRID_HEIGHT = 19;
 export const TOTAL_WIDTH_PX = GRID_WIDTH * TILE_SIZE;
 export const TOTAL_HEIGHT_PX = GRID_HEIGHT * TILE_SIZE;
 
+const tileMap = new Map<string, number>();
+for (const t of officeTilesData.tiles) {
+  tileMap.set(t.name, t.id);
+}
+
+export const USED_TILE_NAMES = new Set<string>();
+
+export function tile(name: string): number {
+  const id = tileMap.get(name);
+  if (id === undefined) {
+    throw new Error(`Unknown tile name: "${name}"`);
+  }
+  USED_TILE_NAMES.add(name);
+  return id;
+}
+
+export function fillRow(
+  y: number,
+  name: string,
+  width: number,
+): Record<string, { floor?: number; object?: number }> {
+  const t = tile(name);
+  const result: Record<string, { floor?: number; object?: number }> = {};
+  for (let x = 0; x < width; x++) {
+    result[`${x},${y}`] = { object: t };
+  }
+  return result;
+}
+
+export function tileBg(id: number): string {
+  const col = id % 8;
+  const row = Math.floor(id / 8);
+  return `background-position: -${col * TILE_SIZE}px -${row * TILE_SIZE}px;`;
+}
+
 export interface RoomBounds {
   x: number;
   y: number;
@@ -21,15 +58,11 @@ export interface RoomBounds {
   height: number;
 }
 
-export type WaypointType = 'desk' | 'door' | 'hallway' | 'transit' | 'rest';
-
 export interface Waypoint {
   id: string;
   roomId: RoomId;
   x: number;
   y: number;
-  label: string;
-  type: WaypointType;
 }
 
 export interface TileCell {
@@ -42,10 +75,8 @@ export interface TileCell {
 export interface RoomDefinition {
   id: RoomId;
   name: string;
-  label: string;
   icon: string;
   bounds: RoomBounds;
-  doorTile: { x: number; y: number };
   mainWaypoint: Waypoint;
   doorWaypoint: Waypoint;
   waypoints: Waypoint[];
@@ -58,25 +89,19 @@ export const WAYPOINTS: Record<string, Waypoint> = {
     id: 'ceo_desk',
     roomId: 'ceo',
     x: 6,
-    y: 4,
-    label: 'Claude Executive Desk',
-    type: 'desk',
+    y: 5,
   },
   ceo_board: {
     id: 'ceo_board',
     roomId: 'ceo',
     x: 9,
     y: 3,
-    label: 'Architektur Whiteboard',
-    type: 'desk',
   },
   ceo_door: {
     id: 'ceo_door',
     roomId: 'ceo',
     x: 6,
     y: 7,
-    label: 'CEO Türschwelle',
-    type: 'door',
   },
 
   // Flur & Übergabezone
@@ -85,56 +110,42 @@ export const WAYPOINTS: Record<string, Waypoint> = {
     roomId: 'hall',
     x: 6,
     y: 8,
-    label: 'Flur CEO Eingang',
-    type: 'door',
   },
   hall_qa_door: {
     id: 'hall_qa_door',
     roomId: 'hall',
     x: 20,
     y: 8,
-    label: 'Flur QA Eingang',
-    type: 'door',
   },
   hall_west: {
     id: 'hall_west',
     roomId: 'hall',
     x: 6,
     y: 9,
-    label: 'Flur West-Kreuzung',
-    type: 'hallway',
   },
   hall_center: {
     id: 'hall_center',
     roomId: 'hall',
     x: 13,
     y: 9,
-    label: 'Übergabezone (Handover)',
-    type: 'transit',
   },
   hall_east: {
     id: 'hall_east',
     roomId: 'hall',
     x: 20,
     y: 9,
-    label: 'Flur Ost-Kreuzung',
-    type: 'hallway',
   },
   hall_dev_door: {
     id: 'hall_dev_door',
     roomId: 'hall',
     x: 6,
     y: 10,
-    label: 'Flur Dev Eingang',
-    type: 'door',
   },
   hall_lounge_door: {
     id: 'hall_lounge_door',
     roomId: 'hall',
     x: 20,
     y: 10,
-    label: 'Flur Lounge Eingang',
-    type: 'door',
   },
 
   // Dev Lab
@@ -143,24 +154,18 @@ export const WAYPOINTS: Record<string, Waypoint> = {
     roomId: 'dev',
     x: 6,
     y: 11,
-    label: 'Dev Lab Türschwelle',
-    type: 'door',
   },
   dev_desk: {
     id: 'dev_desk',
     roomId: 'dev',
     x: 6,
     y: 14,
-    label: 'Agy/Codex Workstation',
-    type: 'desk',
   },
   dev_meeting: {
     id: 'dev_meeting',
     roomId: 'dev',
     x: 9,
     y: 14,
-    label: 'Dev Besprechungstisch',
-    type: 'desk',
   },
 
   // QA Station
@@ -168,25 +173,19 @@ export const WAYPOINTS: Record<string, Waypoint> = {
     id: 'qa_desk',
     roomId: 'qa',
     x: 20,
-    y: 4,
-    label: 'QA Review Station',
-    type: 'desk',
+    y: 5,
   },
   qa_servers: {
     id: 'qa_servers',
     roomId: 'qa',
     x: 17,
     y: 4,
-    label: 'Test Server Racks',
-    type: 'desk',
   },
   qa_door: {
     id: 'qa_door',
     roomId: 'qa',
     x: 20,
     y: 7,
-    label: 'QA Türschwelle',
-    type: 'door',
   },
 
   // Lounge
@@ -195,24 +194,18 @@ export const WAYPOINTS: Record<string, Waypoint> = {
     roomId: 'lounge',
     x: 20,
     y: 11,
-    label: 'Lounge Türschwelle',
-    type: 'door',
   },
   lounge_couch: {
     id: 'lounge_couch',
     roomId: 'lounge',
     x: 20,
     y: 14,
-    label: 'Lounge Sofa',
-    type: 'rest',
   },
   lounge_coffee: {
     id: 'lounge_coffee',
     roomId: 'lounge',
     x: 17,
     y: 13,
-    label: 'Espresso Bar',
-    type: 'rest',
   },
 };
 
@@ -277,282 +270,165 @@ function buildRoomTiles(
 }
 
 // 1. CEO Suite (12x7, y=1..7)
-const ceoTiles = buildRoomTiles(12, 7, 0, {
-  // localY = 0: Wall top molding & windows & architecture frame
-  '0,0': { object: 14 }, // corner left
-  '1,0': { object: 8 },
-  '2,0': { object: 8 },
-  '3,0': { object: 60 }, // window daylight
-  '4,0': { object: 60 }, // window daylight
-  '5,0': { object: 8 },
-  '6,0': { object: 46 }, // framed architecture
-  '7,0': { object: 8 },
-  '8,0': { object: 60 }, // window daylight
-  '9,0': { object: 60 }, // window daylight
-  '10,0': { object: 8 },
-  '11,0': { object: 15 }, // corner right
+const ceoTiles = buildRoomTiles(12, 7, tile('floor_parquet_light'), {
+  ...fillRow(0, 'wall_top_molding', 12),
+  ...fillRow(1, 'wall_drywall_mid', 12),
+  ...fillRow(2, 'wall_baseboard', 12),
+  ...fillRow(6, 'wall_drywall_mid', 12),
 
-  // localY = 1: Drywall & upper objects
-  '0,1': { object: 9 },
-  '1,1': { object: 28 }, // bookshelf top
-  '2,1': { object: 9 },
-  '3,1': { object: 9 },
-  '4,1': { object: 9 },
-  '5,1': { object: 45 }, // wall clock
-  '6,1': { object: 9 },
-  '7,1': { object: 9 },
-  '8,1': { object: 24 }, // whiteboard top left
-  '9,1': { object: 25 }, // whiteboard top right
-  '10,1': { object: 9 },
-  '11,1': { object: 9 },
+  '0,0': { object: tile('wall_corner_left') },
+  '3,0': { object: tile('window_skyline_day') },
+  '4,0': { object: tile('window_skyline_day') },
+  '6,0': { object: tile('framed_architecture') },
+  '8,0': { object: tile('window_skyline_day') },
+  '9,0': { object: tile('window_skyline_day') },
+  '11,0': { object: tile('wall_corner_right') },
 
-  // localY = 2: Baseboard & lower wall objects
-  '0,2': { object: 10 },
-  '1,2': { object: 29 }, // bookshelf bottom
-  '2,2': { object: 10 },
-  '3,2': { object: 10 },
-  '4,2': { object: 10 },
-  '5,2': { object: 10 },
-  '6,2': { object: 10 },
-  '7,2': { object: 10 },
-  '8,2': { object: 26 }, // whiteboard bottom left
-  '9,2': { object: 27 }, // whiteboard bottom right
-  '10,2': { object: 10 },
-  '11,2': { object: 10 },
+  '1,1': { object: tile('bookshelf_top') },
+  '5,1': { object: tile('wall_clock') },
+  '8,1': { object: tile('whiteboard_top_left') },
+  '9,1': { object: tile('whiteboard_top_right') },
 
-  // localY = 3: Executive Desk & Props
-  '1,3': { object: 30 }, // filing cabinet
-  '4,3': { object: 16 }, // desk wood left
-  '5,3': { object: 17 }, // desk wood center
-  '6,3': { object: 18 }, // desk wood right
-  '10,3': { object: 39 }, // potted plant monstera
+  '1,2': { object: tile('bookshelf_bottom') },
+  '8,2': { object: tile('whiteboard_bottom_left') },
+  '9,2': { object: tile('whiteboard_bottom_right') },
 
-  // localY = 4: Chairs & Accessories
-  '3,4': { object: 31 }, // office wastebin
-  '5,4': { object: 21 }, // chair ergonomic front
-  '10,4': { object: 44 }, // potted succulent
+  '1,3': { object: tile('filing_cabinet') },
+  '4,3': { object: tile('desk_wood_left') },
+  '5,3': { object: tile('desk_wood_center') },
+  '6,3': { object: tile('desk_wood_right') },
+  '10,3': { object: tile('potted_plant_monstera') },
 
-  // localY = 6: Bottom wall & Door frame
-  '0,6': { object: 9 },
-  '1,6': { object: 9 },
-  '2,6': { object: 9 },
-  '3,6': { object: 9 },
-  '4,6': { object: 9 },
-  '5,6': { object: 48, floor: 7 }, // door frame top + welcome mat
-  '6,6': { object: 9 },
-  '7,6': { object: 9 },
-  '8,6': { object: 9 },
-  '9,6': { object: 9 },
-  '10,6': { object: 9 },
-  '11,6': { object: 9 },
+  '3,4': { object: tile('office_wastebin') },
+  '5,4': { object: tile('chair_ergonomic_front') },
+  '10,4': { object: tile('potted_plant_succulent') },
+
+  '5,6': { object: tile('door_frame_top'), floor: tile('floor_welcome_mat') },
 });
 
 // 2. QA Station (12x7, y=1..7)
-const qaTiles = buildRoomTiles(12, 7, 5, {
-  // localY = 0: Wall top molding & monitors
-  '0,0': { object: 14 },
-  '1,0': { object: 8 },
-  '2,0': { object: 59 }, // trophy shelf
-  '3,0': { object: 8 },
-  '4,0': { object: 8 },
-  '5,0': { object: 42 }, // qa dashboard wall top
-  '6,0': { object: 42 },
-  '7,0': { object: 8 },
-  '8,0': { object: 60 },
-  '9,0': { object: 60 },
-  '10,0': { object: 8 },
-  '11,0': { object: 15 },
+const qaTiles = buildRoomTiles(12, 7, tile('floor_tech_raised'), {
+  ...fillRow(0, 'wall_top_molding', 12),
+  ...fillRow(1, 'wall_drywall_mid', 12),
+  ...fillRow(2, 'wall_baseboard', 12),
+  ...fillRow(6, 'wall_drywall_mid', 12),
 
-  // localY = 1: Server top & QA screen bottom
-  '0,1': { object: 9 },
-  '1,1': { object: 40 }, // server rack top
-  '2,1': { object: 40 }, // server rack top
-  '3,1': { object: 9 },
-  '4,1': { object: 9 },
-  '5,1': { object: 43 }, // qa dashboard wall bottom
-  '6,1': { object: 43 },
-  '7,1': { object: 9 },
-  '8,1': { object: 9 },
-  '9,1': { object: 9 },
-  '10,1': { object: 9 },
-  '11,1': { object: 9 },
+  '0,0': { object: tile('wall_corner_left') },
+  '2,0': { object: tile('trophy_shelf') },
+  '5,0': { object: tile('qa_dashboard_wall_top') },
+  '6,0': { object: tile('qa_dashboard_wall_top') },
+  '8,0': { object: tile('window_skyline_day') },
+  '9,0': { object: tile('window_skyline_day') },
+  '11,0': { object: tile('wall_corner_right') },
 
-  // localY = 2: Baseboard & server rack bottom
-  '0,2': { object: 10 },
-  '1,2': { object: 41 }, // server rack bottom
-  '2,2': { object: 41 }, // server rack bottom
-  '3,2': { object: 10 },
-  '4,2': { object: 10 },
-  '5,2': { object: 10 },
-  '6,2': { object: 10 },
-  '7,2': { object: 10 },
-  '8,2': { object: 10 },
-  '9,2': { object: 10 },
-  '10,2': { object: 10 },
-  '11,2': { object: 10 },
+  '1,1': { object: tile('server_rack_top') },
+  '2,1': { object: tile('server_rack_top') },
+  '5,1': { object: tile('qa_dashboard_wall_bottom') },
+  '6,1': { object: tile('qa_dashboard_wall_bottom') },
 
-  // localY = 3: QA Review desks
-  '1,3': { object: 30 }, // filing cabinet
-  '4,3': { object: 19 }, // desk tech monitors
-  '5,3': { object: 20 }, // desk laptop coffee
-  '6,3': { object: 23 }, // workstation pc tower
-  '10,3': { object: 44 }, // succulent
+  '1,2': { object: tile('server_rack_bottom') },
+  '2,2': { object: tile('server_rack_bottom') },
 
-  // localY = 4: Chairs
-  '4,4': { object: 21 },
-  '5,4': { object: 21 },
-  '2,4': { object: 31 },
+  '1,3': { object: tile('filing_cabinet') },
+  '4,3': { object: tile('desk_tech_monitors') },
+  '5,3': { object: tile('desk_laptop_coffee') },
+  '6,3': { object: tile('workstation_pc_tower') },
+  '10,3': { object: tile('potted_plant_succulent') },
 
-  // localY = 6: Bottom wall & Door frame
-  '0,6': { object: 9 },
-  '1,6': { object: 9 },
-  '2,6': { object: 9 },
-  '3,6': { object: 9 },
-  '4,6': { object: 9 },
-  '5,6': { object: 48, floor: 7 }, // door frame top + welcome mat
-  '6,6': { object: 9 },
-  '7,6': { object: 9 },
-  '8,6': { object: 9 },
-  '9,6': { object: 9 },
-  '10,6': { object: 9 },
-  '11,6': { object: 9 },
+  '2,4': { object: tile('office_wastebin') },
+  '4,4': { object: tile('chair_ergonomic_front') },
+  '5,4': { object: tile('chair_ergonomic_front') },
+
+  '5,6': { object: tile('door_frame_top'), floor: tile('floor_welcome_mat') },
 });
 
 // 3. Hallway (26x3, y=8..10)
-const hallTiles = buildRoomTiles(26, 3, 3, {
-  // localY = 0: Entrances from CEO and QA
-  '2,0': { object: 51 }, // hallway sign
-  '5,0': { object: 49, floor: 7 }, // CEO doorway
-  '12,0': { object: 62 }, // exit sign
-  '19,0': { object: 49, floor: 7 }, // QA doorway
-  '23,0': { object: 45 }, // wall clock
+const hallTiles = buildRoomTiles(26, 3, tile('floor_carpet_hall'), {
+  '2,0': { object: tile('hallway_sign') },
+  '5,0': {
+    object: tile('door_frame_bottom'),
+    floor: tile('floor_welcome_mat'),
+  },
+  '12,0': { object: tile('exit_sign') },
+  '19,0': {
+    object: tile('door_frame_bottom'),
+    floor: tile('floor_welcome_mat'),
+  },
+  '23,0': { object: tile('wall_clock') },
 
-  // localY = 1: Center walking lane
-  '10,1': { object: 50 }, // cable bridge
-  '15,1': { object: 50 }, // cable bridge
+  '10,1': { object: tile('floor_cable_bridge') },
+  '15,1': { object: tile('floor_cable_bridge') },
 
-  // localY = 2: Entrances to Dev and Lounge
-  '5,2': { object: 48, floor: 7 }, // Dev doorway
-  '19,2': { object: 48, floor: 7 }, // Lounge doorway
+  '5,2': { object: tile('door_frame_top'), floor: tile('floor_welcome_mat') },
+  '19,2': { object: tile('door_frame_top'), floor: tile('floor_welcome_mat') },
 });
 
 // 4. Dev Lab (12x7, y=11..17)
-const devTiles = buildRoomTiles(12, 7, 2, {
-  // localY = 0: Top wall with Doorway
-  '0,0': { object: 9 },
-  '1,0': { object: 9 },
-  '2,0': { object: 9 },
-  '3,0': { object: 9 },
-  '4,0': { object: 9 },
-  '5,0': { object: 49, floor: 7 }, // door frame bottom + welcome mat
-  '6,0': { object: 9 },
-  '7,0': { object: 9 },
-  '8,0': { object: 9 },
-  '9,0': { object: 9 },
-  '10,0': { object: 9 },
-  '11,0': { object: 9 },
+const devTiles = buildRoomTiles(12, 7, tile('floor_carpet_dev'), {
+  ...fillRow(0, 'wall_drywall_mid', 12),
+  ...fillRow(6, 'wall_baseboard', 12),
 
-  // localY = 1: Baseboard & walkway
-  '0,1': { object: 10 },
-  '11,1': { object: 10 },
+  '5,0': {
+    object: tile('door_frame_bottom'),
+    floor: tile('floor_welcome_mat'),
+  },
 
-  // localY = 2: Developer Workstations & Terminals
-  '2,2': { object: 19 }, // desk tech monitors
-  '3,2': { object: 19 }, // desk tech monitors
-  '4,2': { object: 20 }, // desk laptop coffee
-  '5,2': { object: 23 }, // pc tower
-  '8,2': { object: 58 }, // retro crt terminal
-  '9,2': { object: 30 }, // filing cabinet
+  '0,1': { object: tile('wall_baseboard') },
+  '11,1': { object: tile('wall_baseboard') },
 
-  // localY = 3: Chairs & Pizza
-  '1,3': { object: 31 }, // wastebin
-  '2,3': { object: 21 }, // chair
-  '3,3': { object: 21 }, // chair
-  '4,3': { object: 21 }, // chair
+  '2,2': { object: tile('desk_tech_monitors') },
+  '3,2': { object: tile('desk_tech_monitors') },
+  '4,2': { object: tile('desk_laptop_coffee') },
+  '5,2': { object: tile('workstation_pc_tower') },
+  '8,2': { object: tile('retro_crt_terminal') },
+  '9,2': { object: tile('filing_cabinet') },
 
-  // localY = 4: Collaboration table & Pizza box
-  '7,4': { object: 52 }, // meeting table tl
-  '8,4': { object: 53 }, // meeting table tr
-  '9,4': { object: 56 }, // pizza box open
-  '10,4': { object: 44 }, // succulent
+  '1,3': { object: tile('office_wastebin') },
+  '2,3': { object: tile('chair_ergonomic_front') },
+  '3,3': { object: tile('chair_ergonomic_front') },
+  '4,3': { object: tile('chair_ergonomic_front') },
 
-  // localY = 5: Meeting table bottom
-  '7,5': { object: 54 }, // meeting table bl
-  '8,5': { object: 55 }, // meeting table br
+  '7,4': { object: tile('meeting_table_tl') },
+  '8,4': { object: tile('meeting_table_tr') },
+  '9,4': { object: tile('pizza_box_open') },
+  '10,4': { object: tile('potted_plant_succulent') },
 
-  // localY = 6: Bottom baseboard
-  '0,6': { object: 10 },
-  '1,6': { object: 10 },
-  '2,6': { object: 10 },
-  '3,6': { object: 10 },
-  '4,6': { object: 10 },
-  '5,6': { object: 10 },
-  '6,6': { object: 10 },
-  '7,6': { object: 10 },
-  '8,6': { object: 10 },
-  '9,6': { object: 10 },
-  '10,6': { object: 10 },
-  '11,6': { object: 10 },
+  '7,5': { object: tile('meeting_table_bl') },
+  '8,5': { object: tile('meeting_table_br') },
 });
 
 // 5. Lounge / Breakroom (12x7, y=11..17)
-const loungeTiles = buildRoomTiles(12, 7, 4, {
-  // localY = 0: Top wall with Doorway
-  '0,0': { object: 9 },
-  '1,0': { object: 9 },
-  '2,0': { object: 9 },
-  '3,0': { object: 9 },
-  '4,0': { object: 9 },
-  '5,0': { object: 49, floor: 7 }, // door frame bottom + welcome mat
-  '6,0': { object: 9 },
-  '7,0': { object: 9 },
-  '8,0': { object: 9 },
-  '9,0': { object: 9 },
-  '10,0': { object: 9 },
-  '11,0': { object: 9 },
+const loungeTiles = buildRoomTiles(12, 7, tile('floor_tile_lounge'), {
+  ...fillRow(0, 'wall_drywall_mid', 12),
+  ...fillRow(6, 'wall_baseboard', 12),
 
-  // localY = 1: Kitchen corner & plants
-  '1,1': { object: 36 }, // coffee counter machine
-  '2,1': { object: 38 }, // water cooler
-  '3,1': { object: 47 }, // drink fridge
-  '10,1': { object: 39 }, // monstera plant
+  '5,0': {
+    object: tile('door_frame_bottom'),
+    floor: tile('floor_welcome_mat'),
+  },
 
-  // localY = 2: Counter base & Donut box
-  '1,2': { object: 37 }, // coffee counter base
-  '2,2': { object: 57 }, // donut box
+  '1,1': { object: tile('coffee_counter_machine') },
+  '2,1': { object: tile('water_cooler') },
+  '3,1': { object: tile('drink_fridge') },
+  '10,1': { object: tile('potted_plant_monstera') },
 
-  // localY = 3: Modular plush couch
-  '5,3': { object: 32 }, // couch left
-  '6,3': { object: 33 }, // couch center
-  '7,3': { object: 34 }, // couch right
+  '1,2': { object: tile('coffee_counter_base') },
+  '2,2': { object: tile('donut_box') },
 
-  // localY = 4: Coffee table
-  '6,4': { object: 35 }, // coffee table
-  '1,4': { object: 31 }, // wastebin
+  '5,3': { object: tile('couch_left') },
+  '6,3': { object: tile('couch_center') },
+  '7,3': { object: tile('couch_right') },
 
-  // localY = 6: Bottom baseboard
-  '0,6': { object: 10 },
-  '1,6': { object: 10 },
-  '2,6': { object: 10 },
-  '3,6': { object: 10 },
-  '4,6': { object: 10 },
-  '5,6': { object: 10 },
-  '6,6': { object: 10 },
-  '7,6': { object: 10 },
-  '8,6': { object: 10 },
-  '9,6': { object: 10 },
-  '10,6': { object: 10 },
-  '11,6': { object: 10 },
+  '1,4': { object: tile('office_wastebin') },
+  '6,4': { object: tile('coffee_table') },
 });
 
 export const ROOMS: readonly RoomDefinition[] = [
   {
     id: 'ceo',
     name: 'CEO Suite',
-    label: 'Architect & Lead Office',
     icon: '👔',
     bounds: { x: 1, y: 1, width: 12, height: 7 },
-    doorTile: { x: 6, y: 7 },
     mainWaypoint: WAYPOINTS['ceo_desk'],
     doorWaypoint: WAYPOINTS['ceo_door'],
     waypoints: [
@@ -565,10 +441,8 @@ export const ROOMS: readonly RoomDefinition[] = [
   {
     id: 'hall',
     name: 'Flur',
-    label: 'Übergabezone & Korridor',
     icon: '🚪',
     bounds: { x: 1, y: 8, width: 26, height: 3 },
-    doorTile: { x: 13, y: 9 },
     mainWaypoint: WAYPOINTS['hall_center'],
     doorWaypoint: WAYPOINTS['hall_center'],
     waypoints: [
@@ -585,10 +459,8 @@ export const ROOMS: readonly RoomDefinition[] = [
   {
     id: 'dev',
     name: 'Dev Lab',
-    label: 'Entwickler Workstations',
     icon: '💻',
     bounds: { x: 1, y: 11, width: 12, height: 7 },
-    doorTile: { x: 6, y: 11 },
     mainWaypoint: WAYPOINTS['dev_desk'],
     doorWaypoint: WAYPOINTS['dev_door'],
     waypoints: [
@@ -601,10 +473,8 @@ export const ROOMS: readonly RoomDefinition[] = [
   {
     id: 'qa',
     name: 'QS Station',
-    label: 'Review & Test Server',
     icon: '🔍',
     bounds: { x: 15, y: 1, width: 12, height: 7 },
-    doorTile: { x: 20, y: 7 },
     mainWaypoint: WAYPOINTS['qa_desk'],
     doorWaypoint: WAYPOINTS['qa_door'],
     waypoints: [
@@ -617,10 +487,8 @@ export const ROOMS: readonly RoomDefinition[] = [
   {
     id: 'lounge',
     name: 'Lounge',
-    label: 'Breakroom & Cooldown',
     icon: '☕',
     bounds: { x: 15, y: 11, width: 12, height: 7 },
-    doorTile: { x: 20, y: 11 },
     mainWaypoint: WAYPOINTS['lounge_couch'],
     doorWaypoint: WAYPOINTS['lounge_door'],
     waypoints: [
@@ -638,36 +506,6 @@ export function getRoom(id: RoomId): RoomDefinition {
     throw new Error(`Room with ID "${id}" not found`);
   }
   return room;
-}
-
-export function getAllRooms(): readonly RoomDefinition[] {
-  return ROOMS;
-}
-
-export function isTileInRoom(x: number, y: number, roomId: RoomId): boolean {
-  const room = getRoom(roomId);
-  const { bounds } = room;
-  return (
-    x >= bounds.x &&
-    x < bounds.x + bounds.width &&
-    y >= bounds.y &&
-    y < bounds.y + bounds.height
-  );
-}
-
-export function doRoomsOverlap(): boolean {
-  for (let i = 0; i < ROOMS.length; i++) {
-    for (let j = i + 1; j < ROOMS.length; j++) {
-      const a = ROOMS[i].bounds;
-      const b = ROOMS[j].bounds;
-      const overlapsX = a.x < b.x + b.width && a.x + a.width > b.x;
-      const overlapsY = a.y < b.y + b.height && a.y + a.height > b.y;
-      if (overlapsX && overlapsY) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 const adjacencyList = new Map<string, string[]>();

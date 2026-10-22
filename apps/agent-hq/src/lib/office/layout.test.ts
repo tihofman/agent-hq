@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import officeTilesData from '../assets/tilesets/office_tiles.json';
 import {
-  doRoomsOverlap,
-  getAllRooms,
+  fillRow,
+  findWaypointPath,
   getPathBetweenRooms,
   getRoom,
   GRID_HEIGHT,
   GRID_WIDTH,
-  isTileInRoom,
   ROOM_IDS,
+  ROOMS,
+  tile,
+  tileBg,
+  USED_TILE_NAMES,
+  WAYPOINTS,
   type RoomId,
 } from './layout';
 
 describe('office/layout', () => {
   describe('Room presence and properties', () => {
     it('defines exactly the 5 required rooms', () => {
-      const rooms = getAllRooms();
-      expect(rooms).toHaveLength(5);
-      const roomIds = rooms.map((r) => r.id);
+      expect(ROOMS).toHaveLength(5);
+      const roomIds = ROOMS.map((r) => r.id);
       expect(roomIds.sort()).toEqual(['ceo', 'dev', 'hall', 'lounge', 'qa']);
     });
 
@@ -37,19 +41,23 @@ describe('office/layout', () => {
       expect(room.mainWaypoint.roomId).toBe(id);
       expect(room.doorWaypoint.roomId).toBe(id);
       expect(room.waypoints.length).toBeGreaterThan(0);
-      expect(isTileInRoom(room.mainWaypoint.x, room.mainWaypoint.y, id)).toBe(
-        true,
+
+      // Main waypoint is within room bounds
+      expect(room.mainWaypoint.x).toBeGreaterThanOrEqual(room.bounds.x);
+      expect(room.mainWaypoint.x).toBeLessThan(
+        room.bounds.x + room.bounds.width,
+      );
+      expect(room.mainWaypoint.y).toBeGreaterThanOrEqual(room.bounds.y);
+      expect(room.mainWaypoint.y).toBeLessThan(
+        room.bounds.y + room.bounds.height,
       );
     });
 
     it('ensures no two rooms overlap in coordinates', () => {
-      expect(doRoomsOverlap()).toBe(false);
-
-      const rooms = getAllRooms();
-      for (let i = 0; i < rooms.length; i++) {
-        for (let j = i + 1; j < rooms.length; j++) {
-          const a = rooms[i].bounds;
-          const b = rooms[j].bounds;
+      for (let i = 0; i < ROOMS.length; i++) {
+        for (let j = i + 1; j < ROOMS.length; j++) {
+          const a = ROOMS[i].bounds;
+          const b = ROOMS[j].bounds;
           const overlapsX = a.x < b.x + b.width && a.x + a.width > b.x;
           const overlapsY = a.y < b.y + b.height && a.y + a.height > b.y;
           expect(overlapsX && overlapsY).toBe(false);
@@ -58,8 +66,7 @@ describe('office/layout', () => {
     });
 
     it('validates tile counts and tile ID ranges for every room', () => {
-      const rooms = getAllRooms();
-      for (const room of rooms) {
+      for (const room of ROOMS) {
         expect(room.tiles).toHaveLength(room.bounds.width * room.bounds.height);
         for (const cell of room.tiles) {
           expect(cell.localX).toBeGreaterThanOrEqual(0);
@@ -79,7 +86,76 @@ describe('office/layout', () => {
     });
   });
 
-  describe('Waypoint navigation and hallway connections', () => {
+  describe('Tile helpers and office_tiles.json validation', () => {
+    it('returns the correct tile ID for valid tile names', () => {
+      expect(tile('floor_parquet_light')).toBe(0);
+      expect(tile('wall_top_molding')).toBe(8);
+      expect(tile('ambient_occlusion_shadow')).toBe(63);
+    });
+
+    it('throws an error for unknown tile names', () => {
+      expect(() => tile('non_existent_tile_name')).toThrow(
+        'Unknown tile name: "non_existent_tile_name"',
+      );
+    });
+
+    it('verifies that every used tile name exists in office_tiles.json', () => {
+      expect(USED_TILE_NAMES.size).toBeGreaterThan(0);
+      const jsonNames = new Set(officeTilesData.tiles.map((t) => t.name));
+      for (const name of USED_TILE_NAMES) {
+        expect(jsonNames.has(name)).toBe(true);
+      }
+    });
+
+    it('fills a row with the specified object tile', () => {
+      const row = fillRow(2, 'wall_baseboard', 4);
+      expect(Object.keys(row)).toHaveLength(4);
+      expect(row['0,2']).toEqual({ object: tile('wall_baseboard') });
+      expect(row['1,2']).toEqual({ object: tile('wall_baseboard') });
+      expect(row['2,2']).toEqual({ object: tile('wall_baseboard') });
+      expect(row['3,2']).toEqual({ object: tile('wall_baseboard') });
+    });
+
+    it('generates correct background-position with tileBg', () => {
+      expect(tileBg(0)).toBe('background-position: -0px -0px;');
+      expect(tileBg(9)).toBe('background-position: -32px -32px;');
+      expect(tileBg(18)).toBe('background-position: -64px -64px;');
+    });
+  });
+
+  describe('Waypoint positioning and reachability', () => {
+    it('ensures every waypoint lies within its room bounds', () => {
+      for (const wp of Object.values(WAYPOINTS)) {
+        const room = ROOMS.find((r) => r.id === wp.roomId);
+        expect(room).toBeDefined();
+        if (!room) continue;
+
+        expect(wp.x).toBeGreaterThanOrEqual(room.bounds.x);
+        expect(wp.x).toBeLessThan(room.bounds.x + room.bounds.width);
+        expect(wp.y).toBeGreaterThanOrEqual(room.bounds.y);
+        expect(wp.y).toBeLessThan(room.bounds.y + room.bounds.height);
+      }
+    });
+
+    it('positions ceo_desk and qa_desk at their respective chairs', () => {
+      expect(WAYPOINTS['ceo_desk']).toMatchObject({ x: 6, y: 5 });
+      expect(WAYPOINTS['qa_desk']).toMatchObject({ x: 20, y: 5 });
+    });
+
+    it('ensures every waypoint is reachable from hall_center', () => {
+      for (const wp of Object.values(WAYPOINTS)) {
+        const path = findWaypointPath(wp.id, 'hall_center');
+        expect(path.length).toBeGreaterThanOrEqual(1);
+        expect(path[0].id).toBe(wp.id);
+        expect(path[path.length - 1].id).toBe('hall_center');
+
+        const reversePath = findWaypointPath('hall_center', wp.id);
+        expect(reversePath.length).toBeGreaterThanOrEqual(1);
+        expect(reversePath[0].id).toBe('hall_center');
+        expect(reversePath[reversePath.length - 1].id).toBe(wp.id);
+      }
+    });
+
     it('returns a single-step path when start and target rooms are identical', () => {
       const path = getPathBetweenRooms('ceo', 'ceo');
       expect(path).toHaveLength(1);
