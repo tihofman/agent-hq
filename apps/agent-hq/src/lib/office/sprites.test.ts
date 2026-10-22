@@ -9,12 +9,19 @@ import {
   interpolatePosition,
   statusToAnimation,
   walkAnimationForDirection,
-  getAgentTargetWaypointId,
-  getAgentRoomOffset,
-  findPathBetweenWaypoints,
+  SPOTS,
+  getAgentSpot,
   getClosestWaypointId,
+  AgentController,
 } from './sprites';
-import { WAYPOINTS, TILE_SIZE } from './layout';
+import {
+  WAYPOINTS,
+  TILE_SIZE,
+  ROOM_IDS,
+  findWaypointPath,
+  type RoomId,
+} from './layout';
+import type { Agent, AgentStatus } from '../server/state';
 
 describe('office/sprites', () => {
   describe('Metadata and assets', () => {
@@ -72,7 +79,7 @@ describe('office/sprites', () => {
       expect(walkAnimationForDirection('up')).toBe('walk_up');
     });
 
-    it('maps agent status to correct animation', () => {
+    it('maps agent status to correct animation via Record lookup', () => {
       expect(statusToAnimation('idle')).toBe('idle');
       expect(statusToAnimation('walking', 'up')).toBe('walk_up');
       expect(statusToAnimation('walking', 'left')).toBe('walk_left');
@@ -143,6 +150,15 @@ describe('office/sprites', () => {
         css: 'background-position: -224px -96px;',
       });
     });
+
+    it('supports sheet geometry from metadata', () => {
+      const meta = { columns: 8, frameWidth: 32, frameHeight: 32 };
+      expect(getFrameBackgroundPosition(9, meta)).toEqual({
+        x: 32,
+        y: 32,
+        css: 'background-position: -32px -32px;',
+      });
+    });
   });
 
   describe('Speech bubbles and cooldown format', () => {
@@ -170,7 +186,7 @@ describe('office/sprites', () => {
         icon: '⚙️',
       });
 
-      // Review bubble
+      // Review bubble with ticketId
       expect(getSpeechBubble('reviewing')).toEqual({
         type: 'review',
         text: 'Reviewing...',
@@ -179,6 +195,13 @@ describe('office/sprites', () => {
       expect(getSpeechBubble('reviewing', { ticketId: '12' })).toEqual({
         type: 'review',
         text: 'Reviewing #12',
+        icon: '🔍',
+      });
+
+      // Review bubble with activePR fallback (Item 4)
+      expect(getSpeechBubble('reviewing', { prNumber: 44 })).toEqual({
+        type: 'review',
+        text: 'Reviewing PR #44',
         icon: '🔍',
       });
 
@@ -205,37 +228,36 @@ describe('office/sprites', () => {
     });
   });
 
-  describe('Waypoints, target assignments and pathfinding', () => {
-    it('assigns appropriate targets per agent and room', () => {
-      expect(getAgentTargetWaypointId('claude', 'ceo')).toBe('ceo_desk');
-      expect(getAgentTargetWaypointId('agy', 'dev')).toBe('dev_desk');
-      expect(getAgentTargetWaypointId('codex', 'dev')).toBe('dev_meeting');
-      expect(getAgentTargetWaypointId('agy', 'lounge')).toBe('lounge_coffee');
-      expect(getAgentTargetWaypointId('claude', 'lounge')).toBe('lounge_couch');
-      expect(getAgentTargetWaypointId('codex', 'lounge')).toBe('lounge_couch');
+  describe('Waypoints, SPOTS table and pairwise distance', () => {
+    it('defines spots for every agent in every room', () => {
+      const agents: Agent[] = ['claude', 'agy', 'codex'];
+      for (const room of ROOM_IDS) {
+        for (const agent of agents) {
+          const spot = SPOTS[agent]?.[room];
+          expect(spot).toBeDefined();
+          expect(WAYPOINTS[spot.wp]).toBeDefined();
+        }
+      }
     });
 
-    it('assigns handover hallway offsets properly', () => {
-      expect(getAgentRoomOffset('claude', 'hall', true)).toEqual({
-        x: -16,
-        y: 0,
-      });
-      expect(getAgentRoomOffset('agy', 'hall', true)).toEqual({
-        x: 16,
-        y: 0,
-      });
-      expect(getAgentRoomOffset('codex', 'lounge', false)).toEqual({
-        x: 20,
-        y: 0,
-      });
-      expect(getAgentRoomOffset('claude', 'ceo', false)).toEqual({
-        x: 0,
-        y: 0,
-      });
+    it('guarantees pairwise distance >= 40 px between all agents in every room', () => {
+      const agents: Agent[] = ['claude', 'agy', 'codex'];
+      for (const room of ROOM_IDS) {
+        const positions = agents.map((agent) => getAgentSpot(agent, room));
+        for (let i = 0; i < positions.length; i++) {
+          for (let j = i + 1; j < positions.length; j++) {
+            const dist = Math.hypot(
+              positions[i].x - positions[j].x,
+              positions[i].y - positions[j].y,
+            );
+            expect(dist).toBeGreaterThanOrEqual(40);
+          }
+        }
+      }
     });
 
-    it('finds path between waypoints across rooms', () => {
-      const path = findPathBetweenWaypoints('lounge_coffee', 'dev_desk');
+    it('finds path between waypoints across rooms using findWaypointPath', () => {
+      const path = findWaypointPath('lounge_coffee', 'dev_desk');
       expect(path.length).toBeGreaterThan(2);
       expect(path[0].id).toBe('lounge_coffee');
       expect(path[path.length - 1].id).toBe('dev_desk');
@@ -246,7 +268,7 @@ describe('office/sprites', () => {
     });
 
     it('returns single waypoint when start and target are identical', () => {
-      const path = findPathBetweenWaypoints('dev_desk', 'dev_desk');
+      const path = findWaypointPath('dev_desk', 'dev_desk');
       expect(path).toHaveLength(1);
       expect(path[0].id).toBe('dev_desk');
     });
@@ -289,6 +311,82 @@ describe('office/sprites', () => {
       expect(step.position).toEqual({ x: 50, y: 50 });
       expect(step.remainingDistance).toBe(10);
       expect(step.arrived).toBe(true);
+    });
+  });
+
+  describe('Client-side Handover sequence', () => {
+    it('HANDOVER + START direkt hintereinander → beide passieren hall_center', () => {
+      const claude = new AgentController('claude', 'ceo');
+      const agy = new AgentController('agy', 'lounge');
+
+      // Trigger handover sequence
+      claude.startHandover();
+      agy.startHandover();
+
+      // Immediately after, TASK_START arrives moving agy to 'dev' with status 'coding'
+      const stateStatusAgy: AgentStatus = 'coding';
+      const stateRoomAgy: RoomId = 'dev';
+      const stateStatusClaude: AgentStatus = 'idle';
+      const stateRoomClaude: RoomId = 'ceo';
+
+      agy.setTargetRoom(stateRoomAgy);
+      claude.setTargetRoom(stateRoomClaude);
+
+      const hallCenterWp = WAYPOINTS['hall_center'];
+      const hallCenterBaseX = hallCenterWp.x * TILE_SIZE; // 416
+      const hallCenterBaseY = hallCenterWp.y * TILE_SIZE; // 288
+
+      let claudePassedHallCenter = false;
+      let agyPassedHallCenter = false;
+      let claudeHandoverAnimAtHall = false;
+      let agyHandoverAnimAtHall = false;
+
+      // Simulate movement forward over ~12 seconds
+      const dt = 0.05;
+      for (let t = 0; t < 12; t += dt) {
+        const claudeRes = claude.tick(dt, stateStatusClaude, stateRoomClaude);
+        const agyRes = agy.tick(dt, stateStatusAgy, stateRoomAgy);
+
+        // Check if Claude passes hall_center (spot is x: 392, y: 288)
+        if (
+          Math.hypot(
+            claudeRes.x - (hallCenterBaseX - 24),
+            claudeRes.y - hallCenterBaseY,
+          ) < 5
+        ) {
+          claudePassedHallCenter = true;
+          if (claudeRes.animation === 'handover') {
+            claudeHandoverAnimAtHall = true;
+          }
+        }
+
+        // Check if Agy passes hall_center (spot is x: 440, y: 288)
+        if (
+          Math.hypot(
+            agyRes.x - (hallCenterBaseX + 24),
+            agyRes.y - hallCenterBaseY,
+          ) < 5
+        ) {
+          agyPassedHallCenter = true;
+          if (agyRes.animation === 'handover') {
+            agyHandoverAnimAtHall = true;
+          }
+        }
+      }
+
+      // Both must pass hall_center and participate in handover animation
+      expect(claudePassedHallCenter).toBe(true);
+      expect(agyPassedHallCenter).toBe(true);
+      expect(claudeHandoverAnimAtHall).toBe(true);
+      expect(agyHandoverAnimAtHall).toBe(true);
+
+      // And finally, Agy arrives at dev_desk and Claude at ceo_desk
+      const devSpot = getAgentSpot('agy', 'dev');
+      const ceoSpot = getAgentSpot('claude', 'ceo');
+      expect(agy.x).toBeCloseTo(devSpot.x);
+      expect(agy.y).toBeCloseTo(devSpot.y);
+      expect(claude.x).toBeCloseTo(ceoSpot.x);
+      expect(claude.y).toBeCloseTo(ceoSpot.y);
     });
   });
 });

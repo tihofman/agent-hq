@@ -1,10 +1,4 @@
-import {
-  findWaypointPath,
-  WAYPOINTS,
-  TILE_SIZE,
-  type RoomId,
-  type Waypoint,
-} from './layout';
+import { findWaypointPath, WAYPOINTS, TILE_SIZE, type RoomId } from './layout';
 import type { Agent, AgentStatus } from '../server/state';
 import claudeMeta from '../assets/sprites/claude.json';
 import agyMeta from '../assets/sprites/agy.json';
@@ -21,9 +15,7 @@ export type AnimationName =
   | 'typing'
   | 'handover'
   | 'review'
-  | 'cooldown'
-  | 'alert'
-  | 'success';
+  | 'cooldown';
 
 export interface SpriteAnimationMeta {
   frames: number[];
@@ -49,6 +41,12 @@ export interface SpeechBubble {
   type: 'testing' | 'review' | 'alert' | 'cooldown';
   text: string;
   icon?: string;
+}
+
+export interface Spot {
+  wp: string;
+  dx: number;
+  dy: number;
 }
 
 const METADATA_BY_AGENT: Record<Agent, SpriteMetadata> = {
@@ -84,30 +82,20 @@ export function walkAnimationForDirection(
   return `walk_${dir}`;
 }
 
+const STATUS_ANIMATION: Partial<Record<AgentStatus, AnimationName>> = {
+  handover: 'handover',
+  coding: 'typing',
+  testing: 'typing',
+  reviewing: 'review',
+  cooldown: 'cooldown',
+};
+
 export function statusToAnimation(
   status: AgentStatus,
   direction: Direction = 'down',
 ): AnimationName {
-  switch (status) {
-    case 'idle':
-      return 'idle';
-    case 'walking':
-      return walkAnimationForDirection(direction);
-    case 'handover':
-      return 'handover';
-    case 'coding':
-      return 'typing';
-    case 'testing':
-      return 'typing';
-    case 'reviewing':
-      return 'review';
-    case 'errorAlert':
-      return 'idle';
-    case 'cooldown':
-      return 'cooldown';
-    default:
-      return 'idle';
-  }
+  if (status === 'walking') return walkAnimationForDirection(direction);
+  return STATUS_ANIMATION[status] ?? 'idle';
 }
 
 export function getFrameIndex(
@@ -126,13 +114,27 @@ export function getFrameIndex(
 
 export function getFrameBackgroundPosition(
   frameIndex: number,
-  columns = 8,
+  columnsOrMeta:
+    | number
+    | { columns?: number; frameWidth?: number; frameHeight?: number } = 8,
   frameSize = 32,
 ): { x: number; y: number; css: string } {
+  let columns: number;
+  let width = frameSize;
+  let height = frameSize;
+
+  if (typeof columnsOrMeta === 'object' && columnsOrMeta !== null) {
+    columns = columnsOrMeta.columns ?? 8;
+    width = columnsOrMeta.frameWidth ?? 32;
+    height = columnsOrMeta.frameHeight ?? width;
+  } else {
+    columns = columnsOrMeta;
+  }
+
   const col = frameIndex % columns;
   const row = Math.floor(frameIndex / columns);
-  const x = col * frameSize;
-  const y = row * frameSize;
+  const x = col * width;
+  const y = row * height;
   return {
     x,
     y,
@@ -154,6 +156,7 @@ export function getSpeechBubble(
   status: AgentStatus,
   options?: {
     ticketId?: string;
+    prNumber?: number;
     statusText?: string;
     cooldownUntil?: string;
     now?: number;
@@ -167,10 +170,14 @@ export function getSpeechBubble(
     };
   }
   if (status === 'reviewing') {
-    const ticket = options?.ticketId ? `#${options.ticketId}` : '';
+    const target = options?.ticketId
+      ? `#${options.ticketId}`
+      : options?.prNumber
+        ? `PR #${options.prNumber}`
+        : '';
     return {
       type: 'review',
-      text: ticket ? `Reviewing ${ticket}` : 'Reviewing...',
+      text: target ? `Reviewing ${target}` : 'Reviewing...',
       icon: '🔍',
     };
   }
@@ -194,56 +201,41 @@ export function getSpeechBubble(
   return null;
 }
 
-export function getAgentTargetWaypointId(
+export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
+  claude: {
+    ceo: { wp: 'ceo_desk', dx: 0, dy: 0 },
+    dev: { wp: 'dev_meeting', dx: -24, dy: 0 },
+    qa: { wp: 'qa_servers', dx: 0, dy: 0 },
+    lounge: { wp: 'lounge_couch', dx: -24, dy: 0 },
+    hall: { wp: 'hall_center', dx: -24, dy: 0 },
+  },
+  agy: {
+    ceo: { wp: 'ceo_board', dx: -24, dy: 0 },
+    dev: { wp: 'dev_desk', dx: 0, dy: 0 },
+    qa: { wp: 'qa_desk', dx: -24, dy: 0 },
+    lounge: { wp: 'lounge_coffee', dx: 0, dy: 0 },
+    hall: { wp: 'hall_center', dx: 24, dy: 0 },
+  },
+  codex: {
+    ceo: { wp: 'ceo_board', dx: 24, dy: 0 },
+    dev: { wp: 'dev_meeting', dx: 24, dy: 0 },
+    qa: { wp: 'qa_desk', dx: 24, dy: 0 },
+    lounge: { wp: 'lounge_couch', dx: 24, dy: 0 },
+    hall: { wp: 'hall_east', dx: 0, dy: 0 },
+  },
+};
+
+export function getAgentSpot(
   agent: Agent,
   room: RoomId,
-  isHandover = false,
-): string {
-  if (isHandover && room === 'hall') {
-    return 'hall_center';
-  }
-  switch (room) {
-    case 'ceo':
-      return agent === 'claude' ? 'ceo_desk' : 'ceo_board';
-    case 'dev':
-      return agent === 'agy' ? 'dev_desk' : 'dev_meeting';
-    case 'qa':
-      return agent === 'claude' ? 'qa_servers' : 'qa_desk';
-    case 'lounge':
-      return agent === 'agy' ? 'lounge_coffee' : 'lounge_couch';
-    case 'hall':
-      return 'hall_center';
-    default:
-      return 'hall_center';
-  }
-}
-
-export function getAgentRoomOffset(
-  agent: Agent,
-  room: RoomId,
-  isHandover = false,
-): { x: number; y: number } {
-  if (isHandover && room === 'hall') {
-    if (agent === 'claude') {
-      return { x: -16, y: 0 };
-    }
-    return { x: 16, y: 0 };
-  }
-  if (room === 'lounge' && agent === 'codex') {
-    return { x: 20, y: 0 };
-  }
-  return { x: 0, y: 0 };
-}
-
-export function findPathBetweenWaypoints(
-  startWaypointId: string,
-  targetWaypointId: string,
-): Waypoint[] {
-  if (startWaypointId === targetWaypointId) {
-    const wp = WAYPOINTS[startWaypointId];
-    return wp ? [wp] : [];
-  }
-  return findWaypointPath(startWaypointId, targetWaypointId);
+): { x: number; y: number; wpId: string } {
+  const spot = SPOTS[agent]?.[room] ?? { wp: 'hall_center', dx: 0, dy: 0 };
+  const wp = WAYPOINTS[spot.wp] ?? WAYPOINTS['hall_center'];
+  return {
+    x: wp.x * TILE_SIZE + spot.dx,
+    y: wp.y * TILE_SIZE + spot.dy,
+    wpId: spot.wp,
+  };
 }
 
 export function getClosestWaypointId(pixelX: number, pixelY: number): string {
@@ -293,4 +285,167 @@ export function interpolatePosition(
     remainingDistance: 0,
     arrived: false,
   };
+}
+
+export type HandoverPhase =
+  'idle' | 'walking_to_hall' | 'meeting' | 'walking_to_target';
+
+export class AgentController {
+  agent: Agent;
+  x: number;
+  y: number;
+  direction: Direction = 'down';
+  handoverPhase: HandoverPhase = 'idle';
+  private path: { x: number; y: number }[] = [];
+  private meetingElapsedMs = 0;
+  private currentRoom: RoomId;
+  private deferredRoom: RoomId | null = null;
+  readonly walkSpeed = 96;
+
+  constructor(agent: Agent, initialRoom: RoomId = 'lounge') {
+    this.agent = agent;
+    this.currentRoom = initialRoom;
+    const spot = getAgentSpot(agent, initialRoom);
+    this.x = spot.x;
+    this.y = spot.y;
+  }
+
+  startHandover(): void {
+    this.handoverPhase = 'walking_to_hall';
+    this.meetingElapsedMs = 0;
+    const dx = this.agent === 'claude' ? -24 : 24;
+    const hallWp = WAYPOINTS['hall_center'];
+    const targetX = hallWp.x * TILE_SIZE + dx;
+    const targetY = hallWp.y * TILE_SIZE;
+    this.walkTo(targetX, targetY, 'hall_center');
+  }
+
+  setTargetRoom(room: RoomId): void {
+    if (
+      this.handoverPhase === 'walking_to_hall' ||
+      this.handoverPhase === 'meeting'
+    ) {
+      this.deferredRoom = room;
+      return;
+    }
+    if (
+      room === this.currentRoom &&
+      this.path.length === 0 &&
+      this.handoverPhase === 'idle'
+    ) {
+      return;
+    }
+    this.currentRoom = room;
+    const spot = getAgentSpot(this.agent, room);
+    this.walkTo(spot.x, spot.y, spot.wpId);
+  }
+
+  snapToRoom(room: RoomId): void {
+    this.currentRoom = room;
+    this.deferredRoom = null;
+    this.handoverPhase = 'idle';
+    this.path = [];
+    const spot = getAgentSpot(this.agent, room);
+    this.x = spot.x;
+    this.y = spot.y;
+    this.direction = 'down';
+  }
+
+  private walkTo(targetX: number, targetY: number, targetWpId: string): void {
+    const startWpId = getClosestWaypointId(this.x, this.y);
+    const wpPath = findWaypointPath(startWpId, targetWpId);
+    if (wpPath.length === 0) {
+      this.x = targetX;
+      this.y = targetY;
+      this.path = [];
+      return;
+    }
+    this.path = wpPath.map((wp, i) => {
+      const isFinal = i === wpPath.length - 1;
+      return {
+        x: isFinal ? targetX : wp.x * TILE_SIZE,
+        y: isFinal ? targetY : wp.y * TILE_SIZE,
+      };
+    });
+  }
+
+  tick(
+    dt: number,
+    stateStatus: AgentStatus,
+    stateRoom: RoomId,
+  ): {
+    x: number;
+    y: number;
+    direction: Direction;
+    animation: AnimationName;
+    isWalking: boolean;
+  } {
+    if (this.path.length > 0) {
+      let moveDist = this.walkSpeed * dt;
+      while (moveDist > 0 && this.path.length > 0) {
+        const nextTarget = this.path[0];
+        this.direction = getDirection(
+          { x: this.x, y: this.y },
+          nextTarget,
+          this.direction,
+        );
+        const step = interpolatePosition(
+          { x: this.x, y: this.y },
+          nextTarget,
+          moveDist,
+        );
+        this.x = step.position.x;
+        this.y = step.position.y;
+        moveDist = step.remainingDistance;
+
+        if (step.arrived) {
+          this.path.shift();
+        } else {
+          break;
+        }
+      }
+    }
+
+    if (this.handoverPhase === 'walking_to_hall') {
+      if (this.path.length === 0) {
+        this.handoverPhase = 'meeting';
+        this.meetingElapsedMs = 0;
+        this.direction = this.agent === 'claude' ? 'right' : 'left';
+      }
+    } else if (this.handoverPhase === 'meeting') {
+      this.direction = this.agent === 'claude' ? 'right' : 'left';
+      this.meetingElapsedMs += dt * 1000;
+      if (this.meetingElapsedMs >= 1500) {
+        this.handoverPhase = 'walking_to_target';
+        const targetRoom = this.deferredRoom ?? stateRoom ?? this.currentRoom;
+        this.deferredRoom = null;
+        this.currentRoom = targetRoom;
+        const targetSpot = getAgentSpot(this.agent, targetRoom);
+        this.walkTo(targetSpot.x, targetSpot.y, targetSpot.wpId);
+      }
+    } else if (this.handoverPhase === 'walking_to_target') {
+      if (this.path.length === 0) {
+        this.handoverPhase = 'idle';
+      }
+    }
+
+    const isWalking = this.path.length > 0;
+
+    let animation: AnimationName;
+    if (isWalking) {
+      animation = walkAnimationForDirection(this.direction);
+    } else if (this.handoverPhase === 'meeting') {
+      animation = 'handover';
+    } else {
+      animation = statusToAnimation(stateStatus, this.direction);
+    }
+
+    return {
+      x: this.x,
+      y: this.y,
+      direction: this.direction,
+      animation,
+      isWalking,
+    };
+  }
 }

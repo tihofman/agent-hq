@@ -4,21 +4,13 @@
   import type { Agent } from '../../server/state';
   import {
     getSpriteMetadata,
-    statusToAnimation,
     getFrameIndex,
     getFrameBackgroundPosition,
     getSpeechBubble,
-    getDirection,
-    getAgentTargetWaypointId,
-    getAgentRoomOffset,
-    findPathBetweenWaypoints,
-    getClosestWaypointId,
-    interpolatePosition,
-    walkAnimationForDirection,
-    type Direction,
+    AgentController,
     type AnimationName,
   } from '../../office/sprites';
-  import { WAYPOINTS, TILE_SIZE, type RoomId } from '../../office/layout';
+  import type { RoomId } from '../../office/layout';
 
   interface Props {
     agent: Agent;
@@ -36,9 +28,9 @@
     agentState.runId ? liveStore.state?.runs?.[agentState.runId] : undefined,
   );
 
-  const ticketId = $derived(
-    activeRun?.ticketId || liveStore.feed.findLast((e) => e.ticketId)?.ticketId,
-  );
+  const activePR = $derived(liveStore.state?.activePR);
+  const ticketId = $derived(activeRun?.ticketId);
+  const prNumber = $derived(activePR?.prNumber);
 
   const cooldownUntil = $derived(
     agentState.cooldownUntil || activeRun?.data?.cooldownUntil,
@@ -46,182 +38,98 @@
 
   const statusText = $derived(activeRun?.data?.statusText);
 
-  // Handover coordination between Claude and worker
-  const isHandoverActive = $derived.by(() => {
-    if (!liveStore.state?.agents) return false;
+  // Synchronous initial position (Item 5)
+  const initialRoom = (agentState.room as RoomId) ?? 'lounge';
+  const controller = new AgentController(agent, initialRoom);
+
+  let currentX = $state(controller.x);
+  let currentY = $state(controller.y);
+  let currentFrame = $state(0);
+  let activeAnimName = $state<AnimationName>('idle');
+  let now = $state(Date.now()); // Reactive cooldown timer (Item 2)
+
+  let animElapsedMs = 0;
+  let lastNowUpdate = 0;
+  let lastHandledHandoverKey: string | null = null;
+  const knownWorkerRuns: Record<string, string | undefined> = {};
+
+  $effect(() => {
+    const targetRoom = (agentState.room as RoomId) ?? 'lounge';
+    const feedLen = liveStore.feed.length; // Ensure reactive tracking on feed updates
+
+    if (feedLen === 0) {
+      controller.snapToRoom(targetRoom);
+      return;
+    }
+
+    const lastHandoverEvent = liveStore.feed.findLast(
+      (e) => e.event === 'TASK_HANDOVER',
+    );
+    const handoverKey = lastHandoverEvent
+      ? `${lastHandoverEvent.agent}-${lastHandoverEvent.runId ?? lastHandoverEvent.timestamp}`
+      : null;
+
+    let triggerHandover = false;
+
     if (agent === 'claude') {
-      for (const w of ['agy', 'codex'] as const) {
-        const s = liveStore.state.agents[w];
-        if (
-          s &&
-          s.room === 'hall' &&
-          (s.status === 'walking' || s.status === 'handover')
-        ) {
-          return true;
+      if (handoverKey && handoverKey !== lastHandledHandoverKey) {
+        lastHandledHandoverKey = handoverKey;
+        triggerHandover = true;
+      } else {
+        for (const w of ['agy', 'codex'] as const) {
+          const wRun = liveStore.state?.agents?.[w]?.runId;
+          if (wRun && wRun !== knownWorkerRuns[w]) {
+            knownWorkerRuns[w] = wRun;
+            triggerHandover = true;
+            break;
+          }
         }
       }
-    }
-    if (agent === 'agy' || agent === 'codex') {
-      const s = liveStore.state.agents[agent];
+    } else {
       if (
-        s &&
-        s.room === 'hall' &&
-        (s.status === 'walking' || s.status === 'handover')
+        lastHandoverEvent &&
+        lastHandoverEvent.agent === agent &&
+        handoverKey !== lastHandledHandoverKey
       ) {
-        return true;
+        lastHandledHandoverKey = handoverKey;
+        triggerHandover = true;
+      } else if (
+        agentState.runId &&
+        agentState.runId !== knownWorkerRuns[agent]
+      ) {
+        knownWorkerRuns[agent] = agentState.runId;
+        triggerHandover = true;
       }
     }
-    return false;
-  });
 
-  const effectiveRoom = $derived.by<RoomId>(() => {
-    if (agent === 'claude' && isHandoverActive) {
-      return 'hall';
+    if (triggerHandover) {
+      controller.startHandover();
+    } else {
+      controller.setTargetRoom(targetRoom);
     }
-    return (agentState.room as RoomId) ?? 'lounge';
   });
 
   const bubble = $derived(
     getSpeechBubble(agentState.status, {
       ticketId,
+      prNumber,
       statusText,
       cooldownUntil,
+      now,
     }),
   );
 
-  // Mutable animated state
-  let currentX = $state(0);
-  let currentY = $state(0);
-  let currentFrame = $state(0);
-  let isWalking = $state(false);
-  let currentDirection = $state<Direction>('down');
-  let activeAnimName = $state<AnimationName>('idle');
-
-  let currentPath: { x: number; y: number }[] = [];
-  let animElapsedMs = 0;
-  const WALK_SPEED_PX = 96; // 3 tiles / sec
-
-  let initialized = false;
-  let lastKnownRoom: RoomId | null = null;
-  let lastHandover = false;
-
-  function snapToTarget(room: RoomId, handover: boolean) {
-    const wpId = getAgentTargetWaypointId(agent, room, handover);
-    const wp = WAYPOINTS[wpId] ?? WAYPOINTS['hall_center'];
-    const offset = getAgentRoomOffset(agent, room, handover);
-    currentX = wp.x * TILE_SIZE + offset.x;
-    currentY = wp.y * TILE_SIZE + offset.y;
-    currentPath = [];
-    isWalking = false;
-
-    if (handover && room === 'hall') {
-      currentDirection = agent === 'claude' ? 'right' : 'left';
-    } else {
-      currentDirection = 'down';
-    }
-  }
-
-  function startWalkingTo(targetRoom: RoomId, handover: boolean) {
-    const targetWpId = getAgentTargetWaypointId(agent, targetRoom, handover);
-    const targetWp = WAYPOINTS[targetWpId];
-    if (!targetWp) return;
-
-    const startWpId = getClosestWaypointId(currentX, currentY);
-    const wpPath = findPathBetweenWaypoints(startWpId, targetWpId);
-
-    if (wpPath.length === 0) {
-      isWalking = false;
-      return;
-    }
-
-    const offset = getAgentRoomOffset(agent, targetRoom, handover);
-    currentPath = wpPath.map((wp, index) => {
-      const isFinal = index === wpPath.length - 1;
-      return {
-        x: wp.x * TILE_SIZE + (isFinal ? offset.x : 0),
-        y: wp.y * TILE_SIZE + (isFinal ? offset.y : 0),
-      };
-    });
-    isWalking = true;
-  }
-
-  $effect(() => {
-    const targetRoom = effectiveRoom;
-    const handover = isHandoverActive;
-
-    // Initial mount: snap immediately without walking
-    if (!initialized) {
-      initialized = true;
-      lastKnownRoom = targetRoom;
-      lastHandover = handover;
-      snapToTarget(targetRoom, handover);
-      return;
-    }
-
-    // INIT_STATE reset: snap immediately without walking
-    if (liveStore.feed.length === 0) {
-      lastKnownRoom = targetRoom;
-      lastHandover = handover;
-      snapToTarget(targetRoom, handover);
-      return;
-    }
-
-    // Live state room transition
-    if (targetRoom !== lastKnownRoom || handover !== lastHandover) {
-      lastKnownRoom = targetRoom;
-      lastHandover = handover;
-      startWalkingTo(targetRoom, handover);
-    }
-  });
-
   function tick(dt: number) {
-    // 1. Position update along waypoint path
-    if (isWalking && currentPath.length > 0) {
-      let moveDist = WALK_SPEED_PX * dt;
+    const res = controller.tick(
+      dt,
+      agentState.status,
+      (agentState.room as RoomId) ?? 'lounge',
+    );
+    currentX = res.x;
+    currentY = res.y;
 
-      while (moveDist > 0 && currentPath.length > 0) {
-        const nextTarget = currentPath[0];
-        currentDirection = getDirection(
-          { x: currentX, y: currentY },
-          nextTarget,
-          currentDirection,
-        );
-
-        const step = interpolatePosition(
-          { x: currentX, y: currentY },
-          nextTarget,
-          moveDist,
-        );
-        currentX = step.position.x;
-        currentY = step.position.y;
-        moveDist = step.remainingDistance;
-
-        if (step.arrived) {
-          currentPath.shift();
-          if (currentPath.length === 0) {
-            isWalking = false;
-            if (isHandoverActive && effectiveRoom === 'hall') {
-              currentDirection = agent === 'claude' ? 'right' : 'left';
-            }
-          }
-        } else {
-          break;
-        }
-      }
-    }
-
-    // 2. Animation state selection
-    let nextAnim: AnimationName;
-    if (isWalking) {
-      nextAnim = walkAnimationForDirection(currentDirection);
-    } else if (isHandoverActive && effectiveRoom === 'hall') {
-      nextAnim = 'handover';
-    } else {
-      nextAnim = statusToAnimation(agentState.status, currentDirection);
-    }
-
-    if (nextAnim !== activeAnimName) {
-      activeAnimName = nextAnim;
+    if (res.animation !== activeAnimName) {
+      activeAnimName = res.animation;
       animElapsedMs = 0;
     } else {
       animElapsedMs += dt * 1000;
@@ -233,6 +141,16 @@
   }
 
   onMount(() => {
+    const lastHandoverEvent = liveStore.feed.findLast(
+      (e) => e.event === 'TASK_HANDOVER',
+    );
+    if (lastHandoverEvent) {
+      lastHandledHandoverKey = `${lastHandoverEvent.agent}-${lastHandoverEvent.runId ?? lastHandoverEvent.timestamp}`;
+    }
+    for (const w of ['agy', 'codex'] as const) {
+      knownWorkerRuns[w] = liveStore.state?.agents?.[w]?.runId;
+    }
+
     if (
       typeof window === 'undefined' ||
       typeof requestAnimationFrame === 'undefined'
@@ -243,30 +161,34 @@
     let animFrameId: number;
     let lastTime = performance.now();
 
-    const loop = (now: number) => {
-      const dt = Math.min((now - lastTime) / 1000, 0.1);
-      lastTime = now;
+    const loop = (timestamp: number) => {
+      const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+      lastTime = timestamp;
+
+      // Update `now` at most 1x/s in rAF loop (Item 2)
+      if (timestamp - lastNowUpdate >= 1000) {
+        now = Date.now();
+        lastNowUpdate = timestamp;
+      }
+
       tick(dt);
       animFrameId = requestAnimationFrame(loop);
     };
 
     animFrameId = requestAnimationFrame(loop);
-
-    return () => {
-      cancelAnimationFrame(animFrameId);
-    };
+    return () => cancelAnimationFrame(animFrameId);
   });
 
-  const bgPos = $derived(getFrameBackgroundPosition(currentFrame));
+  const bgPos = $derived(getFrameBackgroundPosition(currentFrame, metadata));
 </script>
 
 <div
-  class="character-container absolute"
+  class="character-container agent-{agent} absolute"
   style="
     left: {Math.round(currentX)}px;
     top: {Math.round(currentY)}px;
-    width: 32px;
-    height: 32px;
+    width: {metadata.frameWidth}px;
+    height: {metadata.frameHeight}px;
     z-index: {Math.round(currentY) + 20};
   "
   data-testid="character-sprite-{agent}"
@@ -278,20 +200,24 @@
       class="speech-bubble bubble-{bubble.type}"
       data-testid="speech-bubble-{agent}"
     >
-      {#if bubble.type === 'testing'}
-        <span class="gear-icon">⚙️</span>
-      {:else if bubble.icon && bubble.type !== 'alert'}
-        <span class="bubble-icon">{bubble.icon}</span>
+      {#if bubble.icon}
+        <span class="bubble-icon" class:gear-icon={bubble.type === 'testing'}
+          >{bubble.icon}</span
+        >
       {/if}
       <span class="bubble-text">{bubble.text}</span>
     </div>
   {/if}
 
-  <!-- 32x32 Pixel Sprite -->
-  <div class="pixel-sprite sprite-{agent}" style={bgPos.css}></div>
+  <!-- Pixel Sprite -->
+  <div
+    class="pixel-sprite sprite-{agent}"
+    style="{bgPos.css} width: {metadata.frameWidth}px; height: {metadata.frameHeight}px; background-size: {metadata.columns *
+      metadata.frameWidth}px {metadata.rows * metadata.frameHeight}px;"
+  ></div>
 
   <!-- Agent Retro Nametag Badge -->
-  <div class="agent-badge badge-{agent}">
+  <div class="agent-badge">
     {metadata.displayName}
   </div>
 </div>
@@ -299,28 +225,28 @@
 <style>
   .character-container {
     image-rendering: pixelated;
-    image-rendering: -moz-crisp-edges;
-    image-rendering: crisp-edges;
+  }
+
+  .agent-claude {
+    --agent-color: #f97316;
+  }
+  .agent-agy {
+    --agent-color: #38bdf8;
+  }
+  .agent-codex {
+    --agent-color: #a855f7;
   }
 
   .pixel-sprite {
-    width: 32px;
-    height: 32px;
     background-repeat: no-repeat;
-    background-size: 256px 128px;
-    image-rendering: pixelated;
-    image-rendering: -moz-crisp-edges;
-    image-rendering: crisp-edges;
   }
 
   .sprite-claude {
     background-image: url('../../assets/sprites/claude.png');
   }
-
   .sprite-agy {
     background-image: url('../../assets/sprites/agy.png');
   }
-
   .sprite-codex {
     background-image: url('../../assets/sprites/codex.png');
   }
@@ -345,6 +271,9 @@
     pointer-events: none;
     z-index: 35;
     animation: bubble-bob 2s ease-in-out infinite;
+    background-color: var(--bubble-bg);
+    border: 1px solid var(--bubble-border);
+    color: var(--bubble-text);
   }
 
   .speech-bubble::after {
@@ -357,44 +286,28 @@
     height: 0;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
+    border-top: 4px solid var(--bubble-border);
   }
 
   .bubble-testing {
-    background-color: #451a03;
-    border: 1px solid #f59e0b;
-    color: #fef3c7;
+    --bubble-bg: #451a03;
+    --bubble-border: #f59e0b;
+    --bubble-text: #fef3c7;
   }
-  .bubble-testing::after {
-    border-top: 4px solid #f59e0b;
-  }
-
   .bubble-review {
-    background-color: #1e1b4b;
-    border: 1px solid #818cf8;
-    color: #e0e7ff;
+    --bubble-bg: #1e1b4b;
+    --bubble-border: #818cf8;
+    --bubble-text: #e0e7ff;
   }
-  .bubble-review::after {
-    border-top: 4px solid #818cf8;
-  }
-
   .bubble-alert {
-    background-color: #450a0a;
-    border: 1px solid #ef4444;
-    color: #fee2e2;
-    padding: 1px 6px;
-    font-size: 11px;
+    --bubble-bg: #450a0a;
+    --bubble-border: #ef4444;
+    --bubble-text: #fee2e2;
   }
-  .bubble-alert::after {
-    border-top: 4px solid #ef4444;
-  }
-
   .bubble-cooldown {
-    background-color: #082f49;
-    border: 1px solid #38bdf8;
-    color: #e0f2fe;
-  }
-  .bubble-cooldown::after {
-    border-top: 4px solid #38bdf8;
+    --bubble-bg: #082f49;
+    --bubble-border: #38bdf8;
+    --bubble-text: #e0f2fe;
   }
 
   .gear-icon {
@@ -439,21 +352,7 @@
     pointer-events: none;
     opacity: 0.9;
     background-color: rgba(2, 6, 23, 0.9);
-    border: 1px solid rgba(51, 65, 85, 0.8);
-  }
-
-  .badge-claude {
-    color: #f97316;
-    border-color: rgba(249, 115, 22, 0.4);
-  }
-
-  .badge-agy {
-    color: #38bdf8;
-    border-color: rgba(56, 189, 248, 0.4);
-  }
-
-  .badge-codex {
-    color: #a855f7;
-    border-color: rgba(168, 85, 247, 0.4);
+    color: var(--agent-color);
+    border: 1px solid var(--agent-color);
   }
 </style>
