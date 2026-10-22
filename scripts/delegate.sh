@@ -29,14 +29,16 @@ codex_command() {
       -c 'sandbox_mode="workspace-write"'
       -c sandbox_workspace_write.network_access=true
       -c "sandbox_workspace_write.writable_roots=$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" '[$cwd,$npm]')"
-      "$NEXT_PROMPT")
+      -- "$NEXT_PROMPT")
   else
-    CMD=(codex exec -s workspace-write -c sandbox_workspace_write.network_access=true --add-dir "$HOME/.npm" "$NEXT_PROMPT")
+    CMD=(codex exec -s workspace-write -c sandbox_workspace_write.network_access=true --add-dir "$HOME/.npm" -- "$NEXT_PROMPT")
   fi
 }
 
 agy_command() {
-  CMD=(agy -p "$NEXT_PROMPT" --dangerously-skip-permissions --output-format stream-json)
+  local prompt="$NEXT_PROMPT"
+  [[ "$prompt" != -* ]] || prompt=" $prompt"
+  CMD=(agy -p "$prompt" --dangerously-skip-permissions --output-format stream-json)
   [ -z "$SESSION" ] || CMD+=(--conversation "$SESSION")
 }
 
@@ -47,12 +49,27 @@ worker_output() {
     # Keep diagnostics/unknown events verbatim; render assistant text for the tailer.
     jq --unbuffered -Rr '
       . as $raw | try (fromjson |
-        (if .conversation_id then "conversation id: \(.conversation_id)" else empty end),
-        (if .type == "assistant" and (.message.content | type) == "array" then
+        if .type == "init" then
+          ">>> agy init session: " +
+            (if (.conversation_id | type) == "string" then
+              if (.conversation_id | test("^[A-Za-z0-9][A-Za-z0-9_-]*$")) then .conversation_id else "" end
+            else "" end)
+        else (if .type == "assistant" and (.message.content | type) == "array" then
           [.message.content[] | select(.type == "text") | .text] | join("\n")
         elif .type == "assistant" and (.message.content | type) == "string" then .message.content
-        elif .type == "init" and .conversation_id then empty
-        else $raw end)) catch $raw'
+        else $raw end) | gsub("(?m)^>>> agy init session:"; " >>> agy init session:")
+        end) catch ($raw | gsub("(?m)^>>> agy init session:"; " >>> agy init session:"))'
+  fi
+}
+
+session_from_log() {
+  if [ "$AGENT" = codex ]; then
+    grep -m1 -oE '^session id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "$LOG" | cut -d ' ' -f3
+  else
+    # Select the first init marker before validation; never accept a later replacement.
+    local id
+    id="$(grep '^>>> agy init session: ' "$LOG" | head -1 | cut -d ' ' -f5-)"
+    [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] && printf '%s\n' "$id"
   fi
 }
 
@@ -100,8 +117,7 @@ while :; do
   INSTRUCTION="$(cat "$MSG")"
   rm -f "$MSG"
   [ -n "$INSTRUCTION" ] || break
-  FOUND_SESSION="$(sed -nE 's/^[[:space:]]*(session id|conversation id):[[:space:]]*([^[:space:]]+).*$/\2/p' "$LOG" | tail -1)"
-  [ -z "$FOUND_SESSION" ] || SESSION="$FOUND_SESSION"
+  SESSION="$(session_from_log)"
   CORRECTIONS="${CORRECTIONS}
 $INSTRUCTION"
   if [ -n "$SESSION" ]; then
