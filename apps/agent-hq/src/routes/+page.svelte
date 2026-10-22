@@ -4,6 +4,7 @@
   import TopBar from '../lib/components/TopBar.svelte';
   import OfficeFloor from '../lib/components/office/OfficeFloor.svelte';
   import LogViewer from '../lib/components/feed/LogViewer.svelte';
+  import TicketCard from '../lib/components/tracker/TicketCard.svelte';
   import type { RoomId } from '../lib/office/layout';
 
   // Integer scaling: 1x or 2x
@@ -156,15 +157,7 @@
       </span>
     </div>
 
-    <div
-      class="flex flex-1 items-center justify-center px-4 font-sans text-xs text-slate-500"
-    >
-      <div
-        class="rounded border border-dashed border-slate-800 px-6 py-2.5 text-center"
-      >
-        Ticket &amp; Akzeptanzkriterien – folgt
-      </div>
-    </div>
+    <TicketCard />
   </footer>
 </div>
 
