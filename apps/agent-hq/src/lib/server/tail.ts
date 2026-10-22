@@ -10,6 +10,7 @@ import {
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
+import { detectRateLimit } from './ratelimit';
 import {
   parseEvent,
   type Agent,
@@ -31,6 +32,7 @@ export function startTail(options: {
       pending: string;
       testing: boolean;
       prCreated: boolean;
+      rateLimited?: { cooldownUntil?: string };
     }
   >();
   const finished = new Set<string>();
@@ -106,6 +108,20 @@ export function startTail(options: {
         );
         if (stopped) break;
         const plain = stripVTControlCharacters(line);
+        const limit = detectRateLimit(plain, new Date());
+        if (
+          limit &&
+          (!run.rateLimited ||
+            (limit.cooldownUntil &&
+              (!run.rateLimited.cooldownUntil ||
+                limit.cooldownUntil > run.rateLimited.cooldownUntil)))
+        ) {
+          run.rateLimited = limit;
+          options.onEvent(
+            parseEvent({ event: 'RATE_LIMITED', agent, runId, data: limit }),
+          );
+        }
+        if (stopped) break;
         if (
           !run.testing &&
           /(?:^|[>$])\s*(?:npx\s+|nx\s+run\s+\S*:\s*)?(?:nx\s+test|vitest(?:\s+run)?|pytest|jest)(?=\s|$)/i.test(

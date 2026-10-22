@@ -1,0 +1,2 @@
+# Verified template: same source format_retry_timestamp, instantiated date; https://github.com/openai/codex/blob/main/codex-rs/protocol/src/error.rs
+You’ve hit your usage limit. Try again at Oct 23rd, 2026 1:30 PM.

@@ -28,11 +28,25 @@ export function startServerTail(options?: { dir?: string }): () => void {
     resolveAgent: (runId) => getState().runs[runId]?.agent,
     isRunActive: (runId) => {
       const status = getState().runs[runId]?.status;
-      return status === 'handover' || status === 'running';
+      return (
+        status === 'handover' || status === 'running' || status === 'cooldown'
+      );
     },
   });
 
+  const timer = setInterval(() => {
+    if (
+      Object.values(getState().agents).some(
+        (agent) => agent.status === 'cooldown',
+      )
+    ) {
+      dispatch({ type: 'TICK', timestamp: new Date().toISOString() });
+    }
+  }, 5_000);
+  timer.unref();
+
   const stop = () => {
+    clearInterval(timer);
     stopTail();
     if (globalRef[GLOBAL_TAILER_KEY] === stop) {
       delete globalRef[GLOBAL_TAILER_KEY];

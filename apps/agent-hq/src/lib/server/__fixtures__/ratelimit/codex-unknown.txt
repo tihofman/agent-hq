@@ -1,0 +1,2 @@
+# Verified: https://github.com/openai/codex/blob/main/codex-rs/protocol/src/error.rs retry_suffix(None).
+You’ve hit your usage limit. Try again later.

@@ -1,0 +1,2 @@
+# Derived: https://platform.claude.com/docs/en/api/errors (429 rate_limit_error); Retry-After representation synthetic, seconds from HTTP header convention.
+API Error: 429 rate_limit_error: Rate limit exceeded. Retry-After: 60

@@ -1,0 +1,2 @@
+# Derived from CLI issue: https://github.com/google-gemini/gemini-cli/issues/18050
+[API Error: You have exhausted your daily quota on this model.]
