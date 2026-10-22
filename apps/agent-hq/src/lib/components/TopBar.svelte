@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { liveStore } from '../live.svelte';
+  import { isAudioEnabled, setAudioEnabled } from '../audio';
+  import { requestNotificationPermission } from '../notify';
   import KillSwitch from './KillSwitch.svelte';
 
   interface Props {
@@ -18,10 +21,18 @@
     onToggleAudio,
   }: Props = $props();
 
-  let audioEnabled = $state(true);
+  let audioEnabled = $state(false);
+
+  onMount(() => {
+    audioEnabled = isAudioEnabled();
+  });
 
   function toggleAudio() {
     audioEnabled = !audioEnabled;
+    setAudioEnabled(audioEnabled);
+    if (audioEnabled) {
+      void requestNotificationPermission();
+    }
     onToggleAudio?.(audioEnabled);
   }
 

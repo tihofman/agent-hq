@@ -110,4 +110,5 @@ npm run generate:assets
 ## 5. Lizenz & Urheberrecht
 
 - **Grafiken**: Selbst erstellt (prozedural generiert via `tools/pixel-art/generate.js`). Lizenziert unter **MIT** wie das Repository.
+- **Audio & Sound-FX**: Alle 16-Bit Chiptune-Sounds (`lib/audio.ts`) werden dynamisch über die Standard Web Audio API synthetisiert (Oszillatoren mit Square-, Triangle- und Sawtooth-Wellen). Es werden keinerlei Audio-Dateien oder externe urheberrechtlich geschützte Samples verwendet.
 - **Farbpalette**: [Endesga 32 (EDG32)](https://lospec.com/palette-list/endesga-32) von Ed Blankenship (ENDESGA), CC0 / Public Domain.

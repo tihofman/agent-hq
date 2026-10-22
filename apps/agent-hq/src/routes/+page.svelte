@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { connect } from '../lib/live.svelte';
   import TopBar from '../lib/components/TopBar.svelte';
+  import AlertsListener from '../lib/components/AlertsListener.svelte';
   import OfficeFloor from '../lib/components/office/OfficeFloor.svelte';
   import LogViewer from '../lib/components/feed/LogViewer.svelte';
   import TicketCard from '../lib/components/tracker/TicketCard.svelte';
@@ -28,6 +29,7 @@
 >
   <!-- 1. Top Bar -->
   <TopBar />
+  <AlertsListener />
 
   <!-- 2. Middle Section: Office (Center) & Feed Slot (Right) -->
   <div class="flex flex-1 overflow-hidden">
