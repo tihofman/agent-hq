@@ -109,5 +109,5 @@ npm run generate:assets
 
 ## 5. Lizenz & Urheberrecht
 
-- **Grafiken**: Selbst erstellt (prozedural generiert via `tools/pixel-art/generate.js`). Lizenziert unter **MIT / CC0 (Public Domain)** für das Projekt Agent-HQ.
+- **Grafiken**: Selbst erstellt (prozedural generiert via `tools/pixel-art/generate.js`). Lizenziert unter **MIT** wie das Repository.
 - **Farbpalette**: [Endesga 32 (EDG32)](https://lospec.com/palette-list/endesga-32) von Ed Blankenship (ENDESGA), CC0 / Public Domain.

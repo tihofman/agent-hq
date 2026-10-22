@@ -43,7 +43,7 @@ for (const charId of characterIds) {
     rows: 4,
     totalFrames: frames.length,
     palette: 'Endesga 32 (EDG32)',
-    license: 'CC0 / MIT (Self-created procedural pixel-art)',
+    license: 'MIT (self-created procedural pixel-art)',
     animations: {
       idle: {
         frames: [0, 1, 2, 3],
@@ -149,7 +149,7 @@ const tilesetMeta = {
   rows: 8,
   totalTiles: tiles.length,
   palette: 'Endesga 32 (EDG32)',
-  license: 'CC0 / MIT (Self-created procedural pixel-art)',
+  license: 'MIT (self-created procedural pixel-art)',
   tiles: TILE_CATALOG.map((tile) => ({
     id: tile.id,
     name: tile.name,
@@ -327,7 +327,7 @@ npm run generate:assets
 
 ## 5. Lizenz & Urheberrecht
 
-- **Grafiken**: Selbst erstellt (prozedural generiert via \`tools/pixel-art/generate.js\`). Lizenziert unter **MIT / CC0 (Public Domain)** für das Projekt Agent-HQ.
+- **Grafiken**: Selbst erstellt (prozedural generiert via \`tools/pixel-art/generate.js\`). Lizenziert unter **MIT** wie das Repository.
 - **Farbpalette**: [Endesga 32 (EDG32)](https://lospec.com/palette-list/endesga-32) von Ed Blankenship (ENDESGA), CC0 / Public Domain.
 `;
 

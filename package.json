@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "generate:assets": "node tools/pixel-art/generate.js"
+    "generate:assets": "node tools/pixel-art/generate.js && prettier --write apps/agent-hq/src/lib/assets"
   },
   "private": true,
   "devDependencies": {
@@ -12,7 +12,6 @@
     "@swc/core": "1.15.8",
     "@swc/helpers": "0.5.18",
     "@types/node": "^24.0.0",
-    "@types/pngjs": "^6.0.5",
     "nx": "24.0.0",
     "pngjs": "^7.0.0",
     "prettier": "^3.8.1",
