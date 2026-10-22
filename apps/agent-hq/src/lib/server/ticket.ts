@@ -8,16 +8,18 @@ export interface Criterion {
   done: boolean;
 }
 
+export interface TicketData {
+  number: number;
+  title: string;
+  criteria: Criterion[];
+}
+
+export type TicketResponse = TicketData;
+
 export interface Ticket {
   number: number;
   title: string;
   body: string;
-}
-
-export interface TicketResponse {
-  number: number;
-  title: string;
-  criteria: Criterion[];
 }
 
 export class TicketNotFoundError extends Error {
@@ -46,7 +48,7 @@ export function parseCriteria(body: string): Criterion[] {
   const criteria: Criterion[] = [];
 
   for (const line of lines) {
-    const match = line.match(/^\s*-\s*\[([ xX])\]\s*(.*)$/);
+    const match = line.match(/^\s*[-*]\s*\[([ xX])\]\s*(.*)$/);
     if (match) {
       criteria.push({
         text: match[2].trim(),
@@ -82,8 +84,8 @@ export async function fetchTicket(
   execFn: ExecFileFunction = execFileAsync,
 ): Promise<Ticket> {
   const normalizedId = ticketId.trim().replace(/^#/, '');
-  if (!normalizedId) {
-    throw new TicketNotFoundError('Invalid or empty ticket ID');
+  if (!/^\d+$/.test(normalizedId)) {
+    throw new TicketNotFoundError('Invalid ticket ID');
   }
 
   const cacheKey = `${cwd}::${normalizedId}`;
@@ -96,7 +98,7 @@ export async function fetchTicket(
   try {
     const { stdout } = await execFn(
       'gh',
-      ['issue', 'view', normalizedId, '--json', 'number,title,body'],
+      ['issue', 'view', '--json', 'number,title,body', '--', normalizedId],
       {
         cwd,
         timeout: 5000,

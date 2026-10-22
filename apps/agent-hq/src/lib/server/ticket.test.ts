@@ -91,6 +91,32 @@ Etwas Text am Ende.
       ]);
     });
 
+    it('parses CRLF bodies with \\r\\n newlines correctly', () => {
+      const crlfBody =
+        '## Kurzbeschreibung\r\nText\r\n\r\n## Akzeptanzkriterien\r\n- [ ] First CRLF\r\n- [x] Second CRLF\r\n\r\n## Ziel\r\nZiel CRLF\r\n';
+      const criteria = parseCriteria(crlfBody);
+      expect(criteria).toEqual([
+        { text: 'First CRLF', done: false },
+        { text: 'Second CRLF', done: true },
+      ]);
+    });
+
+    it('parses nested bullets including - [X] under parent bullet', () => {
+      const body = `
+## Akzeptanzkriterien
+* Hauptpunkt
+  - [X] Verschachteltes Kriterium mit großem X
+  * [x] Verschachtelter Stern-Bullet
+    - [ ] Tief verschachteltes Kriterium
+`;
+      const criteria = parseCriteria(body);
+      expect(criteria).toEqual([
+        { text: 'Verschachteltes Kriterium mit großem X', done: true },
+        { text: 'Verschachtelter Stern-Bullet', done: true },
+        { text: 'Tief verschachteltes Kriterium', done: false },
+      ]);
+    });
+
     it('parses real repo issue #15 format', () => {
       const issue15Body = `
 ## Kurzbeschreibung
@@ -164,7 +190,7 @@ Fortschritt gegen die Definition of Done ist jederzeit sichtbar.
 
       expect(mockExec).toHaveBeenCalledWith(
         'gh',
-        ['issue', 'view', '15', '--json', 'number,title,body'],
+        ['issue', 'view', '--json', 'number,title,body', '--', '15'],
         {
           cwd: '/path/to/worktree',
           timeout: 5000,
@@ -187,7 +213,7 @@ Fortschritt gegen die Definition of Done ist jederzeit sichtbar.
       expect(ticket.number).toBe(42);
       expect(mockExec).toHaveBeenCalledWith(
         'gh',
-        ['issue', 'view', '42', '--json', 'number,title,body'],
+        ['issue', 'view', '--json', 'number,title,body', '--', '42'],
         expect.any(Object),
       );
     });
@@ -256,6 +282,25 @@ Fortschritt gegen die Definition of Done ist jederzeit sichtbar.
       await expect(fetchTicket('   ', '/repo')).rejects.toThrowError(
         TicketNotFoundError,
       );
+    });
+
+    it('throws TicketNotFoundError for URLs and does not invoke gh', async () => {
+      const mockExec: ExecFileFunction = vi.fn();
+      await expect(
+        fetchTicket('https://github.com/cli/cli/issues/1', '/repo', mockExec),
+      ).rejects.toThrowError(TicketNotFoundError);
+      expect(mockExec).not.toHaveBeenCalled();
+    });
+
+    it('throws TicketNotFoundError for flags like --repo and does not invoke gh', async () => {
+      const mockExec: ExecFileFunction = vi.fn();
+      await expect(
+        fetchTicket('--repo=cli/cli', '/repo', mockExec),
+      ).rejects.toThrowError(TicketNotFoundError);
+      await expect(
+        fetchTicket('--repo=x/y', '/repo', mockExec),
+      ).rejects.toThrowError(TicketNotFoundError);
+      expect(mockExec).not.toHaveBeenCalled();
     });
   });
 });

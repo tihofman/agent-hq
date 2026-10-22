@@ -1,17 +1,8 @@
 <script lang="ts">
   import { liveStore } from '../../live.svelte';
-  import { getCurrentRun } from './run';
-
-  interface Criterion {
-    text: string;
-    done: boolean;
-  }
-
-  interface TicketData {
-    number: number;
-    title: string;
-    criteria: Criterion[];
-  }
+  import type { HQEvent } from '../../server/state';
+  import type { TicketData } from '../../server/ticket';
+  import { getCurrentRun, hasReloadEvent } from './run';
 
   let ticket = $state<TicketData | null>(null);
   let error = $state<string | null>(null);
@@ -21,7 +12,7 @@
 
   let lastRunId: string | undefined = undefined;
   let lastTicketId: string | undefined = undefined;
-  let lastFeedLength = 0;
+  let lastSeenEvent: HQEvent | undefined = undefined;
   let abortController: AbortController | null = null;
 
   async function loadTicket(runId: string) {
@@ -58,13 +49,6 @@
     }
   }
 
-  const RELOAD_EVENTS = new Set([
-    'TASK_HANDOVER',
-    'REVIEW_START',
-    'PR_READY',
-    'MERGED',
-  ]);
-
   $effect(() => {
     const run = currentRun;
     const feed = liveStore.feed;
@@ -82,18 +66,13 @@
       }
     }
 
-    if (feed.length < lastFeedLength) {
-      lastFeedLength = 0;
-    }
-
-    if (feed.length > lastFeedLength) {
-      for (let i = lastFeedLength; i < feed.length; i++) {
-        if (RELOAD_EVENTS.has(feed[i].event)) {
-          shouldReload = true;
-          break;
-        }
+    if (feed.length === 0) {
+      lastSeenEvent = undefined;
+    } else {
+      if (hasReloadEvent(feed, lastSeenEvent)) {
+        shouldReload = true;
       }
-      lastFeedLength = feed.length;
+      lastSeenEvent = feed.at(-1);
     }
 
     if (!runId || !ticketId) {
@@ -114,6 +93,56 @@
   const totalCount = $derived(ticket?.criteria.length ?? 0);
 </script>
 
+{#snippet prStatusBadges()}
+  {#if activePR?.status}
+    <div class="flex items-center gap-2 font-mono">
+      <div
+        class="flex items-center gap-1 rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-[10px]"
+        data-testid="pr-badge"
+      >
+        {#if activePR.prNumber}
+          <span class="text-slate-400 font-semibold mr-0.5"
+            >#{activePR.prNumber}</span
+          >
+        {/if}
+        <span
+          class={activePR.status === 'draft'
+            ? 'text-amber-400 font-bold'
+            : 'text-slate-500'}>Draft</span
+        >
+        <span class="text-slate-600">→</span>
+        <span
+          class={activePR.status === 'ready' || activePR.status === 'reviewing'
+            ? activePR.status === 'reviewing'
+              ? 'text-indigo-400 font-bold'
+              : 'text-blue-400 font-bold'
+            : 'text-slate-500'}
+        >
+          {activePR.status === 'reviewing' ? 'Review' : 'Ready'}
+        </span>
+        <span class="text-slate-600">→</span>
+        <span
+          class={activePR.status === 'merged'
+            ? 'text-purple-400 font-bold'
+            : 'text-slate-500'}>Merged</span
+        >
+      </div>
+      {#if activePR?.ci}
+        <span
+          class="rounded px-1.5 py-0.5 text-[10px] font-mono font-bold border {activePR.ci ===
+          'pass'
+            ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+            : 'bg-rose-950 text-rose-400 border-rose-800'}"
+          data-testid="ci-badge"
+          data-ci={activePR.ci}
+        >
+          {activePR.ci === 'pass' ? 'CI_CHECK_PASS' : 'CI_CHECK_FAIL'}
+        </span>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
 <div
   class="flex flex-1 min-h-0 w-full overflow-hidden"
   data-testid="ticket-card"
@@ -129,54 +158,7 @@
         <span class="text-sm">⚠️</span>
         <span>Hinweis: {error}</span>
       </div>
-      {#if activePR?.status}
-        <div class="flex items-center gap-2 font-mono">
-          <div
-            class="flex items-center gap-1 rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-[10px]"
-            data-testid="pr-badge"
-          >
-            {#if activePR.prNumber}
-              <span class="text-slate-400 font-semibold mr-0.5"
-                >#{activePR.prNumber}</span
-              >
-            {/if}
-            <span
-              class={activePR.status === 'draft'
-                ? 'text-amber-400 font-bold'
-                : 'text-slate-500'}>Draft</span
-            >
-            <span class="text-slate-600">→</span>
-            <span
-              class={activePR.status === 'ready' ||
-              activePR.status === 'reviewing'
-                ? activePR.status === 'reviewing'
-                  ? 'text-indigo-400 font-bold'
-                  : 'text-blue-400 font-bold'
-                : 'text-slate-500'}
-            >
-              {activePR.status === 'reviewing' ? 'Review' : 'Ready'}
-            </span>
-            <span class="text-slate-600">→</span>
-            <span
-              class={activePR.status === 'merged'
-                ? 'text-purple-400 font-bold'
-                : 'text-slate-500'}>Merged</span
-            >
-          </div>
-          {#if activePR?.ci}
-            <span
-              class="rounded px-1.5 py-0.5 text-[10px] font-mono font-bold border {activePR.ci ===
-              'pass'
-                ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                : 'bg-rose-950 text-rose-400 border-rose-800'}"
-              data-testid="ci-badge"
-              data-ci={activePR.ci}
-            >
-              {activePR.ci === 'pass' ? 'CI_CHECK_PASS' : 'CI_CHECK_FAIL'}
-            </span>
-          {/if}
-        </div>
-      {/if}
+      {@render prStatusBadges()}
     </div>
   {:else if !ticket}
     <div
@@ -224,55 +206,7 @@
             {doneCount} / {totalCount}
           </span>
 
-          <!-- PR Badge -->
-          {#if activePR?.status}
-            <div
-              class="flex items-center gap-1 rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-[10px]"
-              data-testid="pr-badge"
-            >
-              {#if activePR.prNumber}
-                <span class="text-slate-400 font-semibold mr-0.5"
-                  >#{activePR.prNumber}</span
-                >
-              {/if}
-              <span
-                class={activePR.status === 'draft'
-                  ? 'text-amber-400 font-bold'
-                  : 'text-slate-500'}>Draft</span
-              >
-              <span class="text-slate-600">→</span>
-              <span
-                class={activePR.status === 'ready' ||
-                activePR.status === 'reviewing'
-                  ? activePR.status === 'reviewing'
-                    ? 'text-indigo-400 font-bold'
-                    : 'text-blue-400 font-bold'
-                  : 'text-slate-500'}
-              >
-                {activePR.status === 'reviewing' ? 'Review' : 'Ready'}
-              </span>
-              <span class="text-slate-600">→</span>
-              <span
-                class={activePR.status === 'merged'
-                  ? 'text-purple-400 font-bold'
-                  : 'text-slate-500'}>Merged</span
-              >
-            </div>
-          {/if}
-
-          <!-- CI Status -->
-          {#if activePR?.ci}
-            <span
-              class="rounded px-1.5 py-0.5 text-[10px] font-bold border {activePR.ci ===
-              'pass'
-                ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                : 'bg-rose-950 text-rose-400 border-rose-800'}"
-              data-testid="ci-badge"
-              data-ci={activePR.ci}
-            >
-              {activePR.ci === 'pass' ? 'CI_CHECK_PASS' : 'CI_CHECK_FAIL'}
-            </span>
-          {/if}
+          {@render prStatusBadges()}
         </div>
       </div>
 
@@ -306,7 +240,13 @@
                     : 'text-slate-200'}"
                   title={item.text}
                 >
-                  {item.text}
+                  {#each item.text.split('`') as part, j (j)}
+                    {#if j % 2}
+                      <code>{part}</code>
+                    {:else}
+                      {part}
+                    {/if}
+                  {/each}
                 </span>
               </div>
             {/each}

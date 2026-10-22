@@ -100,6 +100,27 @@ describe('GET /api/ticket', () => {
     expect(data.error).toBe('Ticket #999999 not found');
   });
 
+  it('returns 404 when ticketId is invalid (e.g. URL or flag)', async () => {
+    dispatch(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-invalid-url',
+        ticketId: 'https://github.com/cli/cli/issues/1',
+        cwd: '/worktree/path',
+      }),
+    );
+
+    vi.mocked(ticketModule.fetchTicket).mockRejectedValue(
+      new ticketModule.TicketNotFoundError('Invalid ticket ID'),
+    );
+
+    const res = await GET(createRequest('/api/ticket?runId=run-invalid-url'));
+    expect(res.status).toBe(404);
+    const data = (await res.json()) as { error: string };
+    expect(data.error).toBe('Invalid ticket ID');
+  });
+
   it('returns 503 with understandable message when gh is missing or fails', async () => {
     dispatch(
       parseEvent({

@@ -1,4 +1,27 @@
-import type { Run } from '../../server/state';
+import type { Run, HQEvent } from '../../server/state';
+
+export const RELOAD_EVENTS = new Set([
+  'TASK_HANDOVER',
+  'REVIEW_START',
+  'PR_READY',
+  'MERGED',
+]);
+
+export function hasReloadEvent(
+  feed: readonly HQEvent[],
+  lastSeen?: HQEvent,
+): boolean {
+  for (let i = feed.length - 1; i >= 0; i--) {
+    const ev = feed[i];
+    if (ev === lastSeen) {
+      break;
+    }
+    if (RELOAD_EVENTS.has(ev.event)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function getCurrentRun(runs: Record<string, Run>): Run | undefined {
   const list = Object.values(runs);
