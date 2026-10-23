@@ -736,6 +736,25 @@ describe('office/sprites', () => {
         .map((c) => c.runId);
       expect(agyRuns).toEqual(['r-handover', 'r-running', 'r-cooldown']);
     });
+
+    it('does not derive character for run with status stale', () => {
+      const state = {
+        runs: {
+          'run-stale-status': {
+            runId: 'run-stale-status',
+            agent: 'claude' as const,
+            status: 'stale' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+        },
+      };
+      const chars = deriveCharacters(state);
+      const claudeChars = chars.filter((c) => c.agent === 'claude');
+      expect(claudeChars).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+      ]);
+    });
   });
 
   describe('Multi-instance positioning and non-overlapping in rooms', () => {

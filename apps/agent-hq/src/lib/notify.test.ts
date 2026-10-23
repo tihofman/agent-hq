@@ -104,6 +104,7 @@ describe('notify logic (lib/notify.ts)', () => {
         'TASK_PROGRESS',
         'TASK_COMPLETE',
         'TASK_ABORTED',
+        'RUN_STALE',
         'TASK_HANDOVER',
         'DRAFT_PR_CREATED',
         'REVIEW_START',

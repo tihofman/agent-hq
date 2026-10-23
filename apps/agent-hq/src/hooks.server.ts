@@ -1,8 +1,11 @@
 import type { ServerInit } from '@sveltejs/kit/hooks';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sweepStaleRuns } from './lib/server/history';
 import { dispatch, getState } from './lib/server/store';
 import { startTail } from './lib/server/tail';
+
+export { sweepStaleRuns };
 
 export const GLOBAL_TAILER_KEY = '__agent_hq_tailer__';
 
@@ -14,7 +17,11 @@ export function getLogDir(): string {
   return process.env['AGENT_HQ_LOG_DIR'] || join(tmpdir(), 'agent-hq');
 }
 
-export function startServerTail(options?: { dir?: string }): () => void {
+export function startServerTail(options?: {
+  dir?: string;
+  isAlive?: (pid: number) => boolean;
+  now?: () => number;
+}): () => void {
   const globalRef = globalThis as TailerGlobal;
   globalRef[GLOBAL_TAILER_KEY]?.();
 
@@ -45,8 +52,17 @@ export function startServerTail(options?: { dir?: string }): () => void {
   }, 5_000);
   timer.unref();
 
+  const staleTimer = setInterval(() => {
+    void sweepStaleRuns({
+      isAlive: options?.isAlive,
+      now: options?.now?.(),
+    });
+  }, 30_000);
+  staleTimer.unref();
+
   const stop = () => {
     clearInterval(timer);
+    clearInterval(staleTimer);
     stopTail();
     if (globalRef[GLOBAL_TAILER_KEY] === stop) {
       delete globalRef[GLOBAL_TAILER_KEY];

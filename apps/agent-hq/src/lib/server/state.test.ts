@@ -25,6 +25,7 @@ describe('parseEvent', () => {
     ['TASK_COMPLETE', 'dev'],
     ['TASK_FAILED', 'dev'],
     ['TASK_ABORTED', 'lounge'],
+    ['RUN_STALE', 'lounge'],
     ['DRAFT_PR_CREATED', 'qa'],
     ['REVIEW_START', 'qa'],
     ['PR_READY', 'qa'],
@@ -240,6 +241,24 @@ describe('reduce', () => {
     const result = apply(state, 'TASK_FAILED');
     expect(result.agents.codex).toEqual(state.agents.codex);
     expect(result.runs['run-1'].status).toBe('failed');
+  });
+  it('marks run as stale on RUN_STALE and moves agent to idle in lounge only if it is the current run', () => {
+    const active = apply(coding(), 'RATE_LIMITED', {
+      data: { cooldownUntil: '2026-10-22T17:00:00.000Z' },
+    });
+    const stale = apply(active, 'RUN_STALE');
+    expect(stale.runs['run-1'].status).toBe('stale');
+    expect(stale.agents.codex).toEqual({
+      status: 'idle',
+      room: 'lounge',
+      runId: 'run-1',
+    });
+
+    const movedOn = apply(coding(), 'TASK_START', { runId: 'run-2' });
+    const oldStale = apply(movedOn, 'RUN_STALE');
+    expect(oldStale.runs['run-1'].status).toBe('stale');
+    expect(oldStale.runs['run-2'].status).toBe('running');
+    expect(oldStale.agents.codex).toEqual(movedOn.agents.codex);
   });
   it('merges run metadata without mutating prior snapshots', () => {
     const start = apply(initialState, 'TASK_START', {

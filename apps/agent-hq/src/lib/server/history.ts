@@ -8,6 +8,8 @@ import {
   type HQEvent,
   type Run,
 } from './state';
+import { dispatch, getState } from './store';
+import { isRunStale, type RunStaleOptions } from '../runs';
 
 export interface HistoryRun extends Run {
   startedAt: string;
@@ -84,7 +86,53 @@ export async function readHistory(): Promise<HQEvent[]> {
   return events;
 }
 
-export async function readRecentRuns(limit = 20): Promise<HistoryRun[]> {
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+      return false;
+    }
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+let writeQueue: Promise<void> = Promise.resolve();
+
+export function recordEvent(event: HQEvent): Promise<void> {
+  dispatch(event);
+  writeQueue = writeQueue.then(() => appendHistory(event));
+  return writeQueue;
+}
+
+export async function sweepStaleRuns(options?: RunStaleOptions): Promise<void> {
+  const isAlive = options?.isAlive ?? isProcessAlive;
+  const nowClock =
+    options?.now !== undefined
+      ? () => new Date(options.now!).toISOString()
+      : undefined;
+  const writes: Promise<void>[] = [];
+  for (const run of Object.values(getState().runs)) {
+    if (isRunStale(run, { ...options, isAlive })) {
+      const event = parseEvent(
+        {
+          event: 'RUN_STALE',
+          agent: run.agent,
+          runId: run.runId,
+        },
+        nowClock,
+      );
+      writes.push(recordEvent(event));
+    }
+  }
+  await Promise.all(writes);
+}
+
+export async function readRecentRuns(
+  limit = 20,
+  options?: RunStaleOptions,
+): Promise<HistoryRun[]> {
   const events = await readHistory();
   const state = events.reduce((s, e) => reduce(s, e), initialState);
 
@@ -105,8 +153,15 @@ export async function readRecentRuns(limit = 20): Promise<HistoryRun[]> {
     const duration = Date.parse(run.timestamp) - Date.parse(startedAt);
     const durationMs = Number.isNaN(duration) ? 0 : Math.max(0, duration);
 
+    const isStale = isRunStale(run, {
+      ...options,
+      isAlive: options?.isAlive ?? isProcessAlive,
+    });
+    const status = isStale ? 'stale' : run.status;
+
     return {
       ...run,
+      status,
       startedAt,
       durationMs,
       events: runEvents,

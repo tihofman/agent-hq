@@ -6,6 +6,7 @@ import {
   appendHistory,
   getHistoryDir,
   getHistoryPath,
+  isProcessAlive,
   readHistory,
   readRecentRuns,
 } from './history';
@@ -361,6 +362,82 @@ describe('history', () => {
 
       const zeroRuns = await readRecentRuns(0);
       expect(zeroRuns).toEqual([]);
+    });
+
+    it('marks active run with dead PID as stale without modifying history.jsonl', async () => {
+      const event = parseEvent({
+        event: 'TASK_START',
+        agent: 'codex',
+        runId: 'run-dead-pid',
+        pid: 12345,
+        timestamp: '2026-10-23T10:00:00.000Z',
+      });
+      await appendHistory(event);
+
+      const runs = await readRecentRuns(20, { isAlive: () => false });
+      expect(runs).toHaveLength(1);
+      expect(runs[0].runId).toBe('run-dead-pid');
+      expect(runs[0].status).toBe('stale');
+
+      const afterEvents = await readHistory();
+      expect(afterEvents).toHaveLength(1);
+      expect(afterEvents[0].event).toBe('TASK_START');
+    });
+
+    it('evaluates staleness by threshold when no PID and keeps living PID active', async () => {
+      const now = Date.parse('2026-10-23T12:00:00.000Z');
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_HANDOVER',
+          agent: 'agy',
+          runId: 'run-old-handover',
+          timestamp: new Date(now - 20 * 60 * 1000).toISOString(),
+        }),
+      );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_HANDOVER',
+          agent: 'agy',
+          runId: 'run-fresh-handover',
+          timestamp: new Date(now - 5 * 60 * 1000).toISOString(),
+        }),
+      );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'claude',
+          runId: 'run-alive-long',
+          pid: 54321,
+          timestamp: new Date(now - 60 * 60 * 1000).toISOString(),
+        }),
+      );
+
+      const runs = await readRecentRuns(20, { now, isAlive: () => true });
+      const byId = Object.fromEntries(runs.map((r) => [r.runId, r.status]));
+      expect(byId).toEqual({
+        'run-old-handover': 'stale',
+        'run-fresh-handover': 'handover',
+        'run-alive-long': 'running',
+      });
+    });
+  });
+
+  describe('isProcessAlive', () => {
+    it('returns true for current process.pid and EPERM, false for ESRCH', () => {
+      expect(isProcessAlive(process.pid)).toBe(true);
+      const spy = vi.spyOn(process, 'kill').mockImplementationOnce(() => {
+        const err = new Error('no such process') as NodeJS.ErrnoException;
+        err.code = 'ESRCH';
+        throw err;
+      });
+      expect(isProcessAlive(1234)).toBe(false);
+      spy.mockImplementationOnce(() => {
+        const err = new Error('not permitted') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      });
+      expect(isProcessAlive(1234)).toBe(true);
+      spy.mockRestore();
     });
   });
 });

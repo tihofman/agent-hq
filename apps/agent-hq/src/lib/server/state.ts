@@ -8,6 +8,7 @@ const eventRooms = {
   TASK_COMPLETE: 'dev',
   TASK_FAILED: 'dev',
   TASK_ABORTED: 'lounge',
+  RUN_STALE: 'lounge',
   DRAFT_PR_CREATED: 'qa',
   REVIEW_START: 'qa',
   PR_READY: 'qa',
@@ -167,7 +168,13 @@ export interface AgentState {
   cooldownUntil?: string;
 }
 export type RunStatus =
-  'handover' | 'running' | 'complete' | 'failed' | 'aborted' | 'cooldown';
+  | 'handover'
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'aborted'
+  | 'cooldown'
+  | 'stale';
 export interface Run {
   runId: string;
   agent: Agent;
@@ -265,6 +272,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     TASK_COMPLETE: 'idle',
     TASK_FAILED: 'errorAlert',
     TASK_ABORTED: 'idle',
+    RUN_STALE: 'idle',
     DRAFT_PR_CREATED: 'reviewing',
     REVIEW_START: 'reviewing',
     PR_READY: 'idle',
@@ -278,6 +286,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     TASK_COMPLETE: 'complete',
     TASK_FAILED: 'failed',
     TASK_ABORTED: 'aborted',
+    RUN_STALE: 'stale',
     RATE_LIMITED: 'cooldown',
   };
   // Progress after an elapsed (or open-ended) cooldown means the run resumed.
@@ -315,7 +324,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
   // Late completion of another run must not move an agent off its current task.
   if (
     !event.runId ||
-    !current.runId ||
+    (!current.runId && event.event !== 'RUN_STALE') ||
     current.runId === event.runId ||
     event.event === 'TASK_START' ||
     event.event === 'TASK_HANDOVER'

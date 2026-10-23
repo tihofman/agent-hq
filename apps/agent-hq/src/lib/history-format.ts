@@ -70,6 +70,8 @@ export function formatStatusLabel(
       return `Cooldown${codeSuffix}`;
     case 'idle':
       return `Bereit${codeSuffix}`;
+    case 'stale':
+      return `Verwaist${codeSuffix}`;
     default:
       return `${status}${codeSuffix}`;
   }
@@ -141,6 +143,8 @@ export function getStatusBadgeClass(status: string): string {
       return 'bg-blue-950/80 text-blue-300 border-blue-700/60';
     case 'handover':
       return 'bg-purple-950/80 text-purple-300 border-purple-700/60';
+    case 'stale':
+      return 'bg-amber-950/80 text-amber-300 border-amber-700/60';
     default:
       return 'bg-slate-800 text-slate-300 border-slate-700';
   }
