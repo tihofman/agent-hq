@@ -26,6 +26,7 @@ if [ "${FAKE_WAIT:-0}" = 1 ]; then
   trap 'echo terminated > "$WORKER_PID_FILE.term"; exit 143' TERM
   while :; do sleep 0.05; done
 fi
+[ -z "${FAKE_LAST_LINE:-}" ] || echo "$FAKE_LAST_LINE"
 exit "${FAKE_EXIT:-0}"
 WORKER
 chmod +x "$TEST_DIR/bin/agy"
@@ -36,7 +37,12 @@ const server = http.createServer((req, res) => {
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
-    fs.appendFileSync(process.argv[3], JSON.stringify({url:req.url, time:Date.now(), body:JSON.parse(body)}) + '\n');
+    const parsed = JSON.parse(body);
+    let logContent = null;
+    if (parsed.data && parsed.data.logFile && fs.existsSync(parsed.data.logFile)) {
+      logContent = fs.readFileSync(parsed.data.logFile, 'utf8');
+    }
+    fs.appendFileSync(process.argv[3], JSON.stringify({url:req.url, time:Date.now(), body:parsed, logContent}) + '\n');
     if (process.argv[2] !== 'hang') res.end('ok');
   });
 });
@@ -107,6 +113,18 @@ run_delegate
 check_events TASK_FAILED 23
 [ "$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")" != "$LOG" ] || fail 'unique run log'
 pass 'failure event and exit-code propagation'
+
+for mode in COMPLETE FAILED; do
+  if [ "$mode" = COMPLETE ]; then export FAKE_EXIT=0; else export FAKE_EXIT=42; fi
+  export FAKE_LAST_LINE="last worker output before $mode"
+  run_delegate
+  EVENT="TASK_$mode"
+  grep -q 'not a child' "$TEST_DIR/stdout" && fail 'stderr contains "not a child"'
+  LAST_LOG="$(jq -sr --arg ev "$EVENT" 'map(select(.body.event == $ev))[-1].logContent // ""' "$TEST_DIR/events")"
+  echo "$LAST_LOG" | grep -q "last worker output before $mode" || fail "log missing last output before $EVENT"
+done
+unset FAKE_LAST_LINE
+pass 'log contains last worker output before TASK_COMPLETE/TASK_FAILED and no "not a child" on stderr'
 
 : > "$TEST_DIR/events"
 rm -f "$WORKER_PID_FILE"
