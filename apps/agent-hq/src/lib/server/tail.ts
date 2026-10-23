@@ -108,7 +108,11 @@ export function startTail(options: {
         );
         if (stopped) break;
         const plain = stripVTControlCharacters(line);
-        const limit = detectRateLimit(plain, new Date());
+        const now = new Date();
+        const limit = detectRateLimit(plain, now);
+        const until = run.rateLimited?.cooldownUntil;
+        if (!limit && (!until || now >= new Date(until)))
+          run.rateLimited = undefined;
         if (
           limit &&
           (!run.rateLimited ||

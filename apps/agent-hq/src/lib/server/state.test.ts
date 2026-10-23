@@ -180,6 +180,32 @@ describe('reduce', () => {
         .agents.codex,
     ).toMatchObject({ status: 'idle', room: 'lounge' });
   });
+  it('ends an elapsed cooldown on progress of the same run', () => {
+    const limited = apply(coding(), 'RATE_LIMITED', {
+      data: { cooldownUntil: '2026-10-22T17:00:00.000Z' },
+    });
+    const early = apply(limited, 'TASK_PROGRESS');
+    expect(early.agents.codex.status).toBe('cooldown');
+    expect(early.runs['run-1'].status).toBe('cooldown');
+    const late = { timestamp: '2026-10-22T17:00:01.000Z' };
+    const resumed = apply(limited, 'TASK_PROGRESS', late);
+    expect(resumed.agents.codex).toMatchObject({
+      status: 'coding',
+      room: 'dev',
+    });
+    expect(resumed.agents.codex.cooldownUntil).toBeUndefined();
+    expect(resumed.runs['run-1'].status).toBe('running');
+    const expired = reduce(limited, { type: 'TICK', ...late });
+    expect(apply(expired, 'TASK_PROGRESS', late).agents.codex.status).toBe(
+      'coding',
+    );
+  });
+  it('ends an open-ended cooldown on progress', () => {
+    const limited = apply(coding(), 'RATE_LIMITED');
+    const resumed = apply(limited, 'TASK_PROGRESS');
+    expect(resumed.agents.codex.status).toBe('coding');
+    expect(resumed.runs['run-1'].status).toBe('running');
+  });
   it('keeps aborted runs and agents intact after a late failure', () => {
     const aborted = apply(coding(), 'TASK_ABORTED');
     expect(aborted.agents.codex.status).toBe('idle');
