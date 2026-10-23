@@ -129,6 +129,18 @@ else
   fail "Missing both HQ_ISSUE_ID and HQ_TEAM -> Exit 1 without request" "code=$CODE count=$REQ_COUNT"
 fi
 
+for invalid_id in "0" "-1" "abc"; do
+  : > "$REQUESTS_FILE"
+  OUT=$( (export HQ_TEAM="frontend" HQ_ISSUE_ID="$invalid_id"; "$ASK_SCRIPT" "Eine Frage") 2>&1 )
+  CODE=$?
+  REQ_COUNT=$(wc -l < "$REQUESTS_FILE" | tr -d ' ')
+  if [ "$CODE" -ne 0 ] && [ "$REQ_COUNT" -eq 0 ] && [[ "$OUT" =~ positive[[:space:]]+Ganzzahl ]]; then
+    pass "Invalid HQ_ISSUE_ID='$invalid_id' -> Exit 1 with error and no request"
+  else
+    fail "Invalid HQ_ISSUE_ID='$invalid_id' -> Exit 1 with error and no request" "code=$CODE count=$REQ_COUNT out=$OUT"
+  fi
+done
+
 # ---------------------------------------------------------------------------
 # 2. Argument validation -> Exit 1 without sending request
 # ---------------------------------------------------------------------------
@@ -182,6 +194,7 @@ if [ "$CODE" -eq 0 ] && \
    [ "$METHOD" = "POST" ] && \
    [ "$URL" = "/api/questions" ] && \
    [ "$(jq -r '.issueId' <<<"$BODY")" = "105" ] && \
+   [ "$(jq -r '.issueId | type' <<<"$BODY")" = "number" ] && \
    [ "$(jq -r '.team' <<<"$BODY")" = "frontend" ] && \
    [ "$(jq -r '.question' <<<"$BODY")" = "Soll SvelteKit 2 verwendet werden?" ] && \
    [ "$(jq 'has("options")' <<<"$BODY")" = "false" ]; then
@@ -191,11 +204,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Successful request with multiple options (testing --option, -o, --option=)
+# 4. Successful request with multiple options (testing --option)
 # ---------------------------------------------------------------------------
 : > "$REQUESTS_FILE"
 rm -f "$CONTROL_FILE"
-OUT=$(HQ_ISSUE_ID="105" HQ_TEAM="backend" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Welche Datenbank?" --option "PostgreSQL" -o "SQLite" --option="MySQL")
+OUT=$(HQ_ISSUE_ID="105" HQ_TEAM="backend" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Welche Datenbank?" --option "PostgreSQL" --option "SQLite" --option "MySQL")
 CODE=$?
 LAST_LINE=$(tail -n1 <<<"$OUT")
 BODY=$(tail -n1 "$REQUESTS_FILE" | jq -r '.body')
@@ -203,6 +216,7 @@ BODY=$(tail -n1 "$REQUESTS_FILE" | jq -r '.body')
 if [ "$CODE" -eq 0 ] && \
    [ "$LAST_LINE" = "$EXPECTED_OUTPUT" ] && \
    [ "$(jq -r '.team' <<<"$BODY")" = "backend" ] && \
+   [ "$(jq -r '.issueId | type' <<<"$BODY")" = "number" ] && \
    [ "$(jq -r '.options | length' <<<"$BODY")" = "3" ] && \
    [ "$(jq -r '.options[0]' <<<"$BODY")" = "PostgreSQL" ] && \
    [ "$(jq -r '.options[1]' <<<"$BODY")" = "SQLite" ] && \
@@ -210,6 +224,29 @@ if [ "$CODE" -eq 0 ] && \
   pass "Question with multiple options -> correct options array in JSON"
 else
   fail "Question with multiple options -> correct options array in JSON" "code=$CODE out='$LAST_LINE' body='$BODY'"
+fi
+
+# ---------------------------------------------------------------------------
+# 4b. YAGNI: -o and --option= are not supported -> Exit 1
+# ---------------------------------------------------------------------------
+: > "$REQUESTS_FILE"
+OUT=$(HQ_ISSUE_ID="105" HQ_TEAM="frontend" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Frage" -o "Wert" 2>&1)
+CODE=$?
+REQ_COUNT=$(wc -l < "$REQUESTS_FILE" | tr -d ' ')
+if [ "$CODE" -ne 0 ] && [ "$REQ_COUNT" -eq 0 ] && [[ "$OUT" =~ Unerwartetes[[:space:]]+Argument ]]; then
+  pass "Unsupported -o option -> Exit 1 without request"
+else
+  fail "Unsupported -o option -> Exit 1 without request" "code=$CODE count=$REQ_COUNT out='$OUT'"
+fi
+
+: > "$REQUESTS_FILE"
+OUT=$(HQ_ISSUE_ID="105" HQ_TEAM="frontend" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Frage" --option="Wert" 2>&1)
+CODE=$?
+REQ_COUNT=$(wc -l < "$REQUESTS_FILE" | tr -d ' ')
+if [ "$CODE" -ne 0 ] && [ "$REQ_COUNT" -eq 0 ] && [[ "$OUT" =~ Unerwartetes[[:space:]]+Argument ]]; then
+  pass "Unsupported --option= option -> Exit 1 without request"
+else
+  fail "Unsupported --option= option -> Exit 1 without request" "code=$CODE count=$REQ_COUNT out='$OUT'"
 fi
 
 # ---------------------------------------------------------------------------
@@ -285,7 +322,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "hang" > "$CONTROL_FILE"
 START_TIME=$(node -e 'console.log(Date.now())')
-OUT=$(HQ_ISSUE_ID="105" HQ_TEAM="frontend" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Hanging Frage" 2>&1)
+OUT=$(HQ_ISSUE_ID="105" HQ_TEAM="frontend" HQ_CONNECT_TIMEOUT="0.1" HQ_MAX_TIME="0.5" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Hanging Frage" 2>&1)
 CODE=$?
 END_TIME=$(node -e 'console.log(Date.now())')
 ELAPSED=$(( END_TIME - START_TIME ))
@@ -297,29 +334,60 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Default AGENT_HQ_URL uses port 3333 (tested via fake curl wrapper)
+# 9. Default AGENT_HQ_URL and timeouts (tested via fake curl wrapper)
 # ---------------------------------------------------------------------------
 FAKE_CURL_DIR="$TEST_DIR/fake_curl"
 mkdir -p "$FAKE_CURL_DIR"
 cat > "$FAKE_CURL_DIR/curl" << 'EOF'
 #!/usr/bin/env bash
-for arg in "$@"; do
-  if [[ "$arg" =~ ^http:// ]]; then
-    echo "$arg" > "$(dirname "$0")/curl_url.txt"
-  fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --connect-timeout)
+      echo "$2" > "$(dirname "$0")/curl_connect_timeout.txt"
+      shift 2
+      ;;
+    --max-time)
+      echo "$2" > "$(dirname "$0")/curl_max_time.txt"
+      shift 2
+      ;;
+    http://*)
+      echo "$1" > "$(dirname "$0")/curl_url.txt"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
 done
 printf '{"ok":true}\n200\n'
 exit 0
 EOF
 chmod +x "$FAKE_CURL_DIR/curl"
 
-OUT=$( (unset AGENT_HQ_URL; PATH="$FAKE_CURL_DIR:$PATH" HQ_ISSUE_ID="105" HQ_TEAM="frontend" "$ASK_SCRIPT" "Default Port Frage") 2>&1 )
+OUT=$( (unset AGENT_HQ_URL HQ_CONNECT_TIMEOUT HQ_MAX_TIME; PATH="$FAKE_CURL_DIR:$PATH" HQ_ISSUE_ID="105" HQ_TEAM="frontend" "$ASK_SCRIPT" "Default Port Frage") 2>&1 )
 CODE=$?
 CAPTURED_URL="$(cat "$FAKE_CURL_DIR/curl_url.txt" 2>/dev/null || echo '')"
-if [ "$CODE" -eq 0 ] && [ "$CAPTURED_URL" = "http://127.0.0.1:3333/api/questions" ]; then
-  pass "Default AGENT_HQ_URL targets http://127.0.0.1:3333/api/questions"
+CAPTURED_CONNECT_TO="$(cat "$FAKE_CURL_DIR/curl_connect_timeout.txt" 2>/dev/null || echo '')"
+CAPTURED_MAX_TIME="$(cat "$FAKE_CURL_DIR/curl_max_time.txt" 2>/dev/null || echo '')"
+if [ "$CODE" -eq 0 ] && \
+   [ "$CAPTURED_URL" = "http://127.0.0.1:3333/api/questions" ] && \
+   [ "$CAPTURED_CONNECT_TO" = "2" ] && \
+   [ "$CAPTURED_MAX_TIME" = "10" ]; then
+  pass "Default AGENT_HQ_URL targets http://127.0.0.1:3333 and defaults to --connect-timeout 2 --max-time 10"
 else
-  fail "Default AGENT_HQ_URL targets http://127.0.0.1:3333/api/questions" "code=$CODE url='$CAPTURED_URL' out='$OUT'"
+  fail "Default AGENT_HQ_URL and timeouts" "code=$CODE url='$CAPTURED_URL' connect_to='$CAPTURED_CONNECT_TO' max_time='$CAPTURED_MAX_TIME' out='$OUT'"
+fi
+
+OUT=$( (PATH="$FAKE_CURL_DIR:$PATH" HQ_CONNECT_TIMEOUT="3" HQ_MAX_TIME="15" HQ_ISSUE_ID="105" HQ_TEAM="frontend" "$ASK_SCRIPT" "Override Timeout Frage") 2>&1 )
+CODE=$?
+CAPTURED_CONNECT_TO="$(cat "$FAKE_CURL_DIR/curl_connect_timeout.txt" 2>/dev/null || echo '')"
+CAPTURED_MAX_TIME="$(cat "$FAKE_CURL_DIR/curl_max_time.txt" 2>/dev/null || echo '')"
+if [ "$CODE" -eq 0 ] && \
+   [ "$CAPTURED_CONNECT_TO" = "3" ] && \
+   [ "$CAPTURED_MAX_TIME" = "15" ]; then
+  pass "HQ_CONNECT_TIMEOUT and HQ_MAX_TIME override curl timeouts"
+else
+  fail "HQ_CONNECT_TIMEOUT and HQ_MAX_TIME override curl timeouts" "code=$CODE connect_to='$CAPTURED_CONNECT_TO' max_time='$CAPTURED_MAX_TIME' out='$OUT'"
 fi
 
 # ---------------------------------------------------------------------------

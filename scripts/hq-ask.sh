@@ -16,6 +16,11 @@ if [ -z "${HQ_ISSUE_ID:-}" ] || [ -z "${HQ_TEAM:-}" ]; then
   exit 1
 fi
 
+if ! [[ "$HQ_ISSUE_ID" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Fehler: HQ_ISSUE_ID muss eine positive Ganzzahl sein (aktuell: '$HQ_ISSUE_ID')." >&2
+  exit 1
+fi
+
 QUESTION=""
 OPTIONS=()
 
@@ -24,18 +29,6 @@ while [ "$#" -gt 0 ]; do
     --option)
       if [ "$#" -lt 2 ]; then
         echo "Fehler: --option erfordert einen Wert." >&2
-        exit 1
-      fi
-      OPTIONS+=("$2")
-      shift 2
-      ;;
-    --option=*)
-      OPTIONS+=("${1#*=}")
-      shift
-      ;;
-    -o)
-      if [ "$#" -lt 2 ]; then
-        echo "Fehler: -o erfordert einen Wert." >&2
         exit 1
       fi
       OPTIONS+=("$2")
@@ -62,29 +55,17 @@ if [ -z "$QUESTION" ]; then
   exit 1
 fi
 
-if [ "${#OPTIONS[@]}" -gt 0 ]; then
-  PAYLOAD="$(jq -nc \
-    --arg issueId "$HQ_ISSUE_ID" \
-    --arg team "$HQ_TEAM" \
-    --arg question "$QUESTION" \
-    '--args' \
-    '{
-      issueId: ($issueId | if test("^[0-9]+$") then tonumber else . end),
-      team: $team,
-      question: $question,
-      options: $ARGS.positional
-    }' -- "${OPTIONS[@]}")"
-else
-  PAYLOAD="$(jq -nc \
-    --arg issueId "$HQ_ISSUE_ID" \
-    --arg team "$HQ_TEAM" \
-    --arg question "$QUESTION" \
-    '{
-      issueId: ($issueId | if test("^[0-9]+$") then tonumber else . end),
-      team: $team,
-      question: $question
-    }')"
-fi
+PAYLOAD="$(jq -nc \
+  --argjson issueId "$HQ_ISSUE_ID" \
+  --arg team "$HQ_TEAM" \
+  --arg question "$QUESTION" \
+  --args \
+  '{
+    issueId: $issueId,
+    team: $team,
+    question: $question
+  } + (if ($ARGS.positional | length) > 0 then {options: $ARGS.positional} else {} end)' \
+  -- ${OPTIONS[@]+"${OPTIONS[@]}"})"
 
 if [ -z "$PAYLOAD" ]; then
   echo "Fehler: Konnte JSON-Payload nicht erstellen." >&2
@@ -94,8 +75,8 @@ fi
 HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"
 HQ="${HQ%/}"
 
-RESPONSE="$(curl --connect-timeout "${HQ_CONNECT_TIMEOUT:-0.1}" \
-  --max-time "${HQ_MAX_TIME:-0.5}" \
+RESPONSE="$(curl --connect-timeout "${HQ_CONNECT_TIMEOUT:-2}" \
+  --max-time "${HQ_MAX_TIME:-10}" \
   -s \
   -w "\n%{http_code}" \
   -X POST "$HQ/api/questions" \
