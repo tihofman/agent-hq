@@ -311,3 +311,11 @@ export function getFilterClass(filter: FeedFilter, active: boolean): string {
   }
   return 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700';
 }
+
+export {
+  filterCharacterLog,
+  filterRunLogChunks,
+  filterAgentFeed,
+  getLogFileFallback,
+  formatCharacterAriaLabel,
+} from './office/log-filter';

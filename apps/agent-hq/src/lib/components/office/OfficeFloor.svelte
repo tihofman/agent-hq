@@ -1,6 +1,8 @@
 <script lang="ts">
   import Room from './Room.svelte';
   import CharacterSprite from './CharacterSprite.svelte';
+  import CharacterLogModal from './CharacterLogModal.svelte';
+  import type { Agent } from '../../server/state';
   import {
     ROOMS,
     GRID_WIDTH,
@@ -28,6 +30,23 @@
     showRoomLabels = true,
     showWaypoints = false,
   }: Props = $props();
+
+  let selectedTarget = $state<{
+    agent: Agent;
+    runId?: string;
+    triggerEl?: HTMLElement | null;
+  } | null>(null);
+
+  function handleCharacterClick(
+    char: { agent: Agent; runId?: string },
+    event: MouseEvent | KeyboardEvent,
+  ) {
+    selectedTarget = {
+      agent: char.agent,
+      runId: char.runId,
+      triggerEl: (event.currentTarget as HTMLElement) ?? null,
+    };
+  }
 
   const characters = $derived(deriveCharacters(liveStore.state));
 
@@ -124,6 +143,7 @@
         agent={char.agent}
         runId={char.runId}
         instanceIndex={char.instanceIndex}
+        onclick={(event) => handleCharacterClick(char, event)}
       />
     {/each}
 
@@ -143,6 +163,15 @@
       </div>
     {/if}
   </div>
+
+  {#if selectedTarget}
+    <CharacterLogModal
+      agent={selectedTarget.agent}
+      runId={selectedTarget.runId}
+      triggerEl={selectedTarget.triggerEl}
+      onclose={() => (selectedTarget = null)}
+    />
+  {/if}
 </div>
 
 <style>
