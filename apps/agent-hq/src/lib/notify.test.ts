@@ -110,6 +110,7 @@ describe('notify logic (lib/notify.ts)', () => {
         'CI_CHECK_PASS',
         'CI_CHECK_FAIL',
         'MERGED',
+        'PR_CLOSED',
         'RATE_LIMITED',
       ];
 

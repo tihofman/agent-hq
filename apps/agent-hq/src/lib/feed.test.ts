@@ -63,6 +63,7 @@ describe('feed logic (lib/feed.ts)', () => {
       expect(isGitEvent('CI_CHECK_PASS')).toBe(true);
       expect(isGitEvent('CI_CHECK_FAIL')).toBe(true);
       expect(isGitEvent('MERGED')).toBe(true);
+      expect(isGitEvent('PR_CLOSED')).toBe(true);
     });
 
     it('returns false for other events', () => {
@@ -426,6 +427,26 @@ describe('feed logic (lib/feed.ts)', () => {
           data: { prNumber: 42 },
         }),
       ).toBe('Draft PR #42 erstellt');
+
+      expect(
+        getFeedMessageText({
+          event: 'PR_CLOSED',
+          agent: 'claude',
+          room: 'lounge',
+          timestamp: '2026-10-22T20:00:00.000Z',
+          data: { prNumber: 74 },
+        }),
+      ).toBe('PR #74 geschlossen');
+
+      expect(
+        getFeedMessageText({
+          event: 'PR_CLOSED',
+          agent: 'claude',
+          room: 'lounge',
+          timestamp: '2026-10-22T20:00:00.000Z',
+          data: {},
+        }),
+      ).toBe('PR geschlossen');
 
       expect(
         getFeedMessageText({
