@@ -1,6 +1,8 @@
 import officeTilesData from '../assets/tilesets/office_tiles.json';
 
 export type RoomId = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
+import { TEAMS, type Team } from '@agent-hq/queue';
+export { TEAMS, type Team };
 
 export const ROOM_IDS: readonly RoomId[] = [
   'ceo',
@@ -82,6 +84,40 @@ export interface RoomDefinition {
   waypoints: Waypoint[];
   tiles: TileCell[];
 }
+
+export interface TeamDesk {
+  team: Team;
+  roomId: RoomId;
+  name: string;
+  waypointId: string;
+}
+
+export const TEAM_DESKS: Record<Team, TeamDesk> = {
+  frontend: {
+    team: 'frontend',
+    roomId: 'dev',
+    name: 'Frontend Team',
+    waypointId: 'dev_desk',
+  },
+  backend: {
+    team: 'backend',
+    roomId: 'dev',
+    name: 'Backend Team',
+    waypointId: 'dev_meeting',
+  },
+  qa: {
+    team: 'qa',
+    roomId: 'qa',
+    name: 'QA Team',
+    waypointId: 'qa_desk',
+  },
+};
+
+export const TEAM_LABELS: Record<Team, string> = {
+  frontend: 'Frontend Lead',
+  backend: 'Backend Lead',
+  qa: 'QA Lead',
+};
 
 export const WAYPOINTS: Record<string, Waypoint> = {
   // CEO Suite
@@ -380,13 +416,18 @@ const devTiles = buildRoomTiles(12, 7, tile('floor_carpet_dev'), {
   '3,2': { object: tile('desk_tech_monitors') },
   '4,2': { object: tile('desk_laptop_coffee') },
   '5,2': { object: tile('workstation_pc_tower') },
-  '8,2': { object: tile('retro_crt_terminal') },
-  '9,2': { object: tile('filing_cabinet') },
+  '7,2': { object: tile('desk_tech_monitors') },
+  '8,2': { object: tile('desk_laptop_coffee') },
+  '9,2': { object: tile('workstation_pc_tower') },
+  '10,2': { object: tile('retro_crt_terminal') },
 
   '1,3': { object: tile('office_wastebin') },
   '2,3': { object: tile('chair_ergonomic_front') },
   '3,3': { object: tile('chair_ergonomic_front') },
   '4,3': { object: tile('chair_ergonomic_front') },
+  '8,3': { object: tile('chair_ergonomic_front') },
+  '9,3': { object: tile('chair_ergonomic_front') },
+  '10,3': { object: tile('filing_cabinet') },
 
   '7,4': { object: tile('meeting_table_tl') },
   '8,4': { object: tile('meeting_table_tr') },

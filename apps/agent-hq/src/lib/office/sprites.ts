@@ -1,14 +1,30 @@
-import { findWaypointPath, WAYPOINTS, TILE_SIZE, type RoomId } from './layout';
+import {
+  findWaypointPath,
+  WAYPOINTS,
+  TILE_SIZE,
+  TEAM_DESKS,
+  type RoomId,
+  type Team,
+} from './layout';
 import type {
   Agent,
   AgentStatus,
   Run,
   RunStatus,
   AgentState,
+  TeamState,
 } from '../server/state';
 import claudeMeta from '../assets/sprites/claude.json';
 import agyMeta from '../assets/sprites/agy.json';
 import codexMeta from '../assets/sprites/codex.json';
+
+export type CharacterStatus = AgentStatus | 'waiting_input';
+
+export const TEAM_LEADS: Record<Team, Agent> = {
+  frontend: 'agy',
+  backend: 'claude',
+  qa: 'codex',
+};
 
 export type Direction = 'down' | 'left' | 'right' | 'up';
 
@@ -104,10 +120,11 @@ const STATUS_ANIMATION: Partial<Record<AgentStatus, AnimationName>> = {
 };
 
 export function statusToAnimation(
-  status: AgentStatus,
+  status: CharacterStatus,
   direction: Direction = 'down',
 ): AnimationName {
   if (status === 'walking') return walkAnimationForDirection(direction);
+  if (status === 'waiting_input') return 'idle';
   return STATUS_ANIMATION[status] ?? 'idle';
 }
 
@@ -166,7 +183,7 @@ export function formatCooldown(remainingMs: number): string {
 }
 
 export function getSpeechBubble(
-  status: AgentStatus,
+  status: CharacterStatus,
   options?: {
     ticketId?: string;
     title?: string;
@@ -176,6 +193,14 @@ export function getSpeechBubble(
     now?: number;
   },
 ): SpeechBubble | null {
+  if (status === 'waiting_input') {
+    return {
+      type: 'alert',
+      text: '?',
+      icon: '❓',
+      tooltip: options?.statusText || 'Rückfrage wartet auf Antwort',
+    };
+  }
   if (status === 'testing') {
     return {
       type: 'testing',
@@ -402,6 +427,42 @@ export function getAgentSpot(
   };
 }
 
+const TEAM_WORKER_OFFSETS: Record<Team, readonly InstanceOffset[]> = {
+  frontend: [
+    { dx: -36, dy: 0 },
+    { dx: -72, dy: 0 },
+    { dx: 0, dy: 36 },
+  ],
+  backend: [
+    { dx: 36, dy: 0 },
+    { dx: -36, dy: 0 },
+    { dx: 0, dy: 36 },
+  ],
+  qa: [
+    { dx: -36, dy: 0 },
+    { dx: 36, dy: 0 },
+    { dx: 0, dy: 36 },
+  ],
+};
+
+export function getTeamSpot(
+  team: Team,
+  instanceIndex = 0,
+): { x: number; y: number; wpId: string } {
+  const desk = TEAM_DESKS[team];
+  const wp = WAYPOINTS[desk.waypointId] ?? WAYPOINTS['hall_center'];
+  const off =
+    instanceIndex > 0
+      ? TEAM_WORKER_OFFSETS[team]?.[instanceIndex - 1]
+      : undefined;
+
+  return {
+    x: wp.x * TILE_SIZE + (off?.dx ?? 0),
+    y: wp.y * TILE_SIZE + (off?.dy ?? 0),
+    wpId: desk.waypointId,
+  };
+}
+
 export function doSpotsOverlap(
   posA: { x: number; y: number },
   posB: { x: number; y: number },
@@ -415,6 +476,8 @@ export interface Character {
   agent: Agent;
   runId?: string;
   instanceIndex: number;
+  team?: Team;
+  isTeamLead?: boolean;
 }
 
 export type OfficeCharacter = Character;
@@ -429,6 +492,7 @@ export function deriveCharacters(
   state?: {
     runs?: Record<string, Run>;
     agents?: Record<Agent, AgentState>;
+    teams?: Record<Team, TeamState>;
   } | null,
 ): Character[] {
   const agents: Agent[] = ['claude', 'agy', 'codex'];
@@ -439,7 +503,7 @@ export function deriveCharacters(
   const runs = Object.values(state.runs ?? {});
   const activeSet = new Set<string>(ACTIVE_RUN_STATUSES);
 
-  return agents.flatMap((agent): Character[] => {
+  const baseCharacters = agents.flatMap((agent): Character[] => {
     const agentRuns = runs
       .filter((r) => r.agent === agent && activeSet.has(r.status))
       .sort(
@@ -459,6 +523,22 @@ export function deriveCharacters(
       instanceIndex: index,
     }));
   });
+
+  if (!state.teams) {
+    return baseCharacters;
+  }
+
+  const teamLeads: Character[] = (['frontend', 'backend', 'qa'] as const).map(
+    (team) => ({
+      id: `team-lead-${team}`,
+      agent: TEAM_LEADS[team],
+      team,
+      isTeamLead: true,
+      instanceIndex: 0,
+    }),
+  );
+
+  return [...baseCharacters, ...teamLeads];
 }
 
 export function getClosestWaypointId(pixelX: number, pixelY: number): string {
@@ -516,6 +596,8 @@ export type HandoverPhase =
 export class AgentController {
   agent: Agent;
   instanceIndex: number;
+  team?: Team;
+  isTeamLead: boolean;
   x: number;
   y: number;
   direction: Direction = 'down';
@@ -526,16 +608,32 @@ export class AgentController {
   private deferredRoom: RoomId | null = null;
   readonly walkSpeed = 96;
 
-  constructor(agent: Agent, initialRoom: RoomId = 'lounge', instanceIndex = 0) {
+  constructor(
+    agent: Agent,
+    initialRoom: RoomId = 'lounge',
+    instanceIndex = 0,
+    team?: Team,
+    isTeamLead = false,
+  ) {
     this.agent = agent;
     this.instanceIndex = instanceIndex;
+    this.team = team;
+    this.isTeamLead = isTeamLead;
     this.currentRoom = initialRoom;
-    const spot = getAgentSpot(agent, initialRoom, instanceIndex);
+    const spot = this.getSpot(initialRoom);
     this.x = spot.x;
     this.y = spot.y;
   }
 
+  getSpot(room: RoomId): { x: number; y: number; wpId: string } {
+    if (this.team && room === TEAM_DESKS[this.team].roomId) {
+      return getTeamSpot(this.team, this.instanceIndex);
+    }
+    return getAgentSpot(this.agent, room, this.instanceIndex);
+  }
+
   startHandover(): void {
+    if (this.isTeamLead) return;
     this.handoverPhase = 'walking_to_hall';
     this.meetingElapsedMs = 0;
     const hallSpot = getAgentSpot(this.agent, 'hall', this.instanceIndex);
@@ -543,6 +641,10 @@ export class AgentController {
   }
 
   setTargetRoom(room: RoomId): void {
+    if (this.isTeamLead) {
+      this.snapToRoom(room);
+      return;
+    }
     if (
       this.handoverPhase === 'walking_to_hall' ||
       this.handoverPhase === 'meeting'
@@ -550,7 +652,7 @@ export class AgentController {
       this.deferredRoom = room;
       return;
     }
-    const spot = getAgentSpot(this.agent, room, this.instanceIndex);
+    const spot = this.getSpot(room);
     if (
       room === this.currentRoom &&
       this.path.length === 0 &&
@@ -569,7 +671,7 @@ export class AgentController {
     this.deferredRoom = null;
     this.handoverPhase = 'idle';
     this.path = [];
-    const spot = getAgentSpot(this.agent, room, this.instanceIndex);
+    const spot = this.getSpot(room);
     this.x = spot.x;
     this.y = spot.y;
     this.direction = 'down';
@@ -595,7 +697,7 @@ export class AgentController {
 
   tick(
     dt: number,
-    stateStatus: AgentStatus,
+    stateStatus: CharacterStatus,
     stateRoom: RoomId,
   ): {
     x: number;
@@ -644,11 +746,7 @@ export class AgentController {
         const targetRoom = this.deferredRoom ?? stateRoom ?? this.currentRoom;
         this.deferredRoom = null;
         this.currentRoom = targetRoom;
-        const targetSpot = getAgentSpot(
-          this.agent,
-          targetRoom,
-          this.instanceIndex,
-        );
+        const targetSpot = this.getSpot(targetRoom);
         this.walkTo(targetSpot.x, targetSpot.y, targetSpot.wpId);
       }
     } else if (this.handoverPhase === 'walking_to_target') {

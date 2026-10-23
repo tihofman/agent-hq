@@ -214,6 +214,12 @@ export interface Run {
   timestamp: string;
   data: EventData;
 }
+export type { Team } from '@agent-hq/queue';
+import type { Team } from '@agent-hq/queue';
+export type TeamStatus = 'idle' | 'working' | 'waiting_input';
+export interface TeamState {
+  status: TeamStatus;
+}
 export interface State {
   agents: Record<Agent, AgentState>;
   runs: Record<string, Run>;
@@ -223,6 +229,7 @@ export interface State {
         ci?: 'pass' | 'fail';
       })
     | null;
+  teams?: Record<Team, TeamState>;
 }
 export const initialState: State = {
   agents: {
@@ -240,10 +247,29 @@ export type InternalAction =
       type: 'ARRIVED' | 'TEST_STARTED' | 'TEST_FINISHED' | 'DISMISS_ERROR';
       agent: Agent;
     }
-  | { type: 'TICK'; timestamp: string };
+  | { type: 'TICK'; timestamp: string }
+  | { type: 'SET_TEAM_STATUSES'; teams: Partial<Record<Team, TeamStatus>> };
 
 export function reduce(state: State, event: HQEvent | InternalAction): State {
   if ('type' in event) {
+    if (event.type === 'SET_TEAM_STATUSES') {
+      return {
+        ...state,
+        teams: {
+          frontend: {
+            status:
+              event.teams.frontend ?? state.teams?.frontend?.status ?? 'idle',
+          },
+          backend: {
+            status:
+              event.teams.backend ?? state.teams?.backend?.status ?? 'idle',
+          },
+          qa: {
+            status: event.teams.qa ?? state.teams?.qa?.status ?? 'idle',
+          },
+        },
+      };
+    }
     if (event.type === 'TICK') {
       let next = state;
       for (const agent of ['claude', 'agy', 'codex'] as const) {
@@ -394,5 +420,29 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     if (event.event === 'CI_CHECK_PASS' || event.event === 'CI_CHECK_FAIL')
       activePR.ci = event.event === 'CI_CHECK_PASS' ? 'pass' : 'fail';
   }
-  return { agents, runs, activePR };
+  let teams = state.teams;
+  const team = event.data.team ?? previousRun?.data.team;
+  if (team && teams) {
+    if (event.event === 'TASK_START' || event.event === 'TASK_HANDOVER') {
+      teams = { ...teams, [team]: { status: 'working' } };
+    } else if (
+      event.event === 'TASK_COMPLETE' ||
+      event.event === 'TASK_FAILED' ||
+      event.event === 'TASK_ABORTED' ||
+      event.event === 'RUN_STALE'
+    ) {
+      const otherActive = Object.values(runs).some(
+        (r) =>
+          r.runId !== event.runId &&
+          r.data.team === team &&
+          (r.status === 'running' ||
+            r.status === 'handover' ||
+            r.status === 'cooldown'),
+      );
+      if (!otherActive) {
+        teams = { ...teams, [team]: { status: 'idle' } };
+      }
+    }
+  }
+  return { agents, runs, activePR, ...(teams ? { teams } : {}) };
 }

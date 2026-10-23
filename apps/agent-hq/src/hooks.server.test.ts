@@ -10,6 +10,8 @@ import {
   init,
   startServerTail,
   stopServerTail,
+  hasTeamStatusesChanged,
+  createTeamStatusPoller,
 } from './hooks.server';
 import { readHistory, recordEvent } from './lib/server/history';
 import { dispatch, getState, resetStore, subscribe } from './lib/server/store';
@@ -146,7 +148,9 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       init();
       const file = join(tempDir, 'limited.log');
       await appendFile(file, 'You have exhausted your quota on this model.\n');
-      await expect.poll(() => getState().agents.agy.status).toBe('cooldown');
+      await expect
+        .poll(() => getState().agents.agy.status, { timeout: 5000 })
+        .toBe('cooldown');
       await appendFile(
         file,
         'You have exhausted your quota on this model. Retry-After: 60\n',
@@ -398,5 +402,164 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       unsubscribe();
       vi.useRealTimers();
     }
+  });
+
+  describe('Team status polling (#102)', () => {
+    it('detects changes in team statuses', () => {
+      expect(
+        hasTeamStatusesChanged(undefined, {
+          frontend: 'idle',
+          backend: 'idle',
+          qa: 'idle',
+        }),
+      ).toBe(true);
+
+      const current = {
+        frontend: { status: 'idle' as const },
+        backend: { status: 'idle' as const },
+        qa: { status: 'idle' as const },
+      };
+      expect(
+        hasTeamStatusesChanged(current, {
+          frontend: 'idle',
+          backend: 'idle',
+          qa: 'idle',
+        }),
+      ).toBe(false);
+
+      expect(
+        hasTeamStatusesChanged(current, {
+          frontend: 'working',
+          backend: 'idle',
+          qa: 'idle',
+        }),
+      ).toBe(true);
+    });
+
+    it('only dispatches on actual status changes and skips redundant ticks', async () => {
+      let currentTeams = undefined as
+        Record<string, { status: string }> | undefined;
+      const dispatched: unknown[] = [];
+      const mockQueue = {
+        getJobs: vi.fn(async () => []),
+      };
+      const mockQm = {
+        getQueue: vi.fn(() => mockQueue as never),
+      };
+
+      const poller = createTeamStatusPoller(
+        () => mockQm as never,
+        () => currentTeams as never,
+        (statuses) => {
+          dispatched.push(statuses);
+          currentTeams = {
+            frontend: { status: statuses.frontend },
+            backend: { status: statuses.backend },
+            qa: { status: statuses.qa },
+          };
+        },
+      );
+
+      // Initial tick dispatches because currentTeams is undefined
+      await poller();
+      expect(dispatched).toHaveLength(1);
+
+      // Second tick with same statuses does not dispatch
+      await poller();
+      expect(dispatched).toHaveLength(1);
+
+      // Status changes -> dispatches
+      mockQueue.getJobs.mockResolvedValueOnce([
+        { state: 'active', data: {} } as never,
+      ]);
+      await poller();
+      expect(dispatched).toHaveLength(2);
+      expect((dispatched[1] as Record<string, string>).frontend).toBe(
+        'working',
+      );
+    });
+
+    it('prevents overlapping polling runs when Redis is slow', async () => {
+      let resolveJobs: (val: unknown[]) => void;
+      const slowPromise = new Promise<unknown[]>((res) => {
+        resolveJobs = res;
+      });
+      const mockQueue = {
+        getJobs: vi.fn(() => slowPromise),
+      };
+      const mockQm = {
+        getQueue: vi.fn(() => mockQueue as never),
+      };
+
+      const poller = createTeamStatusPoller(
+        () => mockQm as never,
+        () => undefined,
+        () => {},
+      );
+
+      // First call starts and awaits slowPromise
+      const run1 = poller();
+      expect(mockQueue.getJobs).toHaveBeenCalledTimes(1);
+
+      // Second call during in-flight run is dropped by overlap guard
+      const run2 = poller();
+      expect(mockQueue.getJobs).toHaveBeenCalledTimes(1);
+
+      resolveJobs!([]);
+      await Promise.all([run1, run2]);
+
+      // After completion, new poll can proceed
+      mockQueue.getJobs.mockResolvedValueOnce([] as never);
+      await poller();
+      expect(mockQueue.getJobs).toBeCalled();
+    });
+
+    it('logs polling errors at most once per error state and recovers', async () => {
+      const logs: string[] = [];
+      const errorQm = {
+        getQueue: vi.fn(() => {
+          throw new Error('Redis connection refused');
+        }),
+      };
+
+      const poller = createTeamStatusPoller(
+        () => errorQm as never,
+        () => undefined,
+        () => {},
+        (msg, err) =>
+          logs.push(
+            `${msg} ${err instanceof Error ? err.message : String(err)}`,
+          ),
+      );
+
+      await poller();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('Redis connection refused');
+
+      // Subsequent identical errors are not re-logged
+      await poller();
+      expect(logs).toHaveLength(1);
+
+      // Different error is logged
+      errorQm.getQueue.mockImplementationOnce(() => {
+        throw new Error('Redis timeout');
+      });
+      await poller();
+      expect(logs).toHaveLength(2);
+      expect(logs[1]).toContain('Redis timeout');
+
+      // Success resets error state
+      const goodQueue = { getJobs: vi.fn(async () => []) };
+      errorQm.getQueue.mockImplementation(() => goodQueue as never);
+      await poller();
+      expect(logs).toHaveLength(2);
+
+      // New error after recovery is logged again
+      errorQm.getQueue.mockImplementationOnce(() => {
+        throw new Error('Redis connection refused');
+      });
+      await poller();
+      expect(logs).toHaveLength(3);
+    });
   });
 });

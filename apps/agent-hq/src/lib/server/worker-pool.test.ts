@@ -34,6 +34,7 @@ import {
   WorkerPool,
   buildTaskPrompt,
   deriveTeamStatus,
+  deriveAllTeamStatuses,
   isV2WorkersEnabled,
   truncateError,
   type QueueManagerLike,
@@ -393,6 +394,16 @@ describe('WorkerPool (#98)', () => {
       status: 'PENDING',
     };
     expect(await deriveTeamStatus(qaQueue)).toBe('waiting_input');
+
+    // Test deriveAllTeamStatuses (#102)
+    const activePool = createPool();
+    await activePool.start();
+    expect(await deriveAllTeamStatuses(activePool.queueManager!)).toEqual({
+      frontend: 'idle',
+      backend: 'working',
+      qa: 'waiting_input',
+    });
+    await activePool.close();
   });
 
   it('registers synchronous exit fallback to SIGKILL running children, ignores errors, and unregisters on close', async () => {
