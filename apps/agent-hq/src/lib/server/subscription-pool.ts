@@ -53,15 +53,13 @@ export class SubscriptionPool extends EventEmitter<{
   }
 
   private redis() {
-    return (this.connection ??= createRedisConnection(undefined, {
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-      connectTimeout: 1000,
-      commandTimeout: 2000,
-      retryStrategy: () => null,
-    }));
+    return (this.connection ??= createRedisConnection());
   }
 
+  /**
+   * Returns current availability and cooldown timestamps for all providers.
+   * Rejects if Redis operations fail; the caller (Worker-Pool, #98) must catch errors.
+   */
   async status(): Promise<Record<Agent, ProviderStatus>> {
     const values = await this.redis().hgetall(key);
     const result = {} as Record<Agent, ProviderStatus>;
@@ -77,10 +75,18 @@ export class SubscriptionPool extends EventEmitter<{
     return result;
   }
 
+  /**
+   * Picks the preferred available provider for a team, or the earliest reset timestamp if all are in cooldown.
+   * Rejects if Redis operations fail; the caller (Worker-Pool, #98) must catch errors.
+   */
   async pick(team: Team): Promise<Pick> {
     return pickAvailable(team, await this.status());
   }
 
+  /**
+   * Persists provider cooldown and emits SUBSCRIPTION_FAILOVER if an active team preference changes.
+   * Rejects if Redis operations fail; the caller (Worker-Pool, #98) must catch errors.
+   */
   async reportRateLimit(
     provider: Agent,
     cooldownUntil?: string,
@@ -90,6 +96,7 @@ export class SubscriptionPool extends EventEmitter<{
         ? Date.now() + this.defaultCooldownMs
         : Date.parse(cooldownUntil);
     if (!Number.isFinite(until)) throw new Error('Invalid cooldownUntil');
+    // Read-modify-write is non-atomic; acceptable because Agent-HQ runs as a single server process (ADR 0006).
     const status = await this.status();
     // A repeated diagnostic must not shorten an already known cooldown.
     const reset = new Date(

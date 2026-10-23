@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { detectRateLimit } from './ratelimit';
 import { SubscriptionPool } from './subscription-pool';
 
 const redis = vi.hoisted(() => {
@@ -110,9 +111,34 @@ describe('SubscriptionPool', () => {
     expect(() => new SubscriptionPool({ defaultCooldownMs: 0 })).toThrow();
   });
 
-  it.each(['agy-quota', 'claude-fast', 'codex-unknown'])(
-    'uses existing detection fixture %s',
-    async (fixture) => {
+  it.each([
+    {
+      fixture: 'agy-quota',
+      provider: 'agy' as const,
+      team: 'frontend' as const,
+      fallback: 'claude' as const,
+    },
+    {
+      fixture: 'gemini-reset',
+      provider: 'agy' as const,
+      team: 'frontend' as const,
+      fallback: 'claude' as const,
+    },
+    {
+      fixture: 'claude-clock',
+      provider: 'claude' as const,
+      team: 'backend' as const,
+      fallback: 'agy' as const,
+    },
+    {
+      fixture: 'codex-date',
+      provider: 'codex' as const,
+      team: 'qa' as const,
+      fallback: 'agy' as const,
+    },
+  ])(
+    'uses existing detection fixture $fixture with matching provider $provider',
+    async ({ fixture, provider, team, fallback }) => {
       const pool = new SubscriptionPool({ defaultCooldownMs: 30_000 });
       const line = readFileSync(
         join(import.meta.dirname, '__fixtures__/ratelimit', `${fixture}.txt`),
@@ -122,9 +148,18 @@ describe('SubscriptionPool', () => {
         .slice(1)
         .join('\n')
         .trim();
-      expect(await pool.reportOutput('agy', 'ordinary output')).toBe(false);
-      expect(await pool.reportOutput('agy', line)).toBe(true);
-      expect(await pool.pick('frontend')).toEqual({ provider: 'claude' });
+      const detected = detectRateLimit(line, new Date());
+      expect(await pool.reportOutput(provider, 'ordinary output')).toBe(false);
+      expect(await pool.reportOutput(provider, line)).toBe(true);
+      const status = await pool.status();
+      expect(status[provider].status).toBe('COOLDOWN');
+      if (detected?.cooldownUntil) {
+        expect(status[provider].cooldownUntil).toBe(detected.cooldownUntil);
+      } else {
+        expect(fixture).toBe('agy-quota');
+        expect(status[provider].cooldownUntil).toBe('2026-10-22T12:00:30.000Z');
+      }
+      expect(await pool.pick(team)).toEqual({ provider: fallback });
     },
   );
 
