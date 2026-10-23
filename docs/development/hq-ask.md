@@ -26,10 +26,18 @@ Fehlt `HQ_ISSUE_ID` oder `HQ_TEAM` oder ist `HQ_ISSUE_ID` keine positive Ganzzah
 ## 2. Verwendung
 
 ```bash
-"$HQ_ASK" "<Frage>" [--option "<Option A>" --option "<Option B>" ...]
+{{HQ_ASK}} "<Frage>" [--option "<Option A>" --option "<Option B>" ...]
 ```
 
 > **Wichtig:** Führe den Aufruf als genau diesen einen einzelnen Befehl aus. Nicht mit `&&` oder `;` verketten (verkettete Aufrufe bleiben in der Sandbox und scheitern).
+
+### Prompt-Vorlage & Platzhalter
+
+In den Prompt-Instruktionen (`scripts/prompts/hq-ask.md`) wird der Platzhalter `{{HQ_ASK}}` verwendet:
+
+- **Ersetzung durch Aufrufer:** Der Aufrufer (Worker-Pool, #98) ersetzt den Platzhalter `{{HQ_ASK}}` durch den wörtlichen absoluten Pfad, bevor der Prompt an `delegate.sh` übergeben wird.
+- **Begründung:** Die Rechteprüfung von Claude Code (`permissions.allow`) kann keine Variablen-Expansion im Befehl validieren. Der claude-Worker verweigert daher den Aufruf `"$HQ_ASK" "<Frage>"`; mit dem wörtlichen absoluten Pfad funktioniert der Aufruf end-to-end.
+- **Pfad-Übereinstimmung:** Der ersetzte Pfad muss dem von `delegate.sh` freigegebenen Pfad entsprechen (`<Verzeichnis von delegate.sh>/hq-ask.sh`), da `delegate.sh` genau diesen Pfad in die Claude-Settings (`sandbox.excludedCommands` und `permissions.allow`) einträgt.
 
 ### Argumente & Optionen
 
@@ -41,13 +49,13 @@ Fehlt `HQ_ISSUE_ID` oder `HQ_TEAM` oder ist `HQ_ISSUE_ID` keine positive Ganzzah
 Rückfrage ohne Optionen:
 
 ```bash
-"$HQ_ASK" "Soll für das Routing SvelteKit 2 Shallow Routing verwendet werden?"
+/opt/agent-hq/scripts/hq-ask.sh "Soll für das Routing SvelteKit 2 Shallow Routing verwendet werden?"
 ```
 
 Rückfrage mit Optionen:
 
 ```bash
-"$HQ_ASK" "Welche Farbpalette soll als Default gesetzt werden?" \
+/opt/agent-hq/scripts/hq-ask.sh "Welche Farbpalette soll als Default gesetzt werden?" \
   --option "System/Auto" \
   --option "Dark" \
   --option "Light"
@@ -99,3 +107,4 @@ Deshalb wird ausschließlich `hq-ask.sh` aus dem nicht beschreibbaren Haupt-Chec
 - `delegate.sh` ermittelt den absoluten Pfad zu `hq-ask.sh` (`ASK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hq-ask.sh"`).
 - Liegt dieser Pfad **nicht** unter dem aktuellen Arbeitsverzeichnis `$PWD`, wird er in die Claude-Settings als Ausnahme aufgenommen (`sandbox.excludedCommands: ["<ASK> *"]` und `permissions.allow: ["Bash(<ASK> *)"]`) und `HQ_ASK="<ASK>"` für den Worker exportiert.
 - Liegt der Pfad hingegen unter `$PWD`, schließt `delegate.sh` das Skript nicht aus (hq-ask scheitert dann bewusst in der Sandbox) und gibt eine Warnung auf `stderr` aus. Dies schützt davor, dass ein Worker das Skript manipulieren und unsandboxed ausführen kann.
+- Da die Rechteprüfung von Claude Code keine Variablen-Expansion im Befehl validieren kann, darf im Prompt kein `"$HQ_ASK"` stehen: Der Aufrufer (Worker-Pool) ersetzt den Platzhalter `{{HQ_ASK}}` vorab durch den wörtlichen absoluten Pfad, der dem von `delegate.sh` freigegebenen Pfad (`<Verzeichnis von delegate.sh>/hq-ask.sh`) entsprechen muss.
