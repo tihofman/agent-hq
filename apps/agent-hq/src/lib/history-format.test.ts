@@ -56,12 +56,13 @@ describe('history-format', () => {
       expect(formatStatusLabel('failed')).toBe('Fehlgeschlagen');
     });
 
-    it('formats running, handover, aborted, cooldown, idle', () => {
+    it('formats running, handover, aborted, cooldown, idle, stale', () => {
       expect(formatStatusLabel('running')).toBe('Läuft');
       expect(formatStatusLabel('handover')).toBe('Übergabe');
       expect(formatStatusLabel('aborted')).toBe('Abgebrochen');
       expect(formatStatusLabel('cooldown')).toBe('Cooldown');
       expect(formatStatusLabel('idle')).toBe('Bereit');
+      expect(formatStatusLabel('stale')).toBe('Verwaist');
     });
 
     it('passes through unknown statuses', () => {
@@ -161,6 +162,7 @@ describe('history-format', () => {
       expect(getStatusBadgeClass('aborted')).toContain('amber');
       expect(getStatusBadgeClass('running')).toContain('blue');
       expect(getStatusBadgeClass('handover')).toContain('purple');
+      expect(getStatusBadgeClass('stale')).toContain('amber');
       expect(getStatusBadgeClass('cooldown')).toContain('slate');
       expect(getStatusBadgeClass('unknown')).toContain('slate');
     });

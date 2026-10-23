@@ -402,4 +402,59 @@ describe('GET /api/history', () => {
     expect(runs[0].runId).toBe('run-25');
     expect(runs[19].runId).toBe('run-06');
   });
+
+  it('returns status stale instead of running for a run with dead PID', async () => {
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-api-dead-pid',
+        pid: 999999999,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+    const run = runs.find((r) => r.runId === 'run-api-dead-pid');
+    expect(run?.status).toBe('stale');
+  });
+
+  it('returns status stale instead of handover for a run without PID older than 15 min', async () => {
+    const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_HANDOVER',
+        agent: 'codex',
+        runId: 'run-api-old-handover',
+        timestamp: oldTime,
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+    const run = runs.find((r) => r.runId === 'run-api-old-handover');
+    expect(run?.status).toBe('stale');
+  });
+
+  it('keeps status running for a run whose PID lives, even if timestamp is old', async () => {
+    const oldTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'claude',
+        runId: 'run-api-alive-pid',
+        pid: process.pid,
+        timestamp: oldTime,
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+    const run = runs.find((r) => r.runId === 'run-api-alive-pid');
+    expect(run?.status).toBe('running');
+  });
 });

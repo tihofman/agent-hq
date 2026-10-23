@@ -167,7 +167,13 @@ export interface AgentState {
   cooldownUntil?: string;
 }
 export type RunStatus =
-  'handover' | 'running' | 'complete' | 'failed' | 'aborted' | 'cooldown';
+  | 'handover'
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'aborted'
+  | 'cooldown'
+  | 'stale';
 export interface Run {
   runId: string;
   agent: Agent;

@@ -8,6 +8,7 @@ import {
   type HQEvent,
   type Run,
 } from './state';
+import { isRunStale, type RunStaleOptions } from '../runs';
 
 export interface HistoryRun extends Run {
   startedAt: string;
@@ -84,7 +85,10 @@ export async function readHistory(): Promise<HQEvent[]> {
   return events;
 }
 
-export async function readRecentRuns(limit = 20): Promise<HistoryRun[]> {
+export async function readRecentRuns(
+  limit = 20,
+  options?: RunStaleOptions,
+): Promise<HistoryRun[]> {
   const events = await readHistory();
   const state = events.reduce((s, e) => reduce(s, e), initialState);
 
@@ -105,8 +109,12 @@ export async function readRecentRuns(limit = 20): Promise<HistoryRun[]> {
     const duration = Date.parse(run.timestamp) - Date.parse(startedAt);
     const durationMs = Number.isNaN(duration) ? 0 : Math.max(0, duration);
 
+    const isStale = isRunStale(run, options);
+    const status = isStale ? 'stale' : run.status;
+
     return {
       ...run,
+      status,
       startedAt,
       durationMs,
       events: runEvents,
