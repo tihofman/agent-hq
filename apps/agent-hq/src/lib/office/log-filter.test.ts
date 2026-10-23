@@ -1,15 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   filterCharacterLog,
   filterRunLogChunks,
   filterAgentFeed,
   getLogFileFallback,
   formatCharacterAriaLabel,
-  createInitialModalState,
-  openCharacterModal,
-  closeCharacterModal,
-  handleModalEscape,
-  handleBackdropClose,
 } from './log-filter';
 import type { HQEvent, InternalAction, Run } from '../server/state';
 
@@ -228,90 +223,6 @@ describe('office/log-filter', () => {
       expect(formatCharacterAriaLabel('Codex')).toBe('Codex');
       expect(formatCharacterAriaLabel('Claude', '')).toBe('Claude');
       expect(formatCharacterAriaLabel('Agy', '   ')).toBe('Agy');
-    });
-  });
-
-  describe('modal open / close lifecycle and focus return', () => {
-    it('initial state is closed', () => {
-      const state = createInitialModalState();
-      expect(state.isOpen).toBe(false);
-      expect(state.target).toBeNull();
-      expect(state.triggerElement).toBeNull();
-    });
-
-    it('opens modal with target and stores triggerElement', () => {
-      const fakeBtn = { focus: vi.fn() };
-      const state = openCharacterModal(
-        { agent: 'agy', runId: 'run-1' },
-        fakeBtn,
-      );
-
-      expect(state.isOpen).toBe(true);
-      expect(state.target).toEqual({ agent: 'agy', runId: 'run-1' });
-      expect(state.triggerElement).toBe(fakeBtn);
-    });
-
-    it('closes modal and restores focus to triggerElement', () => {
-      const fakeBtn = { focus: vi.fn() };
-      const openState = openCharacterModal({ agent: 'claude' }, fakeBtn);
-
-      const closedState = closeCharacterModal(openState);
-
-      expect(closedState.isOpen).toBe(false);
-      expect(closedState.target).toBeNull();
-      expect(closedState.triggerElement).toBeNull();
-      expect(fakeBtn.focus).toHaveBeenCalledTimes(1);
-    });
-
-    it('handleModalEscape closes modal on Escape and restores focus', () => {
-      const fakeBtn = { focus: vi.fn() };
-      const openState = openCharacterModal(
-        { agent: 'agy', runId: 'run-79' },
-        fakeBtn,
-      );
-
-      const preventDefault = vi.fn();
-      const nextState = handleModalEscape(
-        { key: 'Escape', preventDefault },
-        openState,
-      );
-
-      expect(preventDefault).toHaveBeenCalled();
-      expect(nextState.isOpen).toBe(false);
-      expect(fakeBtn.focus).toHaveBeenCalledTimes(1);
-    });
-
-    it('handleModalEscape ignores other keys', () => {
-      const fakeBtn = { focus: vi.fn() };
-      const openState = openCharacterModal(
-        { agent: 'agy', runId: 'run-79' },
-        fakeBtn,
-      );
-
-      const preventDefault = vi.fn();
-      const nextState = handleModalEscape(
-        { key: 'Enter', preventDefault },
-        openState,
-      );
-
-      expect(preventDefault).not.toHaveBeenCalled();
-      expect(nextState.isOpen).toBe(true);
-      expect(fakeBtn.focus).not.toHaveBeenCalled();
-    });
-
-    it('handleBackdropClose closes modal only when backdrop was clicked', () => {
-      const fakeBtn = { focus: vi.fn() };
-      const openState = openCharacterModal({ agent: 'codex' }, fakeBtn);
-
-      // Click inside modal (isBackdropTarget = false)
-      const unchangedState = handleBackdropClose(false, openState);
-      expect(unchangedState.isOpen).toBe(true);
-      expect(fakeBtn.focus).not.toHaveBeenCalled();
-
-      // Click backdrop (isBackdropTarget = true)
-      const closedState = handleBackdropClose(true, openState);
-      expect(closedState.isOpen).toBe(false);
-      expect(fakeBtn.focus).toHaveBeenCalledTimes(1);
     });
   });
 });

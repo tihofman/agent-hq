@@ -17,7 +17,7 @@
     agent: Agent;
     runId?: string;
     instanceIndex?: number;
-    onclick?: (event: MouseEvent | KeyboardEvent) => void;
+    onclick?: (event: MouseEvent) => void;
   }
 
   let { agent, runId, instanceIndex = 0, onclick }: Props = $props();
@@ -257,13 +257,6 @@
     return () => cancelAnimationFrame(animFrameId);
   });
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      onclick?.(event);
-    }
-  }
-
   const bgPos = $derived(getFrameBackgroundPosition(currentFrame, metadata));
 </script>
 
@@ -284,11 +277,10 @@
   aria-label={ariaLabel}
   title="{metadata.displayName} ({metadata.role}) • {characterStatus}"
   {onclick}
-  onkeydown={handleKeyDown}
 >
   <!-- Retro Status Speech Bubble -->
   {#if bubble}
-    <div
+    <span
       class="speech-bubble bubble-{bubble.type}"
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
@@ -300,7 +292,7 @@
         >
       {/if}
       <span class="bubble-text">{bubble.text}</span>
-    </div>
+    </span>
   {/if}
 
   <!-- Pixel Sprite -->
@@ -311,9 +303,9 @@
   ></div>
 
   <!-- Agent Retro Nametag Badge -->
-  <div class="agent-badge">
+  <span class="agent-badge">
     {metadata.displayName}
-  </div>
+  </span>
 </button>
 
 <style>
@@ -450,6 +442,7 @@
 
   /* Agent Nametag Badge */
   .agent-badge {
+    display: block;
     position: absolute;
     bottom: -10px;
     left: 50%;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { liveStore } from '../../live.svelte';
   import type { Agent } from '../../server/state';
   import { getSpriteMetadata } from '../../office/sprites';
@@ -31,6 +31,7 @@
 
   let autoScroll = $state(true);
   let scrollContainer: HTMLDivElement | undefined = $state();
+  let closeButton: HTMLButtonElement | undefined = $state();
 
   function scrollToBottom() {
     autoScroll = true;
@@ -59,8 +60,11 @@
 
   function closeModal() {
     onclose();
-    triggerEl?.focus?.();
   }
+
+  onMount(() => {
+    closeButton?.focus();
+  });
 
   $effect(() => {
     return () => {
@@ -103,7 +107,6 @@
   aria-labelledby="character-log-title"
   tabindex="-1"
   onclick={handleBackdropClick}
-  onkeydown={handleWindowKeyDown}
   data-testid="character-log-modal"
 >
   <!-- Modal Window -->
@@ -158,6 +161,7 @@
       <!-- Close Button -->
       <button
         type="button"
+        bind:this={closeButton}
         onclick={closeModal}
         class="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-white transition cursor-pointer text-sm font-bold"
         aria-label="Schließen"
