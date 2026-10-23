@@ -12,6 +12,8 @@
     tileBg,
     type RoomId,
   } from '../../office/layout';
+  import { deriveCharacters } from '../../office/sprites';
+  import { liveStore } from '../../live.svelte';
 
   interface Props {
     scale?: number;
@@ -26,6 +28,8 @@
     showRoomLabels = true,
     showWaypoints = false,
   }: Props = $props();
+
+  const characters = $derived(deriveCharacters(liveStore.state));
 
   // Perimeter wall and divider tiles
   interface WallTile {
@@ -114,10 +118,14 @@
       />
     {/each}
 
-    <!-- 3 Character Sprites: Claude, agy, codex -->
-    <CharacterSprite agent="claude" />
-    <CharacterSprite agent="agy" />
-    <CharacterSprite agent="codex" />
+    <!-- Character Sprites: one per active run; idle for agents without active runs -->
+    {#each characters as char (char.id)}
+      <CharacterSprite
+        agent={char.agent}
+        runId={char.runId}
+        instanceIndex={char.instanceIndex}
+      />
+    {/each}
 
     <!-- Optional Waypoints Debug Overlay -->
     {#if showWaypoints}

@@ -177,6 +177,7 @@ export interface Run {
   logFile?: string;
   exitCode?: number | null;
   status: RunStatus;
+  room?: Room;
   timestamp: string;
   data: EventData;
 }
@@ -297,6 +298,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
       status: runResumed
         ? 'running'
         : (runStatuses[event.event] ?? previousRun?.status ?? 'running'),
+      room: event.room,
       timestamp: event.timestamp,
       data: { ...previousRun?.data, ...event.data },
     };

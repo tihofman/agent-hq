@@ -1,5 +1,11 @@
 import { findWaypointPath, WAYPOINTS, TILE_SIZE, type RoomId } from './layout';
-import type { Agent, AgentStatus } from '../server/state';
+import type {
+  Agent,
+  AgentStatus,
+  Run,
+  RunStatus,
+  AgentState,
+} from '../server/state';
 import claudeMeta from '../assets/sprites/claude.json';
 import agyMeta from '../assets/sprites/agy.json';
 import codexMeta from '../assets/sprites/codex.json';
@@ -43,10 +49,16 @@ export interface SpeechBubble {
   icon?: string;
 }
 
+export interface InstanceOffset {
+  dx: number;
+  dy: number;
+}
+
 export interface Spot {
   wp: string;
   dx: number;
   dy: number;
+  instanceOffsets?: readonly InstanceOffset[];
 }
 
 const METADATA_BY_AGENT: Record<Agent, SpriteMetadata> = {
@@ -203,39 +215,217 @@ export function getSpeechBubble(
 
 export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
   claude: {
-    ceo: { wp: 'ceo_desk', dx: 0, dy: 0 },
-    dev: { wp: 'dev_meeting', dx: -24, dy: 0 },
-    qa: { wp: 'qa_servers', dx: 0, dy: 0 },
-    lounge: { wp: 'lounge_couch', dx: -24, dy: 0 },
-    hall: { wp: 'hall_center', dx: -24, dy: 0 },
+    ceo: {
+      wp: 'ceo_desk',
+      dx: 0,
+      dy: 0,
+      instanceOffsets: [{ dx: 0, dy: 36 }],
+    },
+    dev: {
+      wp: 'dev_meeting',
+      dx: -24,
+      dy: 0,
+      instanceOffsets: [{ dx: 0, dy: -36 }],
+    },
+    qa: {
+      wp: 'qa_servers',
+      dx: 0,
+      dy: 0,
+      instanceOffsets: [{ dx: 0, dy: 36 }],
+    },
+    lounge: {
+      wp: 'lounge_couch',
+      dx: -24,
+      dy: 0,
+      instanceOffsets: [{ dx: 0, dy: -36 }],
+    },
+    hall: {
+      wp: 'hall_center',
+      dx: -24,
+      dy: 0,
+      instanceOffsets: [{ dx: 0, dy: 36 }],
+    },
   },
   agy: {
-    ceo: { wp: 'ceo_board', dx: -24, dy: 0 },
-    dev: { wp: 'dev_desk', dx: 0, dy: 0 },
-    qa: { wp: 'qa_desk', dx: -24, dy: 0 },
-    lounge: { wp: 'lounge_coffee', dx: 0, dy: 0 },
-    hall: { wp: 'hall_center', dx: 24, dy: 0 },
+    ceo: {
+      wp: 'ceo_board',
+      dx: -24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: 36 },
+        { dx: -36, dy: 0 },
+      ],
+    },
+    dev: {
+      wp: 'dev_desk',
+      dx: 0,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: -36 },
+        { dx: -36, dy: 0 },
+      ],
+    },
+    qa: {
+      wp: 'qa_desk',
+      dx: -24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: 36 },
+        { dx: -36, dy: 0 },
+      ],
+    },
+    lounge: {
+      wp: 'lounge_coffee',
+      dx: 0,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: -36 },
+        { dx: -36, dy: 0 },
+      ],
+    },
+    hall: {
+      wp: 'hall_center',
+      dx: 24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: 36 },
+        { dx: 36, dy: 0 },
+      ],
+    },
   },
   codex: {
-    ceo: { wp: 'ceo_board', dx: 24, dy: 0 },
-    dev: { wp: 'dev_meeting', dx: 24, dy: 0 },
-    qa: { wp: 'qa_desk', dx: 24, dy: 0 },
-    lounge: { wp: 'lounge_couch', dx: 24, dy: 0 },
-    hall: { wp: 'hall_east', dx: 0, dy: 0 },
+    ceo: {
+      wp: 'ceo_board',
+      dx: 24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: 36 },
+        { dx: 36, dy: 0 },
+      ],
+    },
+    dev: {
+      wp: 'dev_meeting',
+      dx: 24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: -36 },
+        { dx: 36, dy: 0 },
+      ],
+    },
+    qa: {
+      wp: 'qa_desk',
+      dx: 24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: 36 },
+        { dx: 36, dy: 0 },
+      ],
+    },
+    lounge: {
+      wp: 'lounge_couch',
+      dx: 24,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: -36 },
+        { dx: 36, dy: 0 },
+      ],
+    },
+    hall: {
+      wp: 'hall_east',
+      dx: 0,
+      dy: 0,
+      instanceOffsets: [
+        { dx: 0, dy: 36 },
+        { dx: 36, dy: 0 },
+      ],
+    },
   },
 };
 
 export function getAgentSpot(
   agent: Agent,
   room: RoomId,
+  instanceIndex = 0,
 ): { x: number; y: number; wpId: string } {
   const spot = SPOTS[agent]?.[room] ?? { wp: 'hall_center', dx: 0, dy: 0 };
   const wp = WAYPOINTS[spot.wp] ?? WAYPOINTS['hall_center'];
+
+  let extraDx = 0;
+  let extraDy = 0;
+
+  if (instanceIndex > 0) {
+    if (spot.instanceOffsets && spot.instanceOffsets[instanceIndex - 1]) {
+      extraDx = spot.instanceOffsets[instanceIndex - 1].dx;
+      extraDy = spot.instanceOffsets[instanceIndex - 1].dy;
+    } else {
+      const step = Math.ceil(instanceIndex / 2);
+      const sign = instanceIndex % 2 === 1 ? 1 : -1;
+      extraDy = sign * step * 36;
+    }
+  }
+
   return {
-    x: wp.x * TILE_SIZE + spot.dx,
-    y: wp.y * TILE_SIZE + spot.dy,
+    x: wp.x * TILE_SIZE + spot.dx + extraDx,
+    y: wp.y * TILE_SIZE + spot.dy + extraDy,
     wpId: spot.wp,
   };
+}
+
+export function doSpotsOverlap(
+  posA: { x: number; y: number },
+  posB: { x: number; y: number },
+  size = 32,
+): boolean {
+  return Math.abs(posA.x - posB.x) < size && Math.abs(posA.y - posB.y) < size;
+}
+
+export interface OfficeCharacter {
+  id: string;
+  agent: Agent;
+  runId?: string;
+  instanceIndex: number;
+}
+
+export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = [
+  'handover',
+  'running',
+  'cooldown',
+] as const;
+
+export function deriveCharacters(
+  state?: {
+    runs?: Record<string, Run>;
+    agents?: Record<Agent, AgentState>;
+  } | null,
+): OfficeCharacter[] {
+  const agents: Agent[] = ['claude', 'agy', 'codex'];
+  if (!state) {
+    return agents.map((agent) => ({ id: agent, agent, instanceIndex: 0 }));
+  }
+
+  const runs = Object.values(state.runs ?? {});
+  const activeSet = new Set<string>(ACTIVE_RUN_STATUSES);
+
+  return agents.flatMap((agent) => {
+    const agentRuns = runs
+      .filter((r) => r.agent === agent && activeSet.has(r.status))
+      .sort(
+        (a, b) =>
+          (a.timestamp ?? '').localeCompare(b.timestamp ?? '') ||
+          a.runId.localeCompare(b.runId),
+      );
+
+    if (agentRuns.length === 0) {
+      return [{ id: agent, agent, instanceIndex: 0 }];
+    }
+
+    return agentRuns.map((run, index) => ({
+      id: run.runId,
+      agent,
+      runId: run.runId,
+      instanceIndex: index,
+    }));
+  });
 }
 
 export function getClosestWaypointId(pixelX: number, pixelY: number): string {
@@ -292,6 +482,7 @@ export type HandoverPhase =
 
 export class AgentController {
   agent: Agent;
+  instanceIndex: number;
   x: number;
   y: number;
   direction: Direction = 'down';
@@ -302,10 +493,11 @@ export class AgentController {
   private deferredRoom: RoomId | null = null;
   readonly walkSpeed = 96;
 
-  constructor(agent: Agent, initialRoom: RoomId = 'lounge') {
+  constructor(agent: Agent, initialRoom: RoomId = 'lounge', instanceIndex = 0) {
     this.agent = agent;
+    this.instanceIndex = instanceIndex;
     this.currentRoom = initialRoom;
-    const spot = getAgentSpot(agent, initialRoom);
+    const spot = getAgentSpot(agent, initialRoom, instanceIndex);
     this.x = spot.x;
     this.y = spot.y;
   }
@@ -313,11 +505,8 @@ export class AgentController {
   startHandover(): void {
     this.handoverPhase = 'walking_to_hall';
     this.meetingElapsedMs = 0;
-    const dx = this.agent === 'claude' ? -24 : 24;
-    const hallWp = WAYPOINTS['hall_center'];
-    const targetX = hallWp.x * TILE_SIZE + dx;
-    const targetY = hallWp.y * TILE_SIZE;
-    this.walkTo(targetX, targetY, 'hall_center');
+    const hallSpot = getAgentSpot(this.agent, 'hall', this.instanceIndex);
+    this.walkTo(hallSpot.x, hallSpot.y, hallSpot.wpId);
   }
 
   setTargetRoom(room: RoomId): void {
@@ -328,15 +517,17 @@ export class AgentController {
       this.deferredRoom = room;
       return;
     }
+    const spot = getAgentSpot(this.agent, room, this.instanceIndex);
     if (
       room === this.currentRoom &&
       this.path.length === 0 &&
       this.handoverPhase === 'idle'
     ) {
-      return;
+      if (Math.hypot(this.x - spot.x, this.y - spot.y) < 1) {
+        return;
+      }
     }
     this.currentRoom = room;
-    const spot = getAgentSpot(this.agent, room);
     this.walkTo(spot.x, spot.y, spot.wpId);
   }
 
@@ -345,7 +536,7 @@ export class AgentController {
     this.deferredRoom = null;
     this.handoverPhase = 'idle';
     this.path = [];
-    const spot = getAgentSpot(this.agent, room);
+    const spot = getAgentSpot(this.agent, room, this.instanceIndex);
     this.x = spot.x;
     this.y = spot.y;
     this.direction = 'down';
@@ -420,7 +611,11 @@ export class AgentController {
         const targetRoom = this.deferredRoom ?? stateRoom ?? this.currentRoom;
         this.deferredRoom = null;
         this.currentRoom = targetRoom;
-        const targetSpot = getAgentSpot(this.agent, targetRoom);
+        const targetSpot = getAgentSpot(
+          this.agent,
+          targetRoom,
+          this.instanceIndex,
+        );
         this.walkTo(targetSpot.x, targetSpot.y, targetSpot.wpId);
       }
     } else if (this.handoverPhase === 'walking_to_target') {
