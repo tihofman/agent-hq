@@ -133,6 +133,31 @@ export class WorkerPool {
   private readonly children = new Set<ChildProcess>();
   private started = false;
   private closing = false;
+  private exitHandlerRegistered = false;
+
+  private readonly onExit = (): void => {
+    for (const child of this.children) {
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // ignore
+        }
+      }
+    }
+  };
+
+  private registerExitHandler(): void {
+    if (!this.exitHandlerRegistered) {
+      process.once('exit', this.onExit);
+      this.exitHandlerRegistered = true;
+    }
+  }
+
+  private unregisterExitHandler(): void {
+    process.off('exit', this.onExit);
+    this.exitHandlerRegistered = false;
+  }
 
   constructor(options: WorkerPoolOptions = {}) {
     this.opts = options;
@@ -203,6 +228,7 @@ export class WorkerPool {
         );
       }
 
+      this.registerExitHandler();
       this.started = true;
       return true;
     } catch (err) {
@@ -329,6 +355,7 @@ export class WorkerPool {
         detached: true,
       });
       this.children.add(child);
+      this.registerExitHandler();
 
       child.stdout?.setEncoding('utf8').on('data', (c: string) => {
         stdout += c;
@@ -366,6 +393,7 @@ export class WorkerPool {
   async close(): Promise<void> {
     this.closing = true;
     this.started = false;
+    this.unregisterExitHandler();
     this.unwireFailover?.();
     this.unwireFailover = undefined;
 

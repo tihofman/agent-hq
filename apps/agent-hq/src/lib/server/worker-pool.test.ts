@@ -362,4 +362,49 @@ describe('WorkerPool (#98)', () => {
     };
     expect(await deriveTeamStatus(qaQueue)).toBe('waiting_input');
   });
+
+  it('registers synchronous exit fallback to SIGKILL running children, ignores errors, and unregisters on close', async () => {
+    const pidFile = join(tempDir, 'exit-child.pid');
+    const delegateScript = await makeScript(
+      tempDir,
+      `echo $$ > "${pidFile}"; sleep 30`,
+      'exit-delegate.sh',
+    );
+    const pool = createPool({ delegateScript });
+
+    const beforeStart = process.listeners('exit');
+    await pool.start();
+    const afterStart = process.listeners('exit');
+    expect(afterStart.length).toBe(beforeStart.length + 1);
+
+    const poolExitListener = afterStart.find((l) => !beforeStart.includes(l));
+    expect(poolExitListener).toBeDefined();
+
+    void manager.run('backend', makeTask(91, 'backend'));
+    await expect.poll(() => readFile(pidFile, 'utf8')).toMatch(/^\d+/);
+    const pid = Number((await readFile(pidFile, 'utf8')).trim());
+    expect(() => process.kill(pid, 0)).not.toThrow();
+
+    const killSpy = vi.spyOn(process, 'kill');
+
+    expect(() => poolExitListener!(0)).not.toThrow();
+    expect(killSpy).toHaveBeenCalledWith(-pid, 'SIGKILL');
+    expect(() => poolExitListener!(0)).not.toThrow();
+
+    await expect
+      .poll(() => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .toBe(false);
+
+    killSpy.mockRestore();
+
+    await pool.close();
+    expect(process.listeners('exit')).not.toContain(poolExitListener);
+  });
 });

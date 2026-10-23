@@ -103,15 +103,7 @@ export async function startServerWorkers(
     return null;
   }
 
-  const onSignal = () => {
-    void stopServerWorkers();
-  };
-  process.once('SIGTERM', onSignal);
-  process.once('SIGINT', onSignal);
-
   const stop = async () => {
-    process.off('SIGTERM', onSignal);
-    process.off('SIGINT', onSignal);
     await pool.close();
     if (globalRef[GLOBAL_WORKER_POOL_KEY] === stop) {
       delete globalRef[GLOBAL_WORKER_POOL_KEY];
@@ -155,35 +147,31 @@ export const init: ServerInit = () => {
   }
 };
 
-function stopServer(): void {
+async function stopServer(): Promise<void> {
   try {
-    stopConfiguredIssueIngest();
+    await stopConfiguredIssueIngest();
   } catch (err) {
     console.warn('[hooks] could not stop issue ingest:', err);
   }
-  void stopServerWorkers();
   try {
-    stopServerTail();
+    await stopServerWorkers();
+  } catch (err) {
+    console.warn('[hooks] could not stop server workers:', err);
+  }
+  try {
+    await stopServerTail();
   } catch (err) {
     console.warn('[hooks] could not stop server tail:', err);
   }
 }
 
-const onSignal = () => {
-  stopServer();
-};
-
-process.once('SIGTERM', onSignal);
-process.once('SIGINT', onSignal);
-process.once('sveltekit:shutdown', onSignal);
+process.on('sveltekit:shutdown', stopServer);
 
 (
   import.meta as ImportMeta & {
-    hot?: { dispose(cb: () => void): void };
+    hot?: { dispose(cb: () => void | Promise<void>): void };
   }
-).hot?.dispose(() => {
-  stopServer();
-  process.off('SIGTERM', onSignal);
-  process.off('SIGINT', onSignal);
-  process.off('sveltekit:shutdown', onSignal);
+).hot?.dispose(async () => {
+  process.off('sveltekit:shutdown', stopServer);
+  await stopServer();
 });
