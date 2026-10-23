@@ -13,6 +13,7 @@ cleanup() {
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; [ ! -f "$TEST_DIR/stdout" ] || cat "$TEST_DIR/stdout"; exit 1; }
 pass() { echo "PASS: $*"; }
+unset AGENT_MODEL
 mkdir -p "$TEST_DIR/bin"
 export AGENT_HQ_LOG_DIR="$TEST_DIR/agent-hq"
 export TMPDIR="$TEST_DIR" WORKER_PID_FILE="$TEST_DIR/worker.pid"
@@ -20,6 +21,7 @@ export PATH="$TEST_DIR/bin:$PATH"
 cat > "$TEST_DIR/bin/agy" <<'WORKER'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$WORKER_PID_FILE"
+jq -nc --args '$ARGS.positional' -- "$@" >> "$TMPDIR/worker.calls"
 echo 'fake worker output'
 echo 'fake worker stderr' >&2
 if [ "${FAKE_WAIT:-0}" = 1 ]; then
@@ -226,4 +228,82 @@ if (events.length !== 3 || times.some((t, i) => i && t-times[i-1] > 4000) ||
     Number(process.argv[4])-Number(process.argv[3]) > 4500) process.exit(1);
 CHECK
 pass 'hanging server: all three calls time out at 0.5s (with scheduling tolerance)'
+stop_server
+
+start_server respond
+ln -s agy "$TEST_DIR/bin/codex"
+
+# Test agy without AGENT_MODEL
+unset AGENT_MODEL
+: > "$TEST_DIR/worker.calls"
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful agy exit code without AGENT_MODEL'
+AGY_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model without AGENT_MODEL'
+grep -q '\[model:' "$AGY_LOG" && fail 'log contains model without AGENT_MODEL'
+jq -se 'all(.[]; index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'agy called without --model when AGENT_MODEL is unset'
+
+# Test agy with empty AGENT_MODEL
+export AGENT_MODEL=""
+: > "$TEST_DIR/worker.calls"
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful agy exit code with empty AGENT_MODEL'
+AGY_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model with empty AGENT_MODEL'
+grep -q '\[model:' "$AGY_LOG" && fail 'log contains model with empty AGENT_MODEL'
+jq -se 'all(.[]; index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'agy called without --model when AGENT_MODEL is empty'
+
+# Test agy with AGENT_MODEL
+export AGENT_MODEL="gemini-4-argon-high"
+: > "$TEST_DIR/worker.calls"
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful agy exit code with AGENT_MODEL'
+AGY_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '>>> Dispatching to agy \[model: gemini-4-argon-high\]' "$TEST_DIR/stdout" || fail 'stdout contains agy model'
+grep -q '>>> Dispatching to agy \[model: gemini-4-argon-high\]' "$AGY_LOG" || fail 'log contains agy model'
+jq -se --arg model "gemini-4-argon-high" '
+  .[-1] as $call |
+  ($call | index("--model")) != null and
+  $call[($call | index("--model")) + 1] == $model
+' "$TEST_DIR/worker.calls" >/dev/null || fail 'agy called with --model gemini-4-argon-high'
+
+# Test codex with AGENT_MODEL
+export AGENT_MODEL="gpt-6-luna"
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" codex 'Implement #7 for codex' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful codex exit code with AGENT_MODEL'
+CODEX_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '>>> Dispatching to codex \[model: gpt-6-luna\]' "$TEST_DIR/stdout" || fail 'stdout contains codex model'
+grep -q '>>> Dispatching to codex \[model: gpt-6-luna\]' "$CODEX_LOG" || fail 'log contains codex model'
+jq -se --arg model "gpt-6-luna" '
+  .[-1] as $call |
+  (($call | index("-m")) != null and $call[($call | index("-m")) + 1] == $model) or
+  (($call | index("--model")) != null and $call[($call | index("--model")) + 1] == $model)
+' "$TEST_DIR/worker.calls" >/dev/null || fail 'codex called with model option'
+
+# Test codex without AGENT_MODEL
+unset AGENT_MODEL
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" codex 'Implement #7 for codex' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful codex exit code without AGENT_MODEL'
+CODEX_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model for codex without AGENT_MODEL'
+grep -q '\[model:' "$CODEX_LOG" && fail 'log contains model for codex without AGENT_MODEL'
+jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'codex called without model option when AGENT_MODEL is unset'
+
+# Test codex with empty AGENT_MODEL
+export AGENT_MODEL=""
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" codex 'Implement #7 for codex' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful codex exit code with empty AGENT_MODEL'
+CODEX_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model for codex with empty AGENT_MODEL'
+grep -q '\[model:' "$CODEX_LOG" && fail 'log contains model for codex with empty AGENT_MODEL'
+jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'codex called without model option when AGENT_MODEL is empty'
+
+unset AGENT_MODEL
+pass 'AGENT_MODEL passed to agy and codex, logged, and omitted when unset or empty'
 stop_server
