@@ -1,10 +1,11 @@
-export type {
-  Team,
-  Provider,
-  QuestionStatus,
-  QuestionPayload,
-  TaskPayload,
-  EventPayload,
+export {
+  TEAMS,
+  type Team,
+  type Provider,
+  type QuestionStatus,
+  type QuestionPayload,
+  type TaskPayload,
+  type EventPayload,
 } from './types.js';
 
 export {

@@ -14,7 +14,7 @@
     tileBg,
     type RoomId,
   } from '../../office/layout';
-  import { deriveCharacters } from '../../office/sprites';
+  import { deriveCharacters, type Character } from '../../office/sprites';
   import { liveStore } from '../../live.svelte';
 
   interface Props {
@@ -38,12 +38,19 @@
   } | null>(null);
 
   function handleCharacterClick(
-    char: { agent: Agent; runId?: string },
+    char: Character,
     event: MouseEvent | KeyboardEvent,
   ) {
+    let targetRunId = char.runId;
+    if (!targetRunId && char.team) {
+      const teamRuns = Object.values(liveStore.state?.runs ?? {})
+        .filter((r) => r.data?.team === char.team)
+        .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''));
+      targetRunId = teamRuns[0]?.runId;
+    }
     selectedTarget = {
       agent: char.agent,
-      runId: char.runId,
+      runId: targetRunId,
       triggerEl: (event.currentTarget as HTMLElement) ?? null,
     };
   }
@@ -143,6 +150,8 @@
         agent={char.agent}
         runId={char.runId}
         instanceIndex={char.instanceIndex}
+        team={char.team}
+        isTeamLead={char.isTeamLead}
         onclick={(event) => handleCharacterClick(char, event)}
       />
     {/each}

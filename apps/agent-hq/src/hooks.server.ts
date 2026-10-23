@@ -11,8 +11,13 @@ import { startTail } from './lib/server/tail';
 import {
   WorkerPool,
   isV2WorkersEnabled,
+  deriveAllTeamStatuses,
+  TEAMS,
   type WorkerPoolOptions,
+  type QueueManagerLike,
+  type TeamStatus,
 } from './lib/server/worker-pool';
+import type { Team, TeamState } from './lib/server/state';
 
 export { sweepStaleRuns };
 
@@ -89,6 +94,47 @@ export function stopServerTail(): void {
   globalRef[GLOBAL_TAILER_KEY]?.();
 }
 
+export function hasTeamStatusesChanged(
+  current: Record<Team, TeamState> | undefined,
+  next: Record<Team, TeamStatus>,
+): boolean {
+  if (!current) return true;
+  return TEAMS.some((team) => current[team]?.status !== next[team]);
+}
+
+export function createTeamStatusPoller(
+  getQueueManager: () => QueueManagerLike | undefined,
+  getCurrentTeams: () => Record<Team, TeamState> | undefined,
+  onDispatch: (statuses: Record<Team, TeamStatus>) => void,
+  logError: (msg: string, err: unknown) => void = (msg, err) =>
+    console.error(msg, err),
+): () => Promise<void> {
+  let isPolling = false;
+  let lastLoggedError: string | null = null;
+
+  return async () => {
+    if (isPolling) return;
+    isPolling = true;
+    try {
+      const qm = getQueueManager();
+      if (!qm) return;
+      const statuses = await deriveAllTeamStatuses(qm);
+      lastLoggedError = null;
+      if (hasTeamStatusesChanged(getCurrentTeams(), statuses)) {
+        onDispatch(statuses);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg !== lastLoggedError) {
+        lastLoggedError = msg;
+        logError('Failed to poll team statuses:', err);
+      }
+    } finally {
+      isPolling = false;
+    }
+  };
+}
+
 export async function startServerWorkers(
   options?: WorkerPoolOptions,
 ): Promise<WorkerPool | null> {
@@ -103,7 +149,19 @@ export async function startServerWorkers(
     return null;
   }
 
+  const pollStatuses = createTeamStatusPoller(
+    () => pool.queueManager,
+    () => getState().teams,
+    (statuses) => dispatch({ type: 'SET_TEAM_STATUSES', teams: statuses }),
+  );
+
+  const statusTimer = setInterval(pollStatuses, 2_000);
+  statusTimer.unref();
+
+  await pollStatuses();
+
   const stop = async () => {
+    clearInterval(statusTimer);
     await pool.close();
     if (globalRef[GLOBAL_WORKER_POOL_KEY] === stop) {
       delete globalRef[GLOBAL_WORKER_POOL_KEY];

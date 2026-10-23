@@ -16,12 +16,15 @@ import {
   deriveCharacters,
   doSpotsOverlap,
   ACTIVE_RUN_STATUSES,
+  TEAM_LEADS,
+  getTeamSpot,
 } from './sprites';
 import {
   WAYPOINTS,
   TILE_SIZE,
   ROOM_IDS,
   findWaypointPath,
+  TEAMS,
   type RoomId,
 } from './layout';
 import type { Agent, AgentStatus } from '../server/state';
@@ -804,6 +807,118 @@ describe('office/sprites', () => {
       const spot0 = getAgentSpot('agy', 'hall', 0);
       const spot1 = getAgentSpot('agy', 'hall', 1);
       expect(doSpotsOverlap(spot0, spot1)).toBe(false);
+    });
+  });
+
+  describe('TeamLeads and Team-Bereiche (V2 / #102)', () => {
+    it('maps teams to primary team leads (frontend->agy, backend->claude, qa->codex)', () => {
+      expect(TEAM_LEADS).toEqual({
+        frontend: 'agy',
+        backend: 'claude',
+        qa: 'codex',
+      });
+    });
+
+    it('derives team spots at team desks with non-overlapping worker offsets', () => {
+      for (const team of TEAMS) {
+        const leadSpot = getTeamSpot(team, 0);
+        const worker1Spot = getTeamSpot(team, 1);
+        const worker2Spot = getTeamSpot(team, 2);
+
+        expect(leadSpot.x).toBeGreaterThan(0);
+        expect(leadSpot.y).toBeGreaterThan(0);
+        expect(doSpotsOverlap(leadSpot, worker1Spot)).toBe(false);
+        expect(doSpotsOverlap(leadSpot, worker2Spot)).toBe(false);
+        expect(doSpotsOverlap(worker1Spot, worker2Spot)).toBe(false);
+      }
+    });
+
+    it('produces identical output to main when state has no teams', () => {
+      expect(deriveCharacters(null)).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+      expect(deriveCharacters({})).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+      const stateWithoutTeams = {
+        runs: {
+          'r-active': {
+            runId: 'r-active',
+            agent: 'claude' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+        },
+      };
+      expect(deriveCharacters(stateWithoutTeams)).toEqual([
+        {
+          id: 'r-active',
+          agent: 'claude',
+          runId: 'r-active',
+          instanceIndex: 0,
+        },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+    });
+
+    it('derives TeamLead characters in addition to existing V1 characters when state has teams', () => {
+      const state = {
+        teams: {
+          frontend: { status: 'idle' as const },
+          backend: { status: 'idle' as const },
+          qa: { status: 'idle' as const },
+        },
+        runs: {},
+      };
+      const chars = deriveCharacters(state);
+      expect(chars).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        {
+          id: 'team-lead-frontend',
+          agent: 'agy',
+          team: 'frontend',
+          isTeamLead: true,
+          instanceIndex: 0,
+        },
+        {
+          id: 'team-lead-backend',
+          agent: 'claude',
+          team: 'backend',
+          isTeamLead: true,
+          instanceIndex: 0,
+        },
+        {
+          id: 'team-lead-qa',
+          agent: 'codex',
+          team: 'qa',
+          isTeamLead: true,
+          instanceIndex: 0,
+        },
+      ]);
+    });
+
+    it('generates a question speech bubble with ? for waiting_input', () => {
+      const bubble = getSpeechBubble('waiting_input', {
+        statusText: 'Welche Farbe?',
+      });
+      expect(bubble).toEqual({
+        type: 'alert',
+        text: '?',
+        icon: '❓',
+        tooltip: 'Welche Farbe?',
+      });
+    });
+
+    it('maps waiting_input status to idle animation', () => {
+      expect(statusToAnimation('waiting_input')).toBe('idle');
     });
   });
 });

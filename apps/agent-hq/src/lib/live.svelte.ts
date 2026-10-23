@@ -46,6 +46,9 @@ export function connect(url = '/api/stream'): () => void {
       state: State;
     };
     liveStore.state = state;
+    if ('type' in event && event.type === 'SET_TEAM_STATUSES') {
+      return;
+    }
     liveStore.feed.push(event);
     while (liveStore.feed.length > 1000) liveStore.feed.shift();
   });

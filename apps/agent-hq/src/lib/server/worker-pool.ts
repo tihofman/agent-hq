@@ -6,6 +6,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { DelayedError, type Job, type Queue, type Worker } from 'bullmq';
 import {
   QueueManager,
+  TEAMS,
   type QueueManagerLike,
   type TaskPayload,
   type Team,
@@ -23,9 +24,7 @@ import { parseEvent, type Agent } from './state';
 import { dispatch, subscribe } from './store';
 import { SubscriptionPool } from './subscription-pool';
 
-export type { QueueManagerLike };
-
-export const TEAMS: readonly Team[] = ['frontend', 'backend', 'qa'] as const;
+export { TEAMS, type QueueManagerLike, type Team };
 export const DEFAULT_CONCURRENCY: Record<Team, number> = {
   frontend: 2,
   backend: 1,
@@ -157,6 +156,21 @@ export async function deriveTeamStatus(
     : 'idle';
 }
 
+export async function deriveAllTeamStatuses(
+  queueManager: Pick<QueueManagerLike, 'getQueue'>,
+): Promise<Record<Team, TeamStatus>> {
+  const statuses: Record<Team, TeamStatus> = {
+    frontend: 'idle',
+    backend: 'idle',
+    qa: 'idle',
+  };
+  for (const team of TEAMS) {
+    const queue = queueManager.getQueue(team);
+    statuses[team] = queue ? await deriveTeamStatus(queue) : 'idle';
+  }
+  return statuses;
+}
+
 function resolveDefaultDelegateScript(): string {
   if (process.env.AGENT_HQ_DELEGATE_SCRIPT) {
     return process.env.AGENT_HQ_DELEGATE_SCRIPT;
@@ -184,7 +198,7 @@ export class WorkerPool {
     payload: TaskPayload,
     worktree: PreparedWorktree,
   ) => Promise<FinishWorktreeResult>;
-  private queueManager?: QueueManagerLike;
+  queueManager?: QueueManagerLike;
   private subscriptionPool?: SubscriptionPoolLike;
   private unwireFailover?: () => void;
   private readonly workers = new Map<Team, Worker<TaskPayload>>();

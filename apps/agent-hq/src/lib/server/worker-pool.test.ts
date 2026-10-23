@@ -37,6 +37,7 @@ import {
   WorkerPool,
   buildTaskPrompt,
   deriveTeamStatus,
+  deriveAllTeamStatuses,
   extractSessionId,
   isV2WorkersEnabled,
   truncateError,
@@ -418,6 +419,16 @@ describe('WorkerPool (#98)', () => {
       status: 'PENDING',
     };
     expect(await deriveTeamStatus(qaQueue)).toBe('waiting_input');
+
+    // Test deriveAllTeamStatuses (#102)
+    const activePool = createPool();
+    await activePool.start();
+    expect(await deriveAllTeamStatuses(activePool.queueManager!)).toEqual({
+      frontend: 'idle',
+      backend: 'working',
+      qa: 'waiting_input',
+    });
+    await activePool.close();
   });
 
   it('registers synchronous exit fallback to SIGKILL running children, ignores errors, and unregisters on close', async () => {
@@ -574,6 +585,9 @@ describe('WorkerPool (#98)', () => {
       expect(pausedJob.data.sessionId).toBe(sessionId);
       expect(pausedJob.data.provider).toBe('agy');
       expect(finalizeSpy).not.toHaveBeenCalled();
+      expect(await deriveTeamStatus(manager.getQueue('frontend'))).toBe(
+        'waiting_input',
+      );
 
       // Job 109 completes without a question -> sessionId and provider are NOT saved
       const normalJob = await manager.run(
