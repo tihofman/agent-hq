@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Agent, HQEvent } from '../../server/state';
+  import type { Agent, AgentStatus, HQEvent } from '../../server/state';
   import {
     getSpriteMetadata,
     getFrameIndex,
@@ -14,9 +14,11 @@
 
   interface Props {
     agent: Agent;
+    runId?: string;
+    instanceIndex?: number;
   }
 
-  let { agent }: Props = $props();
+  let { agent, runId, instanceIndex = 0 }: Props = $props();
 
   // The feed also carries InternalActions (no event/runId), so narrow to HQEvents.
   function findLastHandover(): HQEvent | undefined {
@@ -36,22 +38,73 @@
   );
 
   const activeRun = $derived(
-    agentState.runId ? liveStore.state?.runs?.[agentState.runId] : undefined,
+    runId
+      ? liveStore.state?.runs?.[runId]
+      : agentState.runId
+        ? liveStore.state?.runs?.[agentState.runId]
+        : undefined,
+  );
+
+  const characterStatus = $derived<AgentStatus>(
+    runId
+      ? activeRun
+        ? activeRun.status === 'cooldown'
+          ? 'cooldown'
+          : activeRun.status === 'handover'
+            ? 'handover'
+            : activeRun.status === 'running'
+              ? runId === agentState.runId &&
+                (agentState.status === 'testing' ||
+                  agentState.status === 'reviewing' ||
+                  agentState.status === 'coding')
+                ? agentState.status
+                : activeRun.room === 'qa'
+                  ? 'reviewing'
+                  : 'coding'
+              : activeRun.status === 'failed'
+                ? 'errorAlert'
+                : 'idle'
+        : 'idle'
+      : agentState.status,
+  );
+
+  const characterRoom = $derived<RoomId>(
+    runId
+      ? (activeRun?.room as RoomId) ??
+          (runId === agentState.runId
+            ? (agentState.room as RoomId)
+            : undefined) ??
+          (activeRun?.status === 'handover'
+            ? 'hall'
+            : activeRun?.status === 'cooldown'
+              ? 'lounge'
+              : 'dev')
+      : (agentState.room as RoomId) ?? 'lounge',
   );
 
   const activePR = $derived(liveStore.state?.activePR);
   const ticketId = $derived(activeRun?.ticketId);
-  const prNumber = $derived(activePR?.prNumber);
+  const prNumber = $derived(activeRun?.data?.prNumber ?? activePR?.prNumber);
 
   const cooldownUntil = $derived(
-    agentState.cooldownUntil || activeRun?.data?.cooldownUntil,
+    activeRun?.data?.cooldownUntil ?? agentState.cooldownUntil,
   );
 
   const statusText = $derived(activeRun?.data?.statusText);
 
-  // Synchronous initial position (Item 5)
-  const initialRoom = (agentState.room as RoomId) ?? 'lounge';
-  const controller = new AgentController(agent, initialRoom);
+  // Synchronous initial position
+  const initialRoom: RoomId = (() => {
+    if (runId) {
+      const run = liveStore.state?.runs?.[runId];
+      if (run?.room) return run.room as RoomId;
+      if (run?.status === 'handover') return 'hall';
+      if (run?.status === 'cooldown') return 'lounge';
+      if (run?.status === 'running') return 'dev';
+    }
+    return (agentState.room as RoomId) ?? 'lounge';
+  })();
+
+  const controller = new AgentController(agent, initialRoom, instanceIndex);
 
   let currentX = $state(controller.x);
   let currentY = $state(controller.y);
@@ -62,10 +115,15 @@
   let animElapsedMs = 0;
   let lastNowUpdate = 0;
   let lastHandledHandoverKey: string | null = null;
+  let hasHandoverTriggered = false;
   const knownWorkerRuns: Record<string, string | undefined> = {};
 
   $effect(() => {
-    const targetRoom = (agentState.room as RoomId) ?? 'lounge';
+    if (controller.instanceIndex !== instanceIndex) {
+      controller.instanceIndex = instanceIndex;
+    }
+
+    const targetRoom = characterRoom;
     const feedLen = liveStore.feed.length; // Ensure reactive tracking on feed updates
 
     if (feedLen === 0) {
@@ -98,15 +156,21 @@
       if (
         lastHandoverEvent &&
         lastHandoverEvent.agent === agent &&
+        (!runId || !lastHandoverEvent.runId || lastHandoverEvent.runId === runId) &&
         handoverKey !== lastHandledHandoverKey
       ) {
         lastHandledHandoverKey = handoverKey;
         triggerHandover = true;
       } else if (
-        agentState.runId &&
-        agentState.runId !== knownWorkerRuns[agent]
+        runId
+          ? activeRun?.status === 'handover' && !hasHandoverTriggered
+          : agentState.runId && agentState.runId !== knownWorkerRuns[agent]
       ) {
-        knownWorkerRuns[agent] = agentState.runId;
+        if (runId) {
+          hasHandoverTriggered = true;
+        } else {
+          knownWorkerRuns[agent] = agentState.runId;
+        }
         triggerHandover = true;
       }
     }
@@ -119,7 +183,7 @@
   });
 
   const bubble = $derived(
-    getSpeechBubble(agentState.status, {
+    getSpeechBubble(characterStatus, {
       ticketId,
       prNumber,
       statusText,
@@ -131,8 +195,8 @@
   function tick(dt: number) {
     const res = controller.tick(
       dt,
-      agentState.status,
-      (agentState.room as RoomId) ?? 'lounge',
+      characterStatus,
+      characterRoom,
     );
     currentX = res.x;
     currentY = res.y;
@@ -199,13 +263,17 @@
     z-index: {Math.round(currentY) + 20};
   "
   data-testid="character-sprite-{agent}"
-  title="{metadata.displayName} ({metadata.role}) • {agentState.status}"
+  data-agent={agent}
+  data-run-id={runId}
+  data-instance-index={instanceIndex}
+  title="{metadata.displayName} ({metadata.role}) • {characterStatus}"
 >
   <!-- Retro Status Speech Bubble -->
   {#if bubble}
     <div
       class="speech-bubble bubble-{bubble.type}"
       data-testid="speech-bubble-{agent}"
+      data-run-id={runId}
     >
       {#if bubble.icon}
         <span class="bubble-icon" class:gear-icon={bubble.type === 'testing'}

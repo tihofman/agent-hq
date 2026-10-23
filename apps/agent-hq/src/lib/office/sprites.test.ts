@@ -13,6 +13,9 @@ import {
   getAgentSpot,
   getClosestWaypointId,
   AgentController,
+  deriveCharacters,
+  doSpotsOverlap,
+  ACTIVE_RUN_STATUSES,
 } from './sprites';
 import {
   WAYPOINTS,
@@ -387,6 +390,242 @@ describe('office/sprites', () => {
       expect(agy.y).toBeCloseTo(devSpot.y);
       expect(claude.x).toBeCloseTo(ceoSpot.x);
       expect(claude.y).toBeCloseTo(ceoSpot.y);
+    });
+  });
+
+  describe('deriveCharacters (Runs -> Characters)', () => {
+    it('returns default 3 characters for claude, agy, codex when state is empty or undefined', () => {
+      expect(deriveCharacters(null)).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+      expect(deriveCharacters({})).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+    });
+
+    it('Claude and agents without active runs remain exactly one character', () => {
+      const state = {
+        runs: {
+          'run-1': {
+            runId: 'run-1',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+        },
+      };
+      const chars = deriveCharacters(state);
+      expect(chars.filter((c) => c.agent === 'claude')).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+      ]);
+      expect(chars.filter((c) => c.agent === 'codex')).toEqual([
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+    });
+
+    it('derives two agy characters for two parallel agy runs with runId as key', () => {
+      const state = {
+        runs: {
+          'run-1': {
+            runId: 'run-1',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+          'run-2': {
+            runId: 'run-2',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:05:00Z',
+            data: {},
+          },
+        },
+      };
+      const chars = deriveCharacters(state);
+      const agyChars = chars.filter((c) => c.agent === 'agy');
+      expect(agyChars).toHaveLength(2);
+      expect(agyChars[0]).toEqual({
+        id: 'run-1',
+        agent: 'agy',
+        runId: 'run-1',
+        instanceIndex: 0,
+      });
+      expect(agyChars[1]).toEqual({
+        id: 'run-2',
+        agent: 'agy',
+        runId: 'run-2',
+        instanceIndex: 1,
+      });
+    });
+
+    it('returns only one agy character after one run ends, and one idle agy after both end', () => {
+      // 1. One run ended, one still active
+      const stateOneActive = {
+        runs: {
+          'run-1': {
+            runId: 'run-1',
+            agent: 'agy' as const,
+            status: 'complete' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+          'run-2': {
+            runId: 'run-2',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:05:00Z',
+            data: {},
+          },
+        },
+      };
+      const charsOne = deriveCharacters(stateOneActive);
+      const agyCharsOne = charsOne.filter((c) => c.agent === 'agy');
+      expect(agyCharsOne).toHaveLength(1);
+      expect(agyCharsOne[0]).toEqual({
+        id: 'run-2',
+        agent: 'agy',
+        runId: 'run-2',
+        instanceIndex: 0,
+      });
+
+      // 2. Both runs ended
+      const stateBothEnded = {
+        runs: {
+          'run-1': {
+            runId: 'run-1',
+            agent: 'agy' as const,
+            status: 'complete' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+          'run-2': {
+            runId: 'run-2',
+            agent: 'agy' as const,
+            status: 'failed' as const,
+            timestamp: '2026-10-23T10:05:00Z',
+            data: {},
+          },
+        },
+      };
+      const charsEnded = deriveCharacters(stateBothEnded);
+      const agyCharsEnded = charsEnded.filter((c) => c.agent === 'agy');
+      expect(agyCharsEnded).toHaveLength(1);
+      expect(agyCharsEnded[0]).toEqual({
+        id: 'agy',
+        agent: 'agy',
+        instanceIndex: 0,
+      });
+    });
+
+    it('considers handover, running, cooldown as active, but complete, failed, aborted as inactive', () => {
+      const state = {
+        runs: {
+          'r-handover': {
+            runId: 'r-handover',
+            agent: 'agy' as const,
+            status: 'handover' as const,
+            timestamp: '2026-10-23T10:01:00Z',
+            data: {},
+          },
+          'r-running': {
+            runId: 'r-running',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:02:00Z',
+            data: {},
+          },
+          'r-cooldown': {
+            runId: 'r-cooldown',
+            agent: 'agy' as const,
+            status: 'cooldown' as const,
+            timestamp: '2026-10-23T10:03:00Z',
+            data: {},
+          },
+          'r-complete': {
+            runId: 'r-complete',
+            agent: 'agy' as const,
+            status: 'complete' as const,
+            timestamp: '2026-10-23T10:04:00Z',
+            data: {},
+          },
+          'r-failed': {
+            runId: 'r-failed',
+            agent: 'agy' as const,
+            status: 'failed' as const,
+            timestamp: '2026-10-23T10:05:00Z',
+            data: {},
+          },
+          'r-aborted': {
+            runId: 'r-aborted',
+            agent: 'agy' as const,
+            status: 'aborted' as const,
+            timestamp: '2026-10-23T10:06:00Z',
+            data: {},
+          },
+        },
+      };
+      expect(ACTIVE_RUN_STATUSES).toEqual(['handover', 'running', 'cooldown']);
+      const chars = deriveCharacters(state);
+      const agyRuns = chars
+        .filter((c) => c.agent === 'agy')
+        .map((c) => c.runId);
+      expect(agyRuns).toEqual(['r-handover', 'r-running', 'r-cooldown']);
+    });
+  });
+
+  describe('Multi-instance positioning and non-overlapping in rooms', () => {
+    it('guarantees instances of the same agent do not overlap in any room', () => {
+      const agents: Agent[] = ['agy', 'codex', 'claude'];
+      for (const room of ROOM_IDS) {
+        for (const agent of agents) {
+          const spot0 = getAgentSpot(agent, room, 0);
+          const spot1 = getAgentSpot(agent, room, 1);
+          expect(doSpotsOverlap(spot0, spot1)).toBe(false);
+          const dist = Math.hypot(spot0.x - spot1.x, spot0.y - spot1.y);
+          expect(dist).toBeGreaterThanOrEqual(36);
+        }
+      }
+    });
+
+    it('guarantees all characters in the same room (including parallel runs) never overlap', () => {
+      // In any room, even if we have claude + agy#0 + agy#1 + codex#0 + codex#1
+      for (const room of ROOM_IDS) {
+        const positions = [
+          getAgentSpot('claude', room, 0),
+          getAgentSpot('agy', room, 0),
+          getAgentSpot('agy', room, 1),
+          getAgentSpot('codex', room, 0),
+          getAgentSpot('codex', room, 1),
+        ];
+
+        for (let i = 0; i < positions.length; i++) {
+          for (let j = i + 1; j < positions.length; j++) {
+            const posA = positions[i];
+            const posB = positions[j];
+            expect(doSpotsOverlap(posA, posB)).toBe(false);
+            const dist = Math.hypot(posA.x - posB.x, posA.y - posB.y);
+            expect(dist).toBeGreaterThanOrEqual(36);
+          }
+        }
+      }
+    });
+
+    it('positions parallel agents at distinct spots during handover walk', () => {
+      const agy0 = new AgentController('agy', 'lounge', 0);
+      const agy1 = new AgentController('agy', 'lounge', 1);
+      agy0.startHandover();
+      agy1.startHandover();
+
+      // In hall, their target positions differ and do not overlap
+      const spot0 = getAgentSpot('agy', 'hall', 0);
+      const spot1 = getAgentSpot('agy', 'hall', 1);
+      expect(doSpotsOverlap(spot0, spot1)).toBe(false);
     });
   });
 });
