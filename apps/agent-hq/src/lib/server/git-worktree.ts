@@ -1,29 +1,17 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { TaskPayload } from '@agent-hq/queue';
 
 const defaultExecFileAsync = promisify(execFile);
 
-export type ExecFileFn = (
-  file: string,
-  args: readonly string[],
-  options?: {
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    timeout?: number;
-    maxBuffer?: number;
-  },
-) => Promise<{ stdout: string; stderr: string }>;
-
-export interface PrepareWorktreeOptions {
+export interface WorktreeContext {
   repoRoot: string;
-  issueId: number;
-  title: string;
+  remote?: string;
   baseBranch?: string;
+  ghBinary?: string;
   env?: NodeJS.ProcessEnv;
-  execFileFn?: ExecFileFn;
 }
 
 export interface PreparedWorktree {
@@ -32,37 +20,8 @@ export interface PreparedWorktree {
   slug: string;
 }
 
-export interface FinishWorktreeOptions {
-  repoRoot: string;
-  worktreePath: string;
-  branch: string;
-  issueId: number;
-  title: string;
-  remote?: string;
-  ghBinary?: string;
-  env?: NodeJS.ProcessEnv;
-  execFileFn?: ExecFileFn;
-}
-
 export interface FinishWorktreeResult {
   prUrl: string;
-}
-
-export interface WorktreeManagerLike {
-  prepare(payload: TaskPayload): Promise<PreparedWorktree>;
-  finalizeSuccess(
-    payload: TaskPayload,
-    worktree: PreparedWorktree,
-  ): Promise<FinishWorktreeResult>;
-}
-
-export interface GitWorktreeManagerOptions {
-  repoRoot?: string;
-  remote?: string;
-  ghBinary?: string;
-  baseBranch?: string;
-  env?: NodeJS.ProcessEnv;
-  execFileFn?: ExecFileFn;
 }
 
 export function slugify(title: string, maxLength = 40): string {
@@ -77,20 +36,11 @@ export function slugify(title: string, maxLength = 40): string {
   return sliced || 'task';
 }
 
-export function getBranchName(issueId: number, slug: string): string {
-  return `feat/${issueId}-${slug}`;
-}
-
-export function getWorktreeRelPath(issueId: number, slug: string): string {
-  return `.worktrees/feat-${issueId}-${slug}`;
-}
-
-export function getWorktreePath(
-  repoRoot: string,
-  issueId: number,
-  slug: string,
-): string {
-  return resolve(repoRoot, getWorktreeRelPath(issueId, slug));
+function getWorktreeTarget(repoRoot: string, issueId: number, title: string) {
+  const slug = slugify(title);
+  const branch = `feat/${issueId}-${slug}`;
+  const worktreePath = resolve(repoRoot, `.worktrees/feat-${issueId}-${slug}`);
+  return { slug, branch, worktreePath };
 }
 
 function formatGitError(err: unknown): string {
@@ -102,221 +52,187 @@ function formatGitError(err: unknown): string {
   return String(err);
 }
 
-export async function resolveServerRepoRoot(
-  cwd = process.cwd(),
-  env: NodeJS.ProcessEnv = process.env,
-  execFileFn: ExecFileFn = defaultExecFileAsync,
+async function git(
+  args: string[],
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<string> {
-  if (env.AGENT_HQ_REPO_ROOT) {
-    return resolve(env.AGENT_HQ_REPO_ROOT);
-  }
   try {
-    const { stdout } = await execFileFn(
-      'git',
-      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-      { cwd, env, timeout: 3_000 },
-    );
-    const gitDir = resolve(cwd, stdout.trim());
-    return dirname(gitDir);
+    const { stdout } = await defaultExecFileAsync('git', args, { cwd, env });
+    return stdout;
+  } catch (err) {
+    throw new Error(`git ${args[0]} failed: ${formatGitError(err)}`, {
+      cause: err,
+    });
+  }
+}
+
+function safeRealpath(p: string): string {
+  try {
+    return realpathSync(p);
   } catch {
-    return cwd;
+    return resolve(p);
   }
 }
 
 export async function prepareWorktree(
-  options: PrepareWorktreeOptions,
+  ctx: WorktreeContext,
+  payload: TaskPayload,
 ): Promise<PreparedWorktree> {
-  const {
-    repoRoot,
-    issueId,
-    title,
-    baseBranch = 'main',
-    env = process.env,
-    execFileFn = defaultExecFileAsync,
-  } = options;
+  const { slug, branch, worktreePath } = getWorktreeTarget(
+    ctx.repoRoot,
+    payload.issueId,
+    payload.title,
+  );
+  const remote = ctx.remote ?? 'origin';
+  const baseBranch = ctx.baseBranch ?? 'main';
+  const baseRef = `${remote}/${baseBranch}`;
 
-  const slug = slugify(title);
-  const branch = getBranchName(issueId, slug);
-  const worktreePath = getWorktreePath(repoRoot, issueId, slug);
+  // 1. Prune stale worktree metadata
+  await git(['worktree', 'prune'], ctx.repoRoot, ctx.env);
 
-  // 1. git worktree prune
-  try {
-    await execFileFn('git', ['worktree', 'prune'], { cwd: repoRoot, env });
-  } catch (err) {
-    throw new Error(`git worktree prune failed: ${formatGitError(err)}`, {
-      cause: err,
-    });
-  }
-
-  // 2. Check if worktree directory already exists (Retry)
+  // 2. Retry check: reuse worktree only if porcelain lists it AND HEAD matches branch
   if (existsSync(worktreePath)) {
+    const listOut = await git(
+      ['worktree', 'list', '--porcelain'],
+      ctx.repoRoot,
+      ctx.env,
+    );
+    const targetReal = safeRealpath(worktreePath);
+    const isRegistered = listOut
+      .split('\n')
+      .filter((l) => l.startsWith('worktree '))
+      .some(
+        (l) => safeRealpath(l.slice('worktree '.length).trim()) === targetReal,
+      );
+
+    let currentBranch: string | null = null;
     try {
-      await execFileFn('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd: worktreePath,
-        env,
-      });
-      return { worktreePath, branch, slug };
+      const { stdout } = await defaultExecFileAsync(
+        'git',
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        { cwd: worktreePath, env: ctx.env },
+      );
+      currentBranch = stdout.trim();
     } catch {
-      try {
-        await execFileFn('git', ['worktree', 'prune'], { cwd: repoRoot, env });
-      } catch {
-        // ignore
-      }
+      // not inside a valid worktree
     }
+
+    if (isRegistered && currentBranch === branch) {
+      return { worktreePath, branch, slug };
+    }
+
+    throw new Error(
+      `Path ${worktreePath} exists but is not a valid worktree for branch ${branch}`,
+    );
   }
 
-  // 3. Check if branch already exists in git
+  // 3. Basis: fetch remote baseBranch and branch off origin/main
+  await git(['fetch', remote, baseBranch], ctx.repoRoot, ctx.env);
+
   let branchExists = false;
   try {
-    await execFileFn(
+    await defaultExecFileAsync(
       'git',
       ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`],
-      { cwd: repoRoot, env },
+      { cwd: ctx.repoRoot, env: ctx.env },
     );
     branchExists = true;
   } catch {
-    // branch does not exist
+    // branch does not exist yet
   }
 
-  // 4. Add worktree
-  try {
-    if (branchExists) {
-      await execFileFn('git', ['worktree', 'add', worktreePath, branch], {
-        cwd: repoRoot,
-        env,
-      });
-    } else {
-      await execFileFn(
-        'git',
-        ['worktree', 'add', '-b', branch, worktreePath, baseBranch],
-        { cwd: repoRoot, env },
-      );
-    }
-  } catch (err) {
-    throw new Error(
-      `git worktree add failed for ${branch} at ${worktreePath}: ${formatGitError(err)}`,
-      { cause: err },
+  if (branchExists) {
+    await git(['worktree', 'add', worktreePath, branch], ctx.repoRoot, ctx.env);
+  } else {
+    await git(
+      ['worktree', 'add', '-b', branch, worktreePath, baseRef],
+      ctx.repoRoot,
+      ctx.env,
     );
   }
 
   return { worktreePath, branch, slug };
 }
 
-export async function finishWorktree(
-  options: FinishWorktreeOptions,
+export async function finalizeWorktree(
+  ctx: WorktreeContext,
+  payload: TaskPayload,
+  wt: PreparedWorktree,
 ): Promise<FinishWorktreeResult> {
-  const {
-    repoRoot,
-    worktreePath,
-    branch,
-    issueId,
-    title,
-    remote = 'origin',
-    ghBinary = process.env.GH_BIN ?? 'gh',
-    env = process.env,
-    execFileFn = defaultExecFileAsync,
-  } = options;
+  const remote = ctx.remote ?? 'origin';
+  const baseBranch = ctx.baseBranch ?? 'main';
+  const baseRef = `${remote}/${baseBranch}`;
+  const ghBinary = ctx.ghBinary ?? process.env.GH_BIN ?? 'gh';
+  const cleanTitle = payload.title.replace(/[\r\n]+/g, ' ').trim();
 
-  const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim();
-
-  // 1. Check for uncommitted changes left by worker
-  let statusOut: string;
-  try {
-    const res = await execFileFn('git', ['status', '--porcelain'], {
-      cwd: worktreePath,
-      env,
-    });
-    statusOut = res.stdout;
-  } catch (err) {
-    throw new Error(`git status failed: ${formatGitError(err)}`, {
-      cause: err,
-    });
-  }
-
+  // 1. Commit uncommitted changes left by worker
+  const statusOut = await git(
+    ['status', '--porcelain'],
+    wt.worktreePath,
+    ctx.env,
+  );
   if (statusOut.trim().length > 0) {
-    try {
-      await execFileFn('git', ['add', '-A'], { cwd: worktreePath, env });
-    } catch (err) {
-      throw new Error(`git add failed: ${formatGitError(err)}`, { cause: err });
-    }
-
-    const commitMsg = `feat(#${issueId}): ${cleanTitle}`;
-
-    let hasAuthor = false;
-    try {
-      await execFileFn('git', ['config', 'user.name'], {
-        cwd: worktreePath,
-        env,
-      });
-      hasAuthor = true;
-    } catch {
-      // no author configured
-    }
-
-    const commitArgs = hasAuthor
-      ? ['commit', '-m', commitMsg]
-      : [
-          '-c',
-          'user.name=Agent-HQ',
-          '-c',
-          'user.email=agent-hq@local',
-          'commit',
-          '-m',
-          commitMsg,
-        ];
-
-    try {
-      await execFileFn('git', commitArgs, { cwd: worktreePath, env });
-    } catch (err) {
-      throw new Error(`git commit failed: ${formatGitError(err)}`, {
-        cause: err,
-      });
-    }
-  }
-
-  // 2. Push branch to remote
-  try {
-    await execFileFn('git', ['push', '-u', remote, branch], {
-      cwd: worktreePath,
-      env,
-    });
-  } catch (err) {
-    throw new Error(
-      `git push -u ${remote} ${branch} failed: ${formatGitError(err)}`,
-      { cause: err },
+    await git(['add', '-A'], wt.worktreePath, ctx.env);
+    await git(
+      [
+        '-c',
+        'user.name=agent-hq',
+        '-c',
+        'user.email=agent-hq@localhost',
+        'commit',
+        '-m',
+        `feat(#${payload.issueId}): ${cleanTitle}`,
+      ],
+      wt.worktreePath,
+      ctx.env,
     );
   }
 
-  // 3. Draft PR creation / lookup
+  // 2. Check for changes / commits against base before gh pr create
+  const revListOut = await git(
+    ['rev-list', '--count', `${baseRef}..HEAD`],
+    wt.worktreePath,
+    ctx.env,
+  );
+  const commitCount = Number.parseInt(revListOut.trim(), 10) || 0;
+  if (commitCount === 0) {
+    throw new Error(
+      `No changes or commits against ${baseRef} for branch ${wt.branch}`,
+    );
+  }
+
+  // 3. Push branch to remote
+  await git(['push', '-u', remote, wt.branch], wt.worktreePath, ctx.env);
+
+  // 4. Draft PR creation / lookup
   let prUrl: string | null = null;
   try {
-    const { stdout } = await execFileFn(
+    const { stdout } = await defaultExecFileAsync(
       ghBinary,
-      ['pr', 'view', branch, '--json', 'url', '-q', '.url'],
-      { cwd: worktreePath, env },
+      ['pr', 'view', wt.branch, '--json', 'url', '-q', '.url'],
+      { cwd: wt.worktreePath, env: ctx.env },
     );
     const trimmed = stdout.trim();
-    if (trimmed) {
-      prUrl = trimmed;
-    }
+    if (trimmed) prUrl = trimmed;
   } catch {
-    // No PR exists yet
+    // PR does not exist yet
   }
 
   if (!prUrl) {
     try {
-      const { stdout } = await execFileFn(
+      const { stdout } = await defaultExecFileAsync(
         ghBinary,
         [
           'pr',
           'create',
           '--draft',
           '--title',
-          `feat(#${issueId}): ${cleanTitle}`,
+          `feat(#${payload.issueId}): ${cleanTitle}`,
           '--body',
-          `Closes #${issueId}`,
+          `Closes #${payload.issueId}`,
         ],
-        { cwd: worktreePath, env },
+        { cwd: wt.worktreePath, env: ctx.env },
       );
       prUrl = stdout.trim();
     } catch (err) {
@@ -330,80 +246,14 @@ export async function finishWorktree(
     }
   }
 
-  // 4. Remove worktree (branch remains)
+  // 5. Worktree removal is best-effort (no --force)
   try {
-    await execFileFn('git', ['worktree', 'remove', worktreePath], {
-      cwd: repoRoot,
-      env,
-    });
-  } catch {
-    try {
-      await execFileFn('git', ['worktree', 'remove', '--force', worktreePath], {
-        cwd: repoRoot,
-        env,
-      });
-    } catch (err) {
-      throw new Error(
-        `git worktree remove failed for ${worktreePath}: ${formatGitError(err)}`,
-        { cause: err },
-      );
-    }
+    await git(['worktree', 'remove', wt.worktreePath], ctx.repoRoot, ctx.env);
+  } catch (err) {
+    console.warn(
+      `[git-worktree] Failed to remove worktree ${wt.worktreePath}: ${formatGitError(err)}`,
+    );
   }
 
   return { prUrl };
-}
-
-export class GitWorktreeManager implements WorktreeManagerLike {
-  private readonly configuredRepoRoot?: string;
-  private readonly remote: string;
-  private readonly ghBinary: string;
-  private readonly baseBranch: string;
-  private readonly env?: NodeJS.ProcessEnv;
-  private readonly execFileFn: ExecFileFn;
-
-  constructor(options: GitWorktreeManagerOptions = {}) {
-    this.configuredRepoRoot = options.repoRoot;
-    this.remote = options.remote ?? 'origin';
-    this.ghBinary = options.ghBinary ?? process.env.GH_BIN ?? 'gh';
-    this.baseBranch = options.baseBranch ?? 'main';
-    this.env = options.env;
-    this.execFileFn = options.execFileFn ?? defaultExecFileAsync;
-  }
-
-  private async getRepoRoot(): Promise<string> {
-    if (this.configuredRepoRoot) {
-      return resolve(this.configuredRepoRoot);
-    }
-    return resolveServerRepoRoot(process.cwd(), this.env, this.execFileFn);
-  }
-
-  async prepare(payload: TaskPayload): Promise<PreparedWorktree> {
-    const repoRoot = await this.getRepoRoot();
-    return prepareWorktree({
-      repoRoot,
-      issueId: payload.issueId,
-      title: payload.title,
-      baseBranch: this.baseBranch,
-      env: this.env,
-      execFileFn: this.execFileFn,
-    });
-  }
-
-  async finalizeSuccess(
-    payload: TaskPayload,
-    worktree: PreparedWorktree,
-  ): Promise<FinishWorktreeResult> {
-    const repoRoot = await this.getRepoRoot();
-    return finishWorktree({
-      repoRoot,
-      worktreePath: worktree.worktreePath,
-      branch: worktree.branch,
-      issueId: payload.issueId,
-      title: payload.title,
-      remote: this.remote,
-      ghBinary: this.ghBinary,
-      env: this.env,
-      execFileFn: this.execFileFn,
-    });
-  }
 }

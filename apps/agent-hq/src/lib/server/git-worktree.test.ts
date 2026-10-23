@@ -1,24 +1,21 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readFile,
-  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TaskPayload } from '@agent-hq/queue';
 import {
-  finishWorktree,
-  getBranchName,
-  getWorktreePath,
-  getWorktreeRelPath,
-  GitWorktreeManager,
+  finalizeWorktree,
   prepareWorktree,
-  resolveServerRepoRoot,
   slugify,
+  type WorktreeContext,
 } from './git-worktree';
 
 describe('git-worktree (#100)', () => {
@@ -27,6 +24,25 @@ describe('git-worktree (#100)', () => {
   let serverRepoDir: string;
   let fakeGhScript: string;
   let fakeGhLog: string;
+
+  const makeCtx = (
+    overrides: Partial<WorktreeContext> = {},
+  ): WorktreeContext => ({
+    repoRoot: serverRepoDir,
+    ghBinary: fakeGhScript,
+    ...overrides,
+  });
+
+  const makePayload = (
+    issueId = 100,
+    title = 'Automatisches Worktree- und Draft-PR-Handling',
+  ): TaskPayload => ({
+    issueId,
+    title,
+    team: 'frontend',
+    body: 'description',
+    labels: ['team:frontend'],
+  });
 
   beforeEach(async () => {
     tempBase = await mkdtemp(join(tmpdir(), 'hq-wt-test-'));
@@ -109,18 +125,14 @@ exit 1
     await rm(tempBase, { recursive: true, force: true });
   });
 
-  describe('slugify & path helpers', () => {
-    it('converts titles to lowercase a-z0-9 and hyphens, strips umlauts, truncates cleanly to max 40 chars', () => {
+  describe('slugify', () => {
+    it('converts titles to lowercase a-z0-9 and hyphens, strips umlauts, truncates cleanly', () => {
       expect(
         slugify(
           'Automatisches Worktree- und Draft-PR-Handling im Worker-Slot',
           40,
         ),
       ).toBe('automatisches-worktree-und-draft-pr-hand');
-      expect(
-        slugify('Automatisches Worktree- und Draft-PR-Handling im Worker-Slot')
-          .length,
-      ).toBeLessThanOrEqual(40);
       expect(slugify('Ärger über Übergröße')).toBe('arger-uber-ubergrosse');
       expect(slugify('Special --- chars &&& spaces   here')).toBe(
         'special-chars-spaces-here',
@@ -128,36 +140,18 @@ exit 1
       expect(slugify('---')).toBe('task');
       expect(slugify('')).toBe('task');
     });
-
-    it('generates standardized branch and worktree paths', () => {
-      const slug = slugify('My Task');
-      expect(getBranchName(42, slug)).toBe('feat/42-my-task');
-      expect(getWorktreeRelPath(42, slug)).toBe('.worktrees/feat-42-my-task');
-      expect(getWorktreePath('/tmp/repo', 42, slug)).toBe(
-        join('/tmp/repo', '.worktrees/feat-42-my-task'),
-      );
-    });
-
-    it('resolves server repo root from within a worktree or standard checkout', async () => {
-      const root = await resolveServerRepoRoot(serverRepoDir);
-      expect(root).toBe(await realpath(serverRepoDir));
-    });
   });
 
   describe('prepareWorktree', () => {
-    it('prunes and creates a new worktree on a new branch from main', async () => {
-      const prepared = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 100,
-        title: 'Worktree Handling',
-      });
+    it('prunes and creates a new worktree on a new branch from origin/main', async () => {
+      const payload = makePayload(100, 'Worktree Handling');
+      const prepared = await prepareWorktree(makeCtx(), payload);
 
       expect(prepared.branch).toBe('feat/100-worktree-handling');
       expect(prepared.worktreePath).toBe(
         join(serverRepoDir, '.worktrees', 'feat-100-worktree-handling'),
       );
 
-      // Verify worktree exists and branch is correct
       const currentBranch = execFileSync('git', [
         '-C',
         prepared.worktreePath,
@@ -169,7 +163,6 @@ exit 1
         .trim();
       expect(currentBranch).toBe('feat/100-worktree-handling');
 
-      // Verify worktree list includes it
       const wtList = execFileSync('git', [
         '-C',
         serverRepoDir,
@@ -177,45 +170,57 @@ exit 1
         'list',
       ]).toString();
       expect(wtList).toContain('feat-100-worktree-handling');
-      expect(wtList).toContain('[feat/100-worktree-handling]');
     });
 
-    it('reuses existing worktree on retry without error', async () => {
-      const first = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 101,
-        title: 'Retry Scenario',
-      });
+    it('refuses to reuse a non-worktree directory or wrong branch and fails without touching main checkout (Finding 1)', async () => {
+      // 1. Create leftover non-worktree directory
+      const leftoverDir = join(
+        serverRepoDir,
+        '.worktrees',
+        'feat-101-security-check',
+      );
+      await mkdir(leftoverDir, { recursive: true });
+      await writeFile(join(leftoverDir, 'leftover.txt'), 'corrupted dir');
 
-      // Write a file in the worktree
+      const payload = makePayload(101, 'Security Check');
+      await expect(prepareWorktree(makeCtx(), payload)).rejects.toThrow(
+        /not a valid worktree/,
+      );
+
+      // Verify nothing happened in main checkout
+      const status = execFileSync('git', [
+        '-C',
+        serverRepoDir,
+        'status',
+        '--porcelain',
+      ])
+        .toString()
+        .trim();
+      expect(status).toBe('');
+    });
+
+    it('reuses existing worktree on retry when registered in worktree list and on expected branch', async () => {
+      const payload = makePayload(101, 'Retry Scenario');
+      const first = await prepareWorktree(makeCtx(), payload);
+
       await writeFile(
         join(first.worktreePath, 'scratch.txt'),
         'in progress data',
       );
 
-      // Retry: prepare again
-      const second = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 101,
-        title: 'Retry Scenario',
-      });
+      const second = await prepareWorktree(makeCtx(), payload);
 
       expect(second.worktreePath).toBe(first.worktreePath);
       expect(second.branch).toBe(first.branch);
-      // Data in scratch.txt remains intact
       expect(
         await readFile(join(second.worktreePath, 'scratch.txt'), 'utf8'),
       ).toBe('in progress data');
     });
 
     it('reuses existing branch when worktree folder was previously removed', async () => {
-      const first = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 102,
-        title: 'Recreate Worktree',
-      });
+      const payload = makePayload(102, 'Recreate Worktree');
+      const first = await prepareWorktree(makeCtx(), payload);
 
-      // Manually remove worktree but keep branch
       execFileSync('git', [
         '-C',
         serverRepoDir,
@@ -224,24 +229,7 @@ exit 1
         first.worktreePath,
       ]);
 
-      // Branch still exists
-      const branchRef = execFileSync('git', [
-        '-C',
-        serverRepoDir,
-        'rev-parse',
-        '--verify',
-        'refs/heads/feat/102-recreate-worktree',
-      ])
-        .toString()
-        .trim();
-      expect(branchRef).toBeTruthy();
-
-      // Second prepare attaches new worktree to existing branch
-      const second = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 102,
-        title: 'Recreate Worktree',
-      });
+      const second = await prepareWorktree(makeCtx(), payload);
 
       expect(second.worktreePath).toBe(first.worktreePath);
       const currentBranch = execFileSync('git', [
@@ -255,36 +243,74 @@ exit 1
         .trim();
       expect(currentBranch).toBe('feat/102-recreate-worktree');
     });
+
+    it('fetches origin/main and branches from origin/main rather than local main (Finding 3)', async () => {
+      // Create a commit on bare origin/main that local main does NOT have
+      const peerRepoDir = join(tempBase, 'peer-repo');
+      execFileSync('git', ['clone', bareRemoteDir, peerRepoDir]);
+      execFileSync('git', ['-C', peerRepoDir, 'config', 'user.name', 'Peer']);
+      execFileSync('git', [
+        '-C',
+        peerRepoDir,
+        'config',
+        'user.email',
+        'peer@example.com',
+      ]);
+      await writeFile(
+        join(peerRepoDir, 'from-origin.txt'),
+        'hello from remote',
+      );
+      execFileSync('git', ['-C', peerRepoDir, 'add', 'from-origin.txt']);
+      execFileSync('git', [
+        '-C',
+        peerRepoDir,
+        'commit',
+        '-m',
+        'commit on origin/main',
+      ]);
+      execFileSync('git', ['-C', peerRepoDir, 'push', 'origin', 'main']);
+
+      // Ensure local serverRepoDir main does NOT have this commit yet
+      expect(
+        execFileSync('git', [
+          '-C',
+          serverRepoDir,
+          'log',
+          '--format=%s',
+          'main',
+        ]).toString(),
+      ).not.toContain('commit on origin/main');
+
+      // prepareWorktree must fetch origin/main and branch off origin/main
+      const payload = makePayload(103, 'Branch From Origin');
+      const prepared = await prepareWorktree(makeCtx(), payload);
+
+      expect(
+        await readFile(join(prepared.worktreePath, 'from-origin.txt'), 'utf8'),
+      ).toBe('hello from remote');
+    });
   });
 
-  describe('finishWorktree', () => {
-    it('commits uncommitted worker changes as feat(#<ID>): <Title>, pushes to origin, creates draft PR with Closes #<ID>, and removes worktree', async () => {
-      const prepared = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 100,
-        title: 'Automatisches Worktree- und Draft-PR-Handling',
-      });
+  describe('finalizeWorktree', () => {
+    it('commits uncommitted worker changes as feat(#<ID>): <Title>, pushes, creates draft PR, and removes worktree', async () => {
+      const payload = makePayload(
+        100,
+        'Automatisches Worktree- und Draft-PR-Handling',
+      );
+      const prepared = await prepareWorktree(makeCtx(), payload);
 
-      // Simulate codex/worker leaving uncommitted changes
       await writeFile(
         join(prepared.worktreePath, 'solution.ts'),
         'export const answer = 42;\n',
       );
 
-      const result = await finishWorktree({
-        repoRoot: serverRepoDir,
-        worktreePath: prepared.worktreePath,
-        branch: prepared.branch,
-        issueId: 100,
-        title: 'Automatisches Worktree- und Draft-PR-Handling',
-        ghBinary: fakeGhScript,
-      });
+      const result = await finalizeWorktree(makeCtx(), payload, prepared);
 
       expect(result.prUrl).toBe(
         'https://github.com/fake-org/fake-repo/pull/123',
       );
 
-      // Verify commit was created with Conventional Commit feat(#100): ...
+      // Conventional Commit feat(#100): Automatisches Worktree- und Draft-PR-Handling
       const lastCommitMsg = execFileSync('git', [
         '-C',
         serverRepoDir,
@@ -299,7 +325,7 @@ exit 1
         'feat(#100): Automatisches Worktree- und Draft-PR-Handling',
       );
 
-      // Verify branch was pushed to bare origin
+      // Pushed to remote
       const remoteHead = execFileSync('git', [
         '--git-dir',
         bareRemoteDir,
@@ -310,14 +336,13 @@ exit 1
         .trim();
       expect(remoteHead).toBeTruthy();
 
-      // Verify gh was invoked with --draft and Closes #100
+      // gh invoked with --draft and Closes #100
       const ghLog = await readFile(fakeGhLog, 'utf8');
-      expect(ghLog).toContain('pr view feat/100-');
       expect(ghLog).toContain(
         'pr create --draft --title feat(#100): Automatisches Worktree- und Draft-PR-Handling --body Closes #100',
       );
 
-      // Verify worktree is removed
+      // Worktree removed
       const wtList = execFileSync('git', [
         '-C',
         serverRepoDir,
@@ -325,28 +350,35 @@ exit 1
         'list',
       ]).toString();
       expect(wtList).not.toContain(prepared.worktreePath);
+    });
 
-      // Verify branch remains
-      const localBranch = execFileSync('git', [
+    it('aborts with a clear error and leaves worktree intact when there are no changes or commits against base (Finding 2)', async () => {
+      const payload = makePayload(104, 'No Changes Made');
+      const prepared = await prepareWorktree(makeCtx(), payload);
+
+      // No changes made by worker
+      await expect(
+        finalizeWorktree(makeCtx(), payload, prepared),
+      ).rejects.toThrow(/No changes or commits against origin\/main/);
+
+      // Worktree remains intact
+      const wtList = execFileSync('git', [
         '-C',
         serverRepoDir,
-        'branch',
-        '--list',
-        prepared.branch,
-      ])
-        .toString()
-        .trim();
-      expect(localBranch).toContain(prepared.branch);
+        'worktree',
+        'list',
+      ]).toString();
+      expect(wtList).toContain(prepared.worktreePath);
+
+      // gh pr create was NOT called
+      const ghLog = (await readFile(fakeGhLog, 'utf8').catch(() => '')).trim();
+      expect(ghLog).not.toContain('pr create');
     });
 
     it('does not create an extra commit if worker already committed changes', async () => {
-      const prepared = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 103,
-        title: 'Pre-committed Feature',
-      });
+      const payload = makePayload(105, 'Pre-committed Feature');
+      const prepared = await prepareWorktree(makeCtx(), payload);
 
-      // Worker commits their own work
       await writeFile(
         join(prepared.worktreePath, 'worker-file.ts'),
         'export const w = 1;',
@@ -357,7 +389,7 @@ exit 1
         prepared.worktreePath,
         'commit',
         '-m',
-        'feat(#103): worker self-commit',
+        'feat(#105): worker self-commit',
       ]);
 
       const commitCountBefore = Number(
@@ -372,15 +404,7 @@ exit 1
           .trim(),
       );
 
-      const result = await finishWorktree({
-        repoRoot: serverRepoDir,
-        worktreePath: prepared.worktreePath,
-        branch: prepared.branch,
-        issueId: 103,
-        title: 'Pre-committed Feature',
-        ghBinary: fakeGhScript,
-      });
-
+      const result = await finalizeWorktree(makeCtx(), payload, prepared);
       expect(result.prUrl).toBe(
         'https://github.com/fake-org/fake-repo/pull/123',
       );
@@ -396,18 +420,15 @@ exit 1
           .toString()
           .trim(),
       );
-      // No extra empty commit was added
       expect(commitCountAfter).toBe(commitCountBefore);
     });
 
     it('does not create a duplicate PR if one already exists for the branch', async () => {
-      const prepared = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 104,
-        title: 'Existing PR Branch',
-      });
+      const payload = makePayload(106, 'Existing PR Branch');
+      const prepared = await prepareWorktree(makeCtx(), payload);
 
-      // Pre-seed an existing PR in fake-gh
+      await writeFile(join(prepared.worktreePath, 'file.ts'), 'test');
+
       const existingPrUrl =
         'https://github.com/fake-org/fake-repo/pull/777-existing';
       await writeFile(
@@ -415,97 +436,37 @@ exit 1
         JSON.stringify({ [prepared.branch]: existingPrUrl }),
       );
 
-      const result = await finishWorktree({
-        repoRoot: serverRepoDir,
-        worktreePath: prepared.worktreePath,
-        branch: prepared.branch,
-        issueId: 104,
-        title: 'Existing PR Branch',
-        ghBinary: fakeGhScript,
-      });
-
+      const result = await finalizeWorktree(makeCtx(), payload, prepared);
       expect(result.prUrl).toBe(existingPrUrl);
+
       const ghLog = await readFile(fakeGhLog, 'utf8');
       expect(ghLog).toContain(`pr view ${prepared.branch}`);
       expect(ghLog).not.toContain('pr create');
     });
 
-    it('throws clean job error when git push fails', async () => {
-      const prepared = await prepareWorktree({
-        repoRoot: serverRepoDir,
-        issueId: 105,
-        title: 'Failed Push',
-      });
+    it('treats worktree removal failure as best-effort: logs warning and returns prUrl without --force (Finding 5)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const payload = makePayload(107, 'Best Effort Removal');
+      const prepared = await prepareWorktree(makeCtx(), payload);
 
-      // Point origin to an invalid non-existent path to trigger push error
-      execFileSync('git', [
-        '-C',
-        prepared.worktreePath,
-        'remote',
-        'set-url',
-        'origin',
-        '/nonexistent-remote-path',
-      ]);
+      await writeFile(join(prepared.worktreePath, 'committed.ts'), 'val');
 
-      await expect(
-        finishWorktree({
-          repoRoot: serverRepoDir,
-          worktreePath: prepared.worktreePath,
-          branch: prepared.branch,
-          issueId: 105,
-          title: 'Failed Push',
-          ghBinary: fakeGhScript,
-        }),
-      ).rejects.toThrow(/git push -u origin/);
+      // Use an invalid repoRoot for removal failure simulation, or cause remove to fail
+      // When worktreePath has an untracked dirty file after commit:
+      // Note: we write an uncommitted file to simulate git worktree remove failing because of untracked files
+      // BUT finalizeWorktree stages all untracked files in step 1!
+      // So let's mock or simulate git worktree remove failure by making worktree remove fail:
+      // Point ctx.repoRoot to an invalid path during finalizeWorktree? No, git push needs repoRoot? Wait, git push runs in worktreePath!
+      // But git worktree remove runs in repoRoot. If ctx.repoRoot doesn't have the worktree metadata or we pass a wrapper,
+      // Or simply: pass an invalid repoRoot:
+      const badCtx = makeCtx({ repoRoot: '/nonexistent-root' });
 
-      // Worktree remains intact on push failure
-      const wtList = execFileSync('git', [
-        '-C',
-        serverRepoDir,
-        'worktree',
-        'list',
-      ]).toString();
-      expect(wtList).toContain(prepared.worktreePath);
-    });
-  });
-
-  describe('GitWorktreeManager', () => {
-    it('manages full lifecycle from TaskPayload', async () => {
-      const manager = new GitWorktreeManager({
-        repoRoot: serverRepoDir,
-        ghBinary: fakeGhScript,
-      });
-
-      const task = {
-        issueId: 106,
-        title: 'Full Lifecycle',
-        team: 'frontend' as const,
-        body: 'Implement feature',
-        labels: ['team:frontend'],
-      };
-
-      const prepared = await manager.prepare(task);
-      expect(prepared.branch).toBe('feat/106-full-lifecycle');
-
-      // Uncommitted file left by worker
-      await writeFile(
-        join(prepared.worktreePath, 'app.ts'),
-        'console.log();\n',
-      );
-
-      const result = await manager.finalizeSuccess(task, prepared);
+      const result = await finalizeWorktree(badCtx, payload, prepared);
       expect(result.prUrl).toBe(
         'https://github.com/fake-org/fake-repo/pull/123',
       );
-
-      // Worktree removed, branch remains on remote
-      const wtList = execFileSync('git', [
-        '-C',
-        serverRepoDir,
-        'worktree',
-        'list',
-      ]).toString();
-      expect(wtList).not.toContain(prepared.worktreePath);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 });

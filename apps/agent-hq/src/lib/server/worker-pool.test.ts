@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,7 +23,7 @@ import {
   stopServerTail,
   stopServerWorkers,
 } from '../../hooks.server';
-import { GitWorktreeManager, type WorktreeManagerLike } from './git-worktree';
+import { finalizeWorktree, prepareWorktree } from './git-worktree';
 import { readHistory } from './history';
 import { createEventStream } from './sse';
 import { getState, resetStore } from './store';
@@ -145,25 +152,25 @@ describe('WorkerPool (#98)', () => {
   let tempDir: string;
   let manager: MockQueueManager;
 
-  const createMockWorktreeManager = (baseDir: string): WorktreeManagerLike => ({
-    prepare: vi.fn(async (payload) => ({
-      worktreePath: baseDir,
-      branch: `feat/${payload.issueId}-test`,
-      slug: 'test',
-    })),
-    finalizeSuccess: vi.fn(async () => ({
-      prUrl: 'https://github.com/fake-org/fake-repo/pull/123',
-    })),
-  });
-
   const createPool = (opts: WorkerPoolOptions = {}) =>
     new WorkerPool({
       enabled: true,
       queueManager: manager,
       subscriptionPool: new SubscriptionPool(),
       logDir: tempDir,
-      worktreeManager:
-        opts.worktreeManager ?? createMockWorktreeManager(tempDir),
+      repoRoot: tempDir,
+      prepareWorktree:
+        opts.prepareWorktree ??
+        vi.fn(async (_ctx, payload) => ({
+          worktreePath: tempDir,
+          branch: `feat/${payload.issueId}-test`,
+          slug: 'test',
+        })),
+      finalizeWorktree:
+        opts.finalizeWorktree ??
+        vi.fn(async () => ({
+          prUrl: 'https://github.com/fake-org/fake-repo/pull/123',
+        })),
       ...opts,
     });
 
@@ -344,7 +351,15 @@ describe('WorkerPool (#98)', () => {
       delegateScript,
       queueManager: manager,
       subscriptionPool: new SubscriptionPool(),
-      worktreeManager: createMockWorktreeManager(tempDir),
+      repoRoot: tempDir,
+      prepareWorktree: vi.fn(async () => ({
+        worktreePath: tempDir,
+        branch: 'feat/90-test',
+        slug: 'test',
+      })),
+      finalizeWorktree: vi.fn(async () => ({
+        prUrl: 'https://github.com/fake-org/fake-repo/pull/123',
+      })),
     });
     expect(pool).not.toBeNull();
 
@@ -479,15 +494,12 @@ exit 1
       'delegate-wt.sh',
     );
 
-    const worktreeManager = new GitWorktreeManager({
-      repoRoot: serverRepoDir,
-      ghBinary: fakeGhScript,
-    });
-
     const pool = createPool({
       delegateScript,
-      worktreeManager,
       repoRoot: serverRepoDir,
+      ghBinary: fakeGhScript,
+      prepareWorktree,
+      finalizeWorktree,
     });
     await pool.start();
 
@@ -593,15 +605,12 @@ exit 1
       'delegate-fail-retry.sh',
     );
 
-    const worktreeManager = new GitWorktreeManager({
-      repoRoot: serverRepoDir,
-      ghBinary: fakeGhScript,
-    });
-
     const pool = createPool({
       delegateScript,
-      worktreeManager,
       repoRoot: serverRepoDir,
+      ghBinary: fakeGhScript,
+      prepareWorktree,
+      finalizeWorktree,
     });
     await pool.start();
 
@@ -625,6 +634,41 @@ exit 1
     ]).toString();
     expect(wtList).not.toContain('feat-200-retry-test');
 
+    await pool.close();
+  });
+
+  it('resolves delegateScript to an absolute path so it is never resolved relative to worktree cwd (#100)', async () => {
+    await makeScript(
+      tempDir,
+      `echo "executed from $(pwd)" > execution.txt
+       exit 0`,
+      'relative-delegate.sh',
+    );
+    const isolatedWorktree = join(tempDir, 'sub-wt');
+    await mkdir(isolatedWorktree, { recursive: true });
+
+    const pool = createPool({
+      cwd: tempDir,
+      delegateScript: 'relative-delegate.sh',
+      prepareWorktree: vi.fn(async () => ({
+        worktreePath: isolatedWorktree,
+        branch: 'feat/300-test',
+        slug: 'test',
+      })),
+      finalizeWorktree: vi.fn(async () => ({
+        prUrl: 'https://github.com/fake-org/agent-hq/pull/300',
+      })),
+    });
+    await pool.start();
+
+    const task = makeTask(300, 'frontend');
+    const job = await manager.run('frontend', task);
+
+    expect(job.state).toBe('completed');
+    const executedOutput = (
+      await readFile(join(isolatedWorktree, 'execution.txt'), 'utf8')
+    ).trim();
+    expect(executedOutput).toContain(isolatedWorktree);
     await pool.close();
   });
 });

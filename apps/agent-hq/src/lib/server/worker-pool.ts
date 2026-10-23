@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -12,7 +12,13 @@ import {
   type WorkerOptions,
 } from 'bullmq';
 import { QueueManager, type TaskPayload, type Team } from '@agent-hq/queue';
-import { GitWorktreeManager, type WorktreeManagerLike } from './git-worktree';
+import {
+  finalizeWorktree,
+  prepareWorktree,
+  type FinishWorktreeResult,
+  type PreparedWorktree,
+  type WorktreeContext,
+} from './git-worktree';
 import { recordEvent } from './history';
 import { parseEvent, type Agent } from './state';
 import { SubscriptionPool } from './subscription-pool';
@@ -57,7 +63,16 @@ export interface WorkerPoolOptions {
   delegateScript?: string;
   cwd?: string;
   repoRoot?: string;
-  worktreeManager?: WorktreeManagerLike;
+  ghBinary?: string;
+  prepareWorktree?: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+  ) => Promise<PreparedWorktree>;
+  finalizeWorktree?: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+    worktree: PreparedWorktree,
+  ) => Promise<FinishWorktreeResult>;
   logDir?: string;
   env?: NodeJS.ProcessEnv;
   queueManager?: QueueManagerLike;
@@ -130,7 +145,16 @@ export class WorkerPool {
 
   private readonly opts: WorkerPoolOptions;
   private readonly onError: (err: unknown) => void;
-  private readonly worktreeManager: WorktreeManagerLike;
+  private repoRoot?: string;
+  private readonly prepareWorktreeFn: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+  ) => Promise<PreparedWorktree>;
+  private readonly finalizeWorktreeFn: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+    worktree: PreparedWorktree,
+  ) => Promise<FinishWorktreeResult>;
   private queueManager?: QueueManagerLike;
   private subscriptionPool?: SubscriptionPoolLike;
   private unwireFailover?: () => void;
@@ -184,14 +208,21 @@ export class WorkerPool {
       this.concurrency.qa;
     this.onError =
       options.onError ?? ((err: unknown) => console.warn('[worker-pool]', err));
-    this.worktreeManager =
-      options.worktreeManager ??
-      new GitWorktreeManager({
-        repoRoot: options.repoRoot ?? options.cwd,
-        env: options.env,
-      });
+    this.prepareWorktreeFn = options.prepareWorktree ?? prepareWorktree;
+    this.finalizeWorktreeFn = options.finalizeWorktree ?? finalizeWorktree;
+    if (options.repoRoot) {
+      this.repoRoot = resolve(options.repoRoot);
+    }
     this.queueManager = options.queueManager;
     this.subscriptionPool = options.subscriptionPool;
+  }
+
+  private getWorktreeContext(): WorktreeContext {
+    return {
+      repoRoot: this.repoRoot ?? resolve(this.opts.cwd ?? process.cwd()),
+      ghBinary: this.opts.ghBinary,
+      env: this.opts.env,
+    };
   }
 
   async start(): Promise<boolean> {
@@ -200,6 +231,19 @@ export class WorkerPool {
     this.closing = false;
 
     try {
+      if (!this.repoRoot) {
+        try {
+          this.repoRoot = resolve(
+            execFileSync('git', ['rev-parse', '--show-toplevel'], {
+              cwd: this.opts.cwd ?? process.cwd(),
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim(),
+          );
+        } catch {
+          this.repoRoot = resolve(this.opts.cwd ?? process.cwd());
+        }
+      }
       this.queueManager ??= new QueueManager({
         onError: (err) => this.onError(err),
         queueOptions: { defaultJobOptions: { attempts: DEFAULT_ATTEMPTS } },
@@ -260,7 +304,7 @@ export class WorkerPool {
     const restartedProviders = new Set<Agent>();
 
     const worktree = await this.guard(() =>
-      this.worktreeManager.prepare(job.data),
+      this.prepareWorktreeFn(this.getWorktreeContext(), job.data),
     );
 
     while (true) {
@@ -300,7 +344,11 @@ export class WorkerPool {
       await this.opts.afterProcessExit?.(job);
       if (exitCode === 0) {
         const result = await this.guard(() =>
-          this.worktreeManager.finalizeSuccess(job.data, worktree),
+          this.finalizeWorktreeFn(
+            this.getWorktreeContext(),
+            job.data,
+            worktree,
+          ),
         );
         job.data = {
           ...job.data,
@@ -378,7 +426,9 @@ export class WorkerPool {
       let stderr = '';
       let settled = false;
 
-      const script = this.opts.delegateScript ?? resolveDefaultDelegateScript();
+      const scriptRaw =
+        this.opts.delegateScript ?? resolveDefaultDelegateScript();
+      const script = resolve(this.opts.cwd ?? process.cwd(), scriptRaw);
       const child = spawn(script, [provider, prompt], {
         cwd: cwd ?? this.opts.cwd ?? process.cwd(),
         env: childEnv,
