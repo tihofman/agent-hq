@@ -25,6 +25,7 @@ function createRequestEvent(request: Request): RequestEvent {
 describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
   let tempDir: string;
   let originalEnv: string | undefined;
+  let originalHqHome: string | undefined;
 
   beforeEach(async () => {
     resetStore();
@@ -32,6 +33,8 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
     tempDir = await mkdtemp(join(tmpdir(), 'agent-hq-test-'));
     originalEnv = process.env.AGENT_HQ_LOG_DIR;
     process.env.AGENT_HQ_LOG_DIR = tempDir;
+    originalHqHome = process.env.AGENT_HQ_HOME;
+    process.env.AGENT_HQ_HOME = tempDir;
   });
 
   afterEach(async () => {
@@ -41,6 +44,11 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       delete process.env.AGENT_HQ_LOG_DIR;
     } else {
       process.env.AGENT_HQ_LOG_DIR = originalEnv;
+    }
+    if (originalHqHome === undefined) {
+      delete process.env.AGENT_HQ_HOME;
+    } else {
+      process.env.AGENT_HQ_HOME = originalHqHome;
     }
     await rm(tempDir, { recursive: true, force: true });
   });

@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   initialState,
   parseEvent,
@@ -15,10 +15,28 @@ export interface HistoryRun extends Run {
   events: HQEvent[];
 }
 
+function isBlockedHistoryDir(dir: string): boolean {
+  const home = resolve(homedir());
+  const agentHqDir = resolve(home, '.agent-hq');
+  const target = resolve(dir);
+
+  if (target === home) return true;
+  const rel = relative(agentHqDir, target);
+  return (
+    rel === '' ||
+    (!rel.startsWith('..' + sep) && rel !== '..' && !isAbsolute(rel))
+  );
+}
+
 export function getHistoryDir(): string {
   const env = process.env.AGENT_HQ_HOME?.trim();
-  if (env) return env;
-  return join(homedir(), '.agent-hq');
+  const dir = env || join(homedir(), '.agent-hq');
+  if (process.env.VITEST && isBlockedHistoryDir(dir)) {
+    throw new Error(
+      `Refusing to use ~/.agent-hq during tests (process.env.VITEST is set). Set AGENT_HQ_HOME to an isolated test directory.`,
+    );
+  }
+  return dir;
 }
 
 export function getHistoryPath(): string {
@@ -26,11 +44,12 @@ export function getHistoryPath(): string {
 }
 
 export async function appendHistory(event: HQEvent): Promise<void> {
+  const dir = getHistoryDir();
+  const filePath = join(dir, 'history.jsonl');
   try {
-    const dir = getHistoryDir();
     await mkdir(dir, { recursive: true });
     const line = JSON.stringify(event) + '\n';
-    await appendFile(getHistoryPath(), line, 'utf8');
+    await appendFile(filePath, line, 'utf8');
   } catch (err) {
     console.error('Failed to append event to history:', err);
   }
