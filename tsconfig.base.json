@@ -18,6 +18,9 @@
     "target": "es2022",
     "customConditions": ["@agent-hq/source"],
     "noUncheckedSideEffectImports": false,
-    "types": ["*"]
+    "types": ["*"],
+    "paths": {
+      "@agent-hq/queue": ["./libs/queue/src/index.ts"]
+    }
   }
 }

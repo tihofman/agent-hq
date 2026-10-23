@@ -40,9 +40,9 @@ flowchart TD
         Ingest["Issue Ingest Service (gh sync)"]
         GH -->|Sync / Webhook| Ingest
 
-        Q_FE[("BullMQ: tasks:frontend")]
-        Q_BE[("BullMQ: tasks:backend")]
-        Q_QA[("BullMQ: tasks:qa")]
+        Q_FE[("BullMQ: tasks-frontend")]
+        Q_BE[("BullMQ: tasks-backend")]
+        Q_QA[("BullMQ: tasks-qa")]
         Q_Events[("BullMQ / PubSub: events")]
 
         Ingest --> Q_FE
@@ -146,9 +146,9 @@ Kein Task existiert außerhalb von GitHub Issues. Das garantiert vollständige N
 2. **Ingest & Routing:**
    - Der Ingest-Service lauscht auf neue Issues mit Label `team:*`.
    - Das Issue wird als BullMQ-Job in die entsprechende Domain-Queue geschoben:
-     - `team:frontend` -> Queue `tasks:frontend`
-     - `team:backend` -> Queue `tasks:backend`
-     - `team:qa` -> Queue `tasks:qa`
+     - `team:frontend` -> Queue `tasks-frontend`
+     - `team:backend` -> Queue `tasks-backend`
+     - `team:qa` -> Queue `tasks-qa`
 3. **Ausführung in Worktree:**
    - Der TeamLead erstellt automatisch einen isolierten Git-Worktree: `.worktrees/feat-#<ISSUE_ID>-<slug>`.
    - Der Subagent implementiert die Änderungen und committet via Conventional Commits: `feat(#<ISSUE_ID>): ...`.
@@ -229,7 +229,7 @@ flowchart LR
 #### Ticket 1.2: `feat(queue): BullMQ Queue Core Service in libs/queue`
 
 - **Agent:** `agent:agy`
-- **Ziel:** TypeScript-Bibliothek/Modul zur Initialisierung von BullMQ-Queues (`tasks:frontend`, `tasks:backend`, `tasks:qa`; Rückfragen sind pausierte Jobs dieser Queues, siehe ADR 0006).
+- **Ziel:** TypeScript-Bibliothek/Modul zur Initialisierung von BullMQ-Queues (`tasks-frontend`, `tasks-backend`, `tasks-qa`; Rückfragen sind pausierte Jobs dieser Queues, siehe ADR 0006).
 - **Akzeptanzkriterien:**
   - Saubere TypeScript-Typen für Jobs, TaskPayload, EventPayload, QuestionPayload.
   - Robuste Reconnection-Logik für Redis.
@@ -253,7 +253,7 @@ flowchart LR
 #### Ticket 2.2: `feat(teamlead): Autonome TeamLead Worker Daemons`
 
 - **Agent:** `agent:agy`
-- **Ziel:** BullMQ Worker für die Queues `tasks:frontend`, `tasks:backend`, `tasks:qa`.
+- **Ziel:** BullMQ Worker für die Queues `tasks-frontend`, `tasks-backend`, `tasks-qa`.
 - **Akzeptanzkriterien:**
   - Worker nimmt Job entgegen und reserviert ihn.
   - Wählt passendes Modell über den Subscription-Pool.

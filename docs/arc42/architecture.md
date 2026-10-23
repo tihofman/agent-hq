@@ -80,7 +80,7 @@ flowchart LR
 | `$TMPDIR/agent-hq/*.log`              | Worker → Server  | Datei, gelesen per `fs.watch` / Tail                                          |
 | `~/.agent-hq/history.jsonl`           | Server           | Append-only Datei                                                             |
 | Signale                               | Server → Worker  | `pkill -TERM -P`, `SIGTERM`, Fallback `SIGKILL`                               |
-| Redis `127.0.0.1:6379` (V2)           | Server ↔ Redis   | BullMQ-Queues `tasks:frontend`, `tasks:backend`, `tasks:qa`                   |
+| Redis `127.0.0.1:6379` (V2)           | Server ↔ Redis   | BullMQ-Queues `tasks-frontend`, `tasks-backend`, `tasks-qa`                   |
 | `gh issue` / `gh pr` (V2)             | Server → GitHub  | Polling offener `team:*`-Issues, Statuslabels, Draft-PRs                      |
 | `GET /api/questions` (V2)             | Browser → Server | Offene Rückfragen                                                             |
 | `POST /api/questions/:id/answer` (V2) | Browser → Server | HTTP + JSON `{ answer }`, `Origin`-geprüft                                    |
@@ -164,7 +164,7 @@ Zustandsdiagramm der Figuren: [PROJECT_PLAN.md, Abschnitt 3](../../PROJECT_PLAN.
 
 ### Team-Task (V2)
 
-1. Claude oder der User legt ein Issue mit Label `team:<x>` an. Der Ingest reiht es in `tasks:<x>` ein und setzt `status:queued`.
+1. Claude oder der User legt ein Issue mit Label `team:<x>` an. Der Ingest reiht es in `tasks-<x>` ein und setzt `status:queued`.
 2. Ein freier Worker-Slot des Teams nimmt den Job, setzt `status:in-progress`, legt `.worktrees/feat-<ID>-<slug>` an und wählt den Provider über den Subscription-Pool.
 3. Er startet `delegate.sh`; der Lauf erscheint wie gewohnt im Büro. Bei einem Rate-Limit setzt er den Provider auf `COOLDOWN`, sendet `SUBSCRIPTION_FAILOVER` und startet den Job sofort mit dem Fallback neu.
 4. Bis zum Prozessende hält der Slot den Job. Schlägt der Lauf fehl, geht der Job mit der Fehlerausgabe als BullMQ-Retry zurück in die Queue (bis zu 3 Reparaturen), der Slot ist frei. Sind die Tests grün, pusht er und erstellt einen Draft-PR (`Closes #<ID>`). Danach reviewt Claude wie bisher.
