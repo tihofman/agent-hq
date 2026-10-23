@@ -65,6 +65,17 @@ bösartigen Git-Hooks oder Git-Konfigurationen einschleusen, die später außerh
 ausgeführt werden. Netzwerkzugriff ist auf GitHub und die npm-Registry begrenzt. Die Einstellungen
 werden mit `--settings '<json>'` übergeben; `~/.npm` wird zusätzlich mit `--add-dir` freigegeben.
 Die Sandbox beschränkt Shell-Befehle und deren Kindprozesse auf Betriebssystemebene.
+Da die Claude-Sandbox Zugriffe auf `localhost` (Port 3333 für Agent-HQ) blockiert, `allowedDomains`
+nicht auf IP-Adressen wirkt und `allowLocalBinding` alle lokalen Dienste einschließlich Redis freigeben
+würde, darf ausschließlich `hq-ask.sh` außerhalb der Sandbox ausgeführt werden. Dazu ermittelt
+`delegate.sh` den absoluten Pfad (`ASK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hq-ask.sh"`).
+Nur wenn die Datei existiert und ihr Pfad nicht unter `$PWD` liegt (damit der Worker das Skript
+nicht manipulieren und unsandboxed ausführen kann), nimmt `delegate.sh` sie in die Settings auf
+(`sandbox.excludedCommands: ["<ASK> *"]` und `permissions.allow: ["Bash(<ASK> *)"]`) und exportiert
+`HQ_ASK="<ASK>"` für den Worker. Liegt der Pfad unter `$PWD`, wird nichts ausgeschlossen (Rückfragen
+scheitern bewusst in der Sandbox) und eine Warnung auf `stderr` ausgegeben. Alle übrigen Sandbox-Einstellungen
+bleiben unverändert (`allowUnsandboxedCommands` bleibt `false`). Der Worker muss `$HQ_ASK` als genau einen
+einzelnen Shell-Befehl ohne Verkettungen (`&&`, `;`) ausführen, da verkettete Aufrufe in der Sandbox verbleiben.
 
 Vor dem ersten Lauf erzeugt `delegate.sh` eine UUID (`uuidgen`, mit Plattform-Fallback) und
 übergibt sie mit `--session-id`. Ist `AGENT_MODEL` gesetzt, wird es als `--model` durchgereicht.
