@@ -83,7 +83,6 @@ export function startServerTail(options?: {
 export function stopServerTail(): void {
   const globalRef = globalThis as TailerGlobal;
   globalRef[GLOBAL_TAILER_KEY]?.();
-  void stopServerWorkers();
 }
 
 export async function startServerWorkers(
@@ -96,16 +95,19 @@ export async function startServerWorkers(
     logDir: getLogDir(),
     ...options,
   });
-  if (!pool.enabled) {
+  if (!pool.enabled || !(await pool.start())) {
     return null;
   }
 
-  const started = await pool.start();
-  if (!started) {
-    return null;
-  }
+  const onSignal = () => {
+    void stopServerWorkers();
+  };
+  process.once('SIGTERM', onSignal);
+  process.once('SIGINT', onSignal);
 
   const stop = async () => {
+    process.off('SIGTERM', onSignal);
+    process.off('SIGINT', onSignal);
     await pool.close();
     if (globalRef[GLOBAL_WORKER_POOL_KEY] === stop) {
       delete globalRef[GLOBAL_WORKER_POOL_KEY];
@@ -121,6 +123,14 @@ export async function stopServerWorkers(): Promise<void> {
   delete globalRef[GLOBAL_WORKER_POOL_KEY];
   await stop?.();
 }
+
+(
+  import.meta as ImportMeta & {
+    hot?: { dispose(cb: () => void): void };
+  }
+).hot?.dispose(() => {
+  void stopServerWorkers();
+});
 
 export const init: ServerInit = () => {
   startServerTail();

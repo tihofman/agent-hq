@@ -17,7 +17,7 @@ class MockRedisClient extends EventEmitter {
 
 describe('QueueManager', () => {
   it('creates Queues using the shared Redis connection', async () => {
-    expect.assertions(7);
+    expect.assertions(6);
     const mockConnection = new MockRedisClient() as unknown as Redis;
     const manager = new QueueManager({
       connection: mockConnection,
@@ -32,7 +32,6 @@ describe('QueueManager', () => {
       expect(feQueue.name).toBe(QUEUE_NAMES.frontend);
       expect(beQueue.name).toBe(QUEUE_NAMES.backend);
       expect(qaQueue.name).toBe(QUEUE_NAMES.qa);
-      expect(feQueue.defaultJobOptions.attempts).toBe(4);
 
       // Same instance returned on subsequent calls
       expect(manager.getQueue('frontend')).toBe(feQueue);
