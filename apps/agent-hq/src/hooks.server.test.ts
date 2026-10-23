@@ -28,6 +28,7 @@ const canWatchFs = await (async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agent-hq-watch-probe-'));
   try {
     return await new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined = undefined;
       let watcher: ReturnType<typeof watch> | undefined;
       let settled = false;
       const finish = (result: boolean) => {
@@ -48,7 +49,7 @@ const canWatchFs = await (async () => {
       } catch {
         return finish(false);
       }
-      const timer = setTimeout(() => finish(true), 50);
+      timer = setTimeout(() => finish(true), 50);
       timer.unref?.();
     });
   } catch {
