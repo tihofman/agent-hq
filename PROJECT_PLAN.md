@@ -15,6 +15,8 @@ Ziel ist es, den Fortschritt, Übergaben, Denkprozesse und Reviews der Agenten i
 
 > [!NOTE]
 > Die genaue Arbeitsweise, Rollenteilung und der 7-Schritte-Delegations-Workflow des Orchestrators sind im Konzeptdokument [orchestrator-skill.md](docs/concepts/orchestrator-skill.md) detailliert beschrieben.
+>
+> **V2 Architektur & Masterplan:** Für die Erweiterung auf asynchrone Queues (Redis/BullMQ in Docker), fachliche Teams mit Subscription-Failover und interaktivem Human-in-the-Loop siehe [multi-team-queue-architecture.md](docs/concepts/multi-team-queue-architecture.md).
 
 ---
 
