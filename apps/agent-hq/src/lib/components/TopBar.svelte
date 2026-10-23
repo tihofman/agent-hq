@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import { liveStore } from '../live.svelte';
   import { isAudioEnabled, setAudioEnabled, getAudioContext } from '../audio';
   import { requestNotificationPermission } from '../notify';
@@ -171,6 +172,12 @@
         <span class="text-[11px] font-medium text-slate-400">MUTED</span>
       {/if}
     </button>
+
+    <a
+      href={resolve('/history')}
+      class="flex items-center gap-1.5 rounded bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
+      data-testid="history-link">Verlauf</a
+    >
 
     <KillSwitch runId={activeRun?.runId ?? null} />
   </div>
