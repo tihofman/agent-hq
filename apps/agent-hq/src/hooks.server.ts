@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { sweepStaleRuns } from './lib/server/history';
 import { dispatch, getState } from './lib/server/store';
 import { startTail } from './lib/server/tail';
+import {
+  startConfiguredIssueIngest,
+  stopConfiguredIssueIngest,
+} from './lib/server/issue-ingest';
 
 export { sweepStaleRuns };
 
@@ -80,4 +84,18 @@ export function stopServerTail(): void {
 
 export const init: ServerInit = () => {
   startServerTail();
+  startConfiguredIssueIngest();
 };
+
+function stopServer(): void {
+  stopConfiguredIssueIngest();
+  stopServerTail();
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    stopServer();
+    process.off('sveltekit:shutdown', stopServer);
+  });
+}
+process.once('sveltekit:shutdown', stopServer);
