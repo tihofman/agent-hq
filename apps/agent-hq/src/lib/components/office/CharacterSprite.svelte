@@ -10,15 +10,17 @@
     AgentController,
     type AnimationName,
   } from '../../office/sprites';
+  import { formatCharacterAriaLabel } from '../../office/log-filter';
   import type { RoomId } from '../../office/layout';
 
   interface Props {
     agent: Agent;
     runId?: string;
     instanceIndex?: number;
+    onclick?: (event: MouseEvent) => void;
   }
 
-  let { agent, runId, instanceIndex = 0 }: Props = $props();
+  let { agent, runId, instanceIndex = 0, onclick }: Props = $props();
 
   // The feed also carries InternalActions (no event/runId), so narrow to HQEvents.
   function findLastHandover(): HQEvent | undefined {
@@ -85,6 +87,9 @@
   const activePR = $derived(liveStore.state?.activePR);
   const ticketId = $derived(activeRun?.ticketId);
   const title = $derived(activeRun?.data?.title);
+  const ariaLabel = $derived(
+    formatCharacterAriaLabel(metadata.displayName, ticketId),
+  );
   const prNumber = $derived(activeRun?.data?.prNumber ?? activePR?.prNumber);
 
   const cooldownUntil = $derived(
@@ -255,7 +260,8 @@
   const bgPos = $derived(getFrameBackgroundPosition(currentFrame, metadata));
 </script>
 
-<div
+<button
+  type="button"
   class="character-container agent-{agent} absolute"
   style="
     left: {Math.round(currentX)}px;
@@ -268,11 +274,13 @@
   data-agent={agent}
   data-run-id={runId}
   data-instance-index={instanceIndex}
+  aria-label={ariaLabel}
   title="{metadata.displayName} ({metadata.role}) • {characterStatus}"
+  {onclick}
 >
   <!-- Retro Status Speech Bubble -->
   {#if bubble}
-    <div
+    <span
       class="speech-bubble bubble-{bubble.type}"
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
@@ -284,7 +292,7 @@
         >
       {/if}
       <span class="bubble-text">{bubble.text}</span>
-    </div>
+    </span>
   {/if}
 
   <!-- Pixel Sprite -->
@@ -295,14 +303,27 @@
   ></div>
 
   <!-- Agent Retro Nametag Badge -->
-  <div class="agent-badge">
+  <span class="agent-badge">
     {metadata.displayName}
-  </div>
-</div>
+  </span>
+</button>
 
 <style>
   .character-container {
     image-rendering: pixelated;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    text-align: left;
+    outline: none;
+  }
+
+  .character-container:focus-visible {
+    outline: 2px solid #818cf8;
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 
   .agent-claude {
@@ -421,6 +442,7 @@
 
   /* Agent Nametag Badge */
   .agent-badge {
+    display: block;
     position: absolute;
     bottom: -10px;
     left: 50%;
