@@ -83,13 +83,13 @@ Das Büro ist in visuelle Funktionszonen (Räume) unterteilt. Jede Figur besitzt
 
 Fünf Zonen, im Event-Schema als `room` kodiert:
 
-| Raum                                | `room`   | Primäre Agenten     | Auslöser / Aktivität                                     | Visuelle Raum-Elemente                                   |
-| :---------------------------------- | :------- | :------------------ | :------------------------------------------------------- | :------------------------------------------------------- |
-| 👔 **CEO Suite / Architect Office** | `ceo`    | **Claude**          | Ticket-Erstellung, Architektur-Planung, Scope-Definition | Großer Schreibtisch, Architektur-Whiteboard, Bücherregal |
-| 🚪 **Flur & Übergabezone**          | `hall`   | **Claude ➔ Worker** | Moment der Task-Delegation (`delegate.sh`)               | Verbindender Gang zwischen den Büros                     |
-| 💻 **Dev Lab (Entwickler)**         | `dev`    | **`agy` / `codex`** | Code-Generierung, Refactoring, Datei-Edits               | Monitore mit Matrix-Code, Workstations, Kaffeetassen     |
-| 🔍 **QS & Review Station**          | `qa`     | **Claude / CI**     | Prüfen von Akzeptanzkriterien, Test-Runs, PR-Review      | Test-Server-Racks, Monitor mit grünen/roten Checkmarks   |
-| ☕ **Lounge / Breakroom**           | `lounge` | **Alle Idler**      | Kein aktiver Task, Wartet auf User-Input, Cooldown       | Couch, Kaffeemaschine, Wasserspender, Pflanze            |
+| Raum                                | `room`   | Primäre Agenten          | Auslöser / Aktivität                                     | Visuelle Raum-Elemente                                   |
+| :---------------------------------- | :------- | :----------------------- | :------------------------------------------------------- | :------------------------------------------------------- |
+| 👔 **CEO Suite / Architect Office** | `ceo`    | **Claude**               | Ticket-Erstellung, Architektur-Planung, Scope-Definition | Großer Schreibtisch, Architektur-Whiteboard, Bücherregal |
+| 🚪 **Flur & Übergabezone**          | `hall`   | **Claude ➔ Worker**      | Moment der Task-Delegation (`delegate.sh`)               | Verbindender Gang zwischen den Büros                     |
+| 💻 **Dev Lab (Entwickler)**         | `dev`    | **`agy` / `codex`**      | Code-Generierung, Refactoring, Datei-Edits               | Monitore mit Matrix-Code, Workstations, Kaffeetassen     |
+| 🔍 **QS & Review Station**          | `qa`     | **Review-Subagent / CI** | Prüfen von Akzeptanzkriterien, Test-Runs, PR-Review      | Test-Server-Racks, Monitor mit grünen/roten Checkmarks   |
+| ☕ **Lounge / Breakroom**           | `lounge` | **Alle Idler**           | Kein aktiver Task, Wartet auf User-Input, Cooldown       | Couch, Kaffeemaschine, Wasserspender, Pflanze            |
 
 ### Charakter-Zustände & Animationen
 
@@ -223,6 +223,7 @@ Der Hook ist ebenso fehlertolerant wie `delegate.sh` (siehe 6D) und gibt immer E
    - **Rückfrage-Hinweis**: Erkennt der Log-Parser eine wartende Eingabeaufforderung, erscheint eine hervorgehobene Karte („Agent wartet auf Eingabe → Terminal“) plus Browser-Notification.
    - Eine Eingabezeile (2-Wege-Chat) kommt nur, wenn der Spike aus Abschnitt 6H positiv ausfällt.
 4. **Untere Leiste: Ticket & Acceptance Criteria Matrix**:
+   - Zeigt Ticket-Titel, ID und das zugewiesene Agenten-Badge (`agent:claude`, `agent:agy`, `agent:codex`).
    - Live-Checkliste der Akzeptanzkriterien des aktuellen Tickets.
    - Haken setzen sich live grün, sobald Claude sie im Review validiert hat.
    - PR-Status-Badge (`Draft` ➔ `Ready` ➔ `Merged`).
