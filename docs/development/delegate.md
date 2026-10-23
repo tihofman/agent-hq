@@ -35,6 +35,10 @@ einer strikten UUID (`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 fortgesetzt. Da resume keine `-s`/`--add-dir`-Flags unterstützt, setzt es die Sandbox
 über `-c sandbox_mode="workspace-write"`, Netzwerkzugriff und die Schreibverzeichnisse
 (Arbeitsverzeichnis und `~/.npm`) explizit wie beim Erstlauf.
+In Git-Worktrees committet codex nicht selbst, weil `index.lock` unter `<git-common-dir>/worktrees/`
+liegt und außerhalb der `writable_roots` nicht geschrieben werden kann (eine Freigabe des
+Git-Common-Dir würde hooks/config freigeben). Commit und Push übernimmt bei codex stattdessen
+der Aufrufer (Runner bzw. Worker-Slot, #100).
 
 agy läuft mit `--output-format stream-json`: Das frühe Init-Event liefert
 `conversation_id`, auch wenn der Lauf später abgebrochen wird. Der Ausgabefilter
@@ -50,9 +54,10 @@ Fehlt eine gültige Session-ID, startet der Worker mit Originalprompt und bisher
 claude läuft nicht-interaktiv mit aktivierter Sandbox und `--permission-mode acceptEdits`.
 Bash-Befehle innerhalb der Sandbox werden ohne Rückfrage freigegeben; ein unsandboxed Retry
 ist deaktiviert und Claude Code muss beim Fehlen der Sandbox abbrechen. Schreibzugriff ist
-auf den Worktree, `~/.npm` und das Git-Common-Verzeichnis beschränkt; letzteres wird absolut
-ermittelt (`git rev-parse --git-common-dir`), damit Commits und `index.lock` im Git-Worktree
-funktionieren. Pfade außerhalb von `allowWrite` blockiert die Sandbox bereits standardmäßig
+auf den Worktree, `~/.npm`, das reale `$TMPDIR` (aufgelöst per `cd … && pwd`, Fallback `/tmp`
+für temporäre Dateien u. a. von vitest und npm) und das Git-Common-Verzeichnis beschränkt;
+letzteres wird absolut ermittelt (`git rev-parse --git-common-dir`), damit Commits und `index.lock`
+im Git-Worktree funktionieren. Pfade außerhalb von `allowWrite` blockiert die Sandbox bereits standardmäßig
 (ein globales `denyWrite: ["/"]` darf nicht gesetzt werden, da `denyWrite` Vorrang vor `allowWrite`
 hat und alle Schreibzugriffe blockieren würde). Zum Schutz vor Privilegieneskalation sind
 `$GITDIR/hooks` und `$GITDIR/config` explizit per `denyWrite` gesperrt: So kann ein Worker keine
@@ -71,6 +76,10 @@ weiterhin mit `--resume` genutzt werden.
 
 Prüfen mit `bash scripts/test/delegate.test.sh` und
 `bash scripts/test/delegate-resume.test.sh` (Fake-CLIs, keine echten Worker).
+Tests, die Fähigkeiten erfordern, die in restriktiven Sandbox-Umgebungen nicht verfügbar
+sind (z. B. `fs.watch` via FSEvents unter macOS Seatbelt oder Prozessinspektion via `ps`),
+prüfen diese Fähigkeiten zur Laufzeit und werden in eingeschränkten Umgebungen sauber
+übersprungen. Die CI führt alle Tests unbeschränkt aus und ist die maßgebliche Instanz.
 
 Die lokalen Hilfen von `codex exec`, `codex exec resume`, `agy` und `claude` wurden geprüft.
 Codex akzeptiert `--` als Optionsende (zusätzlich mit Parser-Proben geprüft);

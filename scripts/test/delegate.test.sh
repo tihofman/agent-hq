@@ -331,7 +331,9 @@ CLAUDE_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
 grep -q '>>> Dispatching to claude \[model: claude-3-7-sonnet\]' "$TEST_DIR/stdout" || fail 'stdout contains claude model'
 grep -q '>>> Dispatching to claude \[model: claude-3-7-sonnet\]' "$CLAUDE_LOG" || fail 'log contains claude model'
 CLAUDE_GITDIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
-jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$CLAUDE_GITDIR" '
+CLAUDE_TMPDIR="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd || echo /tmp)"
+[ -n "$CLAUDE_TMPDIR" ] || CLAUDE_TMPDIR="/tmp"
+jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg tmp "$CLAUDE_TMPDIR" --arg git "$CLAUDE_GITDIR" '
   .[-1] as $call |
   ($call | index("--model")) != null and
   $call[($call | index("--model")) + 1] == $model and
@@ -345,7 +347,7 @@ jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" -
   ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
     .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and
     .sandbox.autoAllowBashIfSandboxed == true and
-    .sandbox.filesystem.allowWrite == [$cwd, $npm, $git] and
+    .sandbox.filesystem.allowWrite == [$cwd, $npm, $tmp, $git] and
     .sandbox.filesystem.denyWrite == [($git + "/hooks"), ($git + "/config")] and
     ((.sandbox.filesystem.denyWrite // []) | index("/") == null))
 ' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called with model and sandbox settings'

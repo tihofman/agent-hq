@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,16 @@ function request(body: unknown, origin?: string) {
   });
   return POST({ request: req, url: new URL(req.url) } as RequestEvent);
 }
+
+// In restricted sandboxes (e.g. codex workspace-write), ps fails with EPERM so the worker parent validation fails.
+const canInspectProcess = (() => {
+  try {
+    execFileSync('ps', ['-p', String(process.pid)], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 beforeEach(() => resetStore());
 
@@ -83,7 +93,7 @@ describe('POST /api/kill', () => {
     }
   });
 
-  it.each([
+  it.skipIf(!canInspectProcess).each([
     ['a plain child', 'sleep 30 &'],
     // Ignored signals survive exec, so this child only dies by SIGKILL after the worker is gone.
     ['a TERM-ignoring child', `bash -c 'trap "" TERM; exec sleep 30' &`],

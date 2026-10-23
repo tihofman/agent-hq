@@ -66,10 +66,12 @@ for ((i=0; i<${#CMD[@]}; i++)); do
 done
 [ -n "$settings_json" ] || fail 'claude settings missing'
 expected_gitdir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
-printf '%s\n' "$settings_json" | jq -e --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$expected_gitdir" '
+expected_tmpdir="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd || echo /tmp)"
+[ -n "$expected_tmpdir" ] || expected_tmpdir="/tmp"
+printf '%s\n' "$settings_json" | jq -e --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg tmp "$expected_tmpdir" --arg git "$expected_gitdir" '
   .sandbox.enabled == true and .sandbox.failIfUnavailable == true and
   .sandbox.allowUnsandboxedCommands == false and .sandbox.autoAllowBashIfSandboxed == true and
-  .sandbox.filesystem.allowWrite == [$cwd, $npm, $git] and
+  .sandbox.filesystem.allowWrite == [$cwd, $npm, $tmp, $git] and
   .sandbox.filesystem.denyWrite == [($git + "/hooks"), ($git + "/config")] and
   ((.sandbox.filesystem.denyWrite // []) | index("/") == null) and
   (.sandbox.network.allowedDomains | index("registry.npmjs.org")) != null' >/dev/null || fail 'claude sandbox settings'
@@ -80,11 +82,31 @@ printf '%s\n' "$settings_json" | jq -e --arg cwd "$PWD" --arg npm "$HOME/.npm" -
   for ((i=0; i<${#CMD[@]}; i++)); do
     [ "${CMD[i]}" = --settings ] && no_git_settings="${CMD[i+1]}"
   done
-  printf '%s\n' "$no_git_settings" | jq -e --arg cwd "$TEST_DIR" --arg npm "$HOME/.npm" '
-    .sandbox.filesystem.allowWrite == [$cwd, $npm] and
+  printf '%s\n' "$no_git_settings" | jq -e --arg cwd "$TEST_DIR" --arg npm "$HOME/.npm" --arg tmp "$expected_tmpdir" '
+    .sandbox.filesystem.allowWrite == [$cwd, $npm, $tmp] and
     .sandbox.filesystem.denyWrite == [] and
     ((.sandbox.filesystem.denyWrite // []) | index("/") == null)' >/dev/null || exit 1
 ) || fail 'claude sandbox settings outside git repo'
+(
+  custom_tmp="$(mktemp -d)"
+  TMPDIR="$custom_tmp" claude_command
+  custom_settings=
+  for ((i=0; i<${#CMD[@]}; i++)); do
+    [ "${CMD[i]}" = --settings ] && custom_settings="${CMD[i+1]}"
+  done
+  resolved_custom="$(cd "$custom_tmp" && pwd)"
+  printf '%s\n' "$custom_settings" | jq -e --arg tmp "$resolved_custom" '
+    .sandbox.filesystem.allowWrite | index($tmp) != null' >/dev/null || exit 1
+  rm -rf "$custom_tmp"
+
+  TMPDIR=/nonexistent-tmp-dir claude_command
+  fallback_settings=
+  for ((i=0; i<${#CMD[@]}; i++)); do
+    [ "${CMD[i]}" = --settings ] && fallback_settings="${CMD[i+1]}"
+  done
+  printf '%s\n' "$fallback_settings" | jq -e '
+    .sandbox.filesystem.allowWrite | index("/tmp") != null' >/dev/null || exit 1
+) || fail 'claude sandbox settings TMPDIR resolution and fallback'
 found=0
 for arg in "${CMD[@]}"; do [ "$arg" != --session-id ] || found=1; done
 [ "$found" = 1 ] || fail 'claude initial session ID missing'
