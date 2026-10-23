@@ -28,7 +28,7 @@ flowchart TD
         L2["Gatekeeping & Review-Delegation"]
         L3["PR Ready schalten (gh pr ready)"]
         L4["Merge-Gate (CI Check & Auto-Merge)"]
-        L5["Cleanup & /compact (Session-Reset)"]
+        L5["Worktree Cleanup & Pruning"]
     end
 
     subgraph Worker ["Execution Subagent (agy / codex)"]
@@ -182,13 +182,6 @@ git worktree remove .worktrees/feat-<ID>-<slug>
 git branch -d feat/<ID>-<slug> 2>/dev/null || true
 git worktree prune
 ```
-
-### Schritt 8: Session Compacting (`/compact` - Pflicht zur Budget-Schonung)
-
-Um Claudes rollendes 5-Stunden-Token-Budget zu schonen und den Input-Cache-Multiplikator für Folgeaufgaben zu minimieren, gilt:
-
-- Nach Abschluss und Aufräumen jedes Tickets führt Claude zwingend `/compact` aus bzw. fordert den User dazu auf.
-- **Regel**: Ein neues Ticket wird **niemals** mit einer durch Vor-Tickets aufgeblähten Chat-Historie begonnen. Vor jedem neuen Ticket wird das Kontextfenster komprimiert oder eine frische Session gestartet.
 
 ---
 
