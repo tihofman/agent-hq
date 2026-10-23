@@ -67,6 +67,13 @@ describe('git-worktree (#100)', () => {
     execFileSync('git', [
       '-C',
       serverRepoDir,
+      'config',
+      'core.excludesFile',
+      '',
+    ]);
+    execFileSync('git', [
+      '-C',
+      serverRepoDir,
       'remote',
       'add',
       'origin',
@@ -74,8 +81,15 @@ describe('git-worktree (#100)', () => {
     ]);
 
     // Create initial commit on main and push to bare remote
+    await writeFile(join(serverRepoDir, '.gitignore'), '.worktrees/\n');
     await writeFile(join(serverRepoDir, 'README.md'), '# Test Repo\n');
-    execFileSync('git', ['-C', serverRepoDir, 'add', 'README.md']);
+    execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'add',
+      '.gitignore',
+      'README.md',
+    ]);
     execFileSync('git', [
       '-C',
       serverRepoDir,
