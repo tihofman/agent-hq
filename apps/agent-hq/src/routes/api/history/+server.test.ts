@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -182,6 +182,91 @@ describe('GET /api/history', () => {
     expect(dirRun?.logExists).toBe(false);
 
     await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it('returns logExists: false when logFile is a symlink in logDir pointing outside', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'hq-outside-symlink-'));
+    const outsideFile = join(outsideDir, 'secret.log');
+    await writeFile(outsideFile, 'outside content\n', 'utf8');
+
+    const symlinkPath = join(logDir, 'symlink-outside.log');
+    await symlink(outsideFile, symlinkPath);
+
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-symlink-outside',
+        data: { logFile: symlinkPath },
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+    const run = runs.find((r) => r.runId === 'run-symlink-outside');
+    expect(run?.logExists).toBe(false);
+
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it('returns logExists: false for <logdir>/../x and <logdir>-evil/x', async () => {
+    const parentFile = join(tempDir, 'x.log');
+    await writeFile(parentFile, 'parent content\n', 'utf8');
+
+    const evilDir = `${logDir}-evil`;
+    await mkdir(evilDir, { recursive: true });
+    const evilFile = join(evilDir, 'x.log');
+    await writeFile(evilFile, 'evil content\n', 'utf8');
+
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-parent-x',
+        data: { logFile: join(logDir, '../x.log') },
+      }),
+    );
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-evil-x',
+        data: { logFile: evilFile },
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+
+    const parentRun = runs.find((r) => r.runId === 'run-parent-x');
+    expect(parentRun?.logExists).toBe(false);
+
+    const evilRun = runs.find((r) => r.runId === 'run-evil-x');
+    expect(evilRun?.logExists).toBe(false);
+
+    await rm(evilDir, { recursive: true, force: true });
+  });
+
+  it('returns logExists: true for a file named "..foo" inside logDir', async () => {
+    const dotDotFoo = join(logDir, '..foo');
+    await writeFile(dotDotFoo, 'dot-dot-foo content\n', 'utf8');
+
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-dot-dot-foo',
+        data: { logFile: dotDotFoo },
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+    const run = runs.find((r) => r.runId === 'run-dot-dot-foo');
+    expect(run?.logExists).toBe(true);
   });
 
   it('resolves prUrl server-side using git remote get-url origin with realistic data', async () => {

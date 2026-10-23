@@ -2,7 +2,7 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { execFile } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { readRecentRuns } from '../../../lib/server/history';
 import { isOriginAllowed } from '../../../lib/server/origin';
@@ -13,7 +13,12 @@ const GITHUB_REMOTE_REGEX = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/;
 
 function isInsideDir(childPath: string, parentDir: string): boolean {
   const rel = relative(parentDir, childPath);
-  return !rel.startsWith('..') && !isAbsolute(rel);
+  return (
+    rel !== '' &&
+    rel !== '..' &&
+    !rel.startsWith('..' + sep) &&
+    !isAbsolute(rel)
+  );
 }
 
 function isLogFileValid(filePath?: string | null): boolean {
@@ -23,14 +28,13 @@ function isLogFileValid(filePath?: string | null): boolean {
   const logDir = resolve(
     process.env.AGENT_HQ_LOG_DIR?.trim() || join(tmpdir(), 'agent-hq'),
   );
-  const resolved = resolve(filePath);
-  const stat = statSync(resolved, { throwIfNoEntry: false });
-  if (!stat?.isFile()) return false;
-
-  if (isInsideDir(resolved, logDir)) return true;
-
   try {
-    return isInsideDir(realpathSync(resolved), realpathSync(logDir));
+    const realFile = realpathSync(filePath);
+    const realLogDir = realpathSync(logDir);
+    const stat = statSync(realFile, { throwIfNoEntry: false });
+    if (!stat?.isFile()) return false;
+
+    return isInsideDir(realFile, realLogDir);
   } catch {
     return false;
   }
