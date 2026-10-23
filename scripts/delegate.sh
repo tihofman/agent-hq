@@ -14,9 +14,9 @@ TICKET_ID="${TICKET_ID:-$(grep -oE '#[0-9]+|T-[0-9]+' <<<"$PROMPT" | head -n1 | 
 LOG_DIR="${AGENT_HQ_LOG_DIR:-${TMPDIR:-/tmp}/agent-hq}"
 mkdir -p "$LOG_DIR" || exit 1
 
-hq_event() { # <event> [pid] [exitCode] [prNumber]
-  local pr="${4:-}"
-  if [ -z "$pr" ] && { [ "$1" = TASK_COMPLETE ] || [ "$1" = TASK_FAILED ]; }; then
+hq_event() { # <event> [pid] [exitCode]
+  local pr=""
+  if [ "$1" = TASK_COMPLETE ] || [ "$1" = TASK_FAILED ]; then
     pr="$(pr_from_log)"
   fi
   curl --connect-timeout 0.1 --max-time 0.5 -s -X POST "$HQ/api/events" \

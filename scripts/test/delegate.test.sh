@@ -165,7 +165,16 @@ jq -se '
   map(.body) as $e |
   all($e[]; .data | has("prNumber") | not)
 ' "$TEST_DIR/events" >/dev/null || fail 'no prNumber when log has no PR URL'
-pass 'prNumber extraction: hit, no hit, multiple URLs and TASK_FAILED'
+
+export FAKE_LAST_LINE="https://github.com/o/r/pull/new/some-branch"
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful worker exit code with PR creation URL'
+check_events TASK_COMPLETE 0
+jq -se '
+  map(.body) | .[2].data | has("prNumber") | not
+' "$TEST_DIR/events" >/dev/null || fail 'no prNumber for PR creation URL'
+unset FAKE_LAST_LINE
+pass 'prNumber extraction: hit, no hit, multiple URLs, TASK_FAILED and PR creation URL'
 
 : > "$TEST_DIR/events"
 rm -f "$WORKER_PID_FILE"
