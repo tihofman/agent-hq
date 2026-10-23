@@ -224,10 +224,169 @@ describe('office/sprites', () => {
         icon: '💤',
       });
 
-      // Idle and coding have no speech bubble
+      // Idle has no speech bubble; walking and handover without ticketId have none
       expect(getSpeechBubble('idle')).toBeNull();
-      expect(getSpeechBubble('coding')).toBeNull();
       expect(getSpeechBubble('walking')).toBeNull();
+      expect(getSpeechBubble('handover')).toBeNull();
+
+      // Coding without ticketId shows generic bubble
+      expect(getSpeechBubble('coding')).toEqual({
+        type: 'coding',
+        text: 'Coding…',
+      });
+    });
+
+    it('generates task bubble for coding with ticketId only (#<ticketId>)', () => {
+      expect(getSpeechBubble('coding', { ticketId: '75' })).toEqual({
+        type: 'coding',
+        text: '#75',
+      });
+      // Already prefixed with #
+      expect(getSpeechBubble('coding', { ticketId: '#75' })).toEqual({
+        type: 'coding',
+        text: '#75',
+      });
+    });
+
+    it('generates task bubble with title, truncating at max 32 chars with ellipsis and full text in tooltip', () => {
+      // Short title (<= 32 chars) stays unshortened
+      const shortTitle = 'Fix speech bubble bug';
+      expect(
+        getSpeechBubble('coding', { ticketId: '75', title: shortTitle }),
+      ).toEqual({
+        type: 'coding',
+        text: `#75 ${shortTitle}`,
+        tooltip: `#75 ${shortTitle}`,
+      });
+
+      // Exactly 32 chars: stays unshortened
+      const title32 = '12345678901234567890123456789012';
+      expect(title32.length).toBe(32);
+      expect(
+        getSpeechBubble('coding', { ticketId: '75', title: title32 }),
+      ).toEqual({
+        type: 'coding',
+        text: `#75 ${title32}`,
+        tooltip: `#75 ${title32}`,
+      });
+
+      // 33 chars: truncated to 31 chars + … (length 32)
+      const title33 = '123456789012345678901234567890123';
+      const truncated32 = '1234567890123456789012345678901…';
+      expect(truncated32.length).toBe(32);
+      expect(
+        getSpeechBubble('coding', { ticketId: '75', title: title33 }),
+      ).toEqual({
+        type: 'coding',
+        text: `#75 ${truncated32}`,
+        tooltip: `#75 ${title33}`,
+      });
+
+      // Long realistic title
+      const longTitle = 'Sprechblase mit aktuellem Task über dem Character';
+      const expectedShort = `${longTitle.slice(0, 31)}…`;
+      expect(expectedShort.length).toBe(32);
+      expect(
+        getSpeechBubble('coding', { ticketId: '78', title: longTitle }),
+      ).toEqual({
+        type: 'coding',
+        text: `#78 ${expectedShort}`,
+        tooltip: `#78 ${longTitle}`,
+      });
+    });
+
+    it('shows task bubble during walking and handover when ticketId is known', () => {
+      expect(getSpeechBubble('walking', { ticketId: '75' })).toEqual({
+        type: 'coding',
+        text: '#75',
+      });
+      expect(
+        getSpeechBubble('walking', { ticketId: '75', title: 'Walk to dev' }),
+      ).toEqual({
+        type: 'coding',
+        text: '#75 Walk to dev',
+        tooltip: '#75 Walk to dev',
+      });
+      expect(getSpeechBubble('handover', { ticketId: '75' })).toEqual({
+        type: 'coding',
+        text: '#75',
+      });
+      expect(
+        getSpeechBubble('handover', {
+          ticketId: '75',
+          title: 'Handover to worker',
+        }),
+      ).toEqual({
+        type: 'coding',
+        text: '#75 Handover to worker',
+        tooltip: '#75 Handover to worker',
+      });
+    });
+
+    it('returns generic text for coding when ticketId is missing, even if title is provided', () => {
+      expect(getSpeechBubble('coding', { title: 'Some title' })).toEqual({
+        type: 'coding',
+        text: 'Coding…',
+      });
+    });
+
+    it('preserves precedence for testing, reviewing, errorAlert and cooldown over ticket bubble', () => {
+      const opts = {
+        ticketId: '75',
+        title: 'Some feature task',
+      };
+
+      // Testing bubble has precedence
+      expect(getSpeechBubble('testing', opts)).toEqual({
+        type: 'testing',
+        text: 'Testing...',
+        icon: '⚙️',
+      });
+
+      // Reviewing bubble has precedence
+      expect(getSpeechBubble('reviewing', opts)).toEqual({
+        type: 'review',
+        text: 'Reviewing #75',
+        icon: '🔍',
+      });
+
+      // Error alert bubble has precedence
+      expect(getSpeechBubble('errorAlert', opts)).toEqual({
+        type: 'alert',
+        text: '!',
+        icon: '⚠️',
+      });
+
+      // Cooldown bubble has precedence
+      const now = 1761150000000;
+      const cooldownUntil = new Date(now + 60000).toISOString();
+      expect(
+        getSpeechBubble('cooldown', { ...opts, cooldownUntil, now }),
+      ).toEqual({
+        type: 'cooldown',
+        text: 'Zzz (1m)',
+        icon: '💤',
+      });
+    });
+
+    it('resolves distinct speech bubbles for parallel runs with their own ticket IDs', () => {
+      const run1 = { ticketId: '75', title: 'Feature Alpha' };
+      const run2 = { ticketId: '76', title: 'Bugfix Beta' };
+
+      const bubble1 = getSpeechBubble('coding', run1);
+      const bubble2 = getSpeechBubble('coding', run2);
+
+      expect(bubble1).toEqual({
+        type: 'coding',
+        text: '#75 Feature Alpha',
+        tooltip: '#75 Feature Alpha',
+      });
+      expect(bubble2).toEqual({
+        type: 'coding',
+        text: '#76 Bugfix Beta',
+        tooltip: '#76 Bugfix Beta',
+      });
+      expect(bubble1?.text).not.toBe(bubble2?.text);
     });
   });
 
