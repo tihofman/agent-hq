@@ -22,7 +22,7 @@ Das kollidiert mit bisherigen Festlegungen:
 ### 1. Redis + BullMQ als Task-Backbone
 
 - Redis 7 läuft in Docker (`docker-compose.yml`, nur `127.0.0.1:6379`, AOF, Volume `redis_data`). `run.sh` startet den Container vor dem Server.
-- BullMQ hält je Team eine Queue (`tasks:frontend`, `tasks:backend`, `tasks:qa`). Job-ID ist die Issue-Nummer.
+- BullMQ hält je Team eine Queue (`tasks-frontend`, `tasks-backend`, `tasks-qa`). Job-ID ist die Issue-Nummer. BullMQ erlaubt keinen Doppelpunkt in Queue-Namen.
 - Events (`POST /api/events`, SSE `/api/stream`, JSONL-Historie) bleiben wie in ADR 0002 und 0003. Redis speichert nur Tasks, Rückfragen und den Subscription-Status.
 
 ### 2. Fester Worker-Pool, TeamLead ist Logik statt Prozess

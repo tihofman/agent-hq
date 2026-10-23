@@ -10,21 +10,8 @@ export const QUEUE_NAMES = {
   qa: 'tasks-qa',
 } as const satisfies Record<Team, string>;
 
-export type QueueTeam = keyof typeof QUEUE_NAMES;
-export type QueueName = (typeof QUEUE_NAMES)[QueueTeam];
+export type QueueName = (typeof QUEUE_NAMES)[Team];
 
 export function getQueueName(team: Team): QueueName {
-  const name = QUEUE_NAMES[team];
-  if (!name) {
-    throw new Error(
-      `Unknown team: "${team}". Must be one of: frontend, backend, qa.`,
-    );
-  }
-  return name;
+  return QUEUE_NAMES[team];
 }
-
-export const ALL_QUEUE_NAMES: readonly QueueName[] = [
-  QUEUE_NAMES.frontend,
-  QUEUE_NAMES.backend,
-  QUEUE_NAMES.qa,
-] as const;

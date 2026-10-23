@@ -1,12 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { Redis } from 'ioredis';
-import {
-  createQueue,
-  createQueueManager,
-  createWorker,
-  QueueManager,
-} from './manager.js';
+import { QueueManager } from './manager.js';
 import { QUEUE_NAMES } from './queues.js';
 
 class MockRedisClient extends EventEmitter {
@@ -20,11 +15,11 @@ class MockRedisClient extends EventEmitter {
   disconnect = vi.fn();
 }
 
-describe('QueueManager & Factories', () => {
+describe('QueueManager', () => {
   it('creates Queues using the shared Redis connection', async () => {
     expect.assertions(6);
     const mockConnection = new MockRedisClient() as unknown as Redis;
-    const manager = createQueueManager({
+    const manager = new QueueManager({
       connection: mockConnection,
       queueOptions: { skipVersionCheck: true },
     });
@@ -52,7 +47,7 @@ describe('QueueManager & Factories', () => {
   it('creates Workers with team queue name and shared connection', async () => {
     expect.assertions(3);
     const mockConnection = new MockRedisClient() as unknown as Redis;
-    const manager = createQueueManager({
+    const manager = new QueueManager({
       connection: mockConnection,
       workerOptions: { skipVersionCheck: true, autorun: false },
     });
@@ -105,28 +100,5 @@ describe('QueueManager & Factories', () => {
     await manager.close();
 
     expect(disconnectSpy).toHaveBeenCalled();
-  });
-
-  it('standalone createQueue and createWorker helpers construct properly', async () => {
-    expect.assertions(2);
-    const mockConnection = new MockRedisClient() as unknown as Redis;
-
-    const queue = createQueue('backend', {
-      connection: mockConnection,
-      skipVersionCheck: true,
-    });
-    const worker = createWorker('backend', async () => {}, {
-      connection: mockConnection,
-      skipVersionCheck: true,
-      autorun: false,
-    });
-
-    try {
-      expect(queue.name).toBe(QUEUE_NAMES.backend);
-      expect(worker.name).toBe(QUEUE_NAMES.backend);
-    } finally {
-      await queue.close();
-      await worker.close();
-    }
   });
 });

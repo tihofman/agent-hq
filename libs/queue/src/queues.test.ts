@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_QUEUE_NAMES, getQueueName, QUEUE_NAMES } from './queues.js';
-import type { Team } from './types.js';
+import { getQueueName, QUEUE_NAMES } from './queues.js';
 
 describe('Queue Names', () => {
   it('maps each team to a BullMQ-compatible name without colons', () => {
@@ -20,22 +19,5 @@ describe('Queue Names', () => {
     expect(getQueueName('frontend')).toBe('tasks-frontend');
     expect(getQueueName('backend')).toBe('tasks-backend');
     expect(getQueueName('qa')).toBe('tasks-qa');
-  });
-
-  it('getQueueName throws for invalid teams', () => {
-    expect.assertions(1);
-    expect(() => getQueueName('unknown' as unknown as Team)).toThrow(
-      'Unknown team: "unknown"',
-    );
-  });
-
-  it('ALL_QUEUE_NAMES contains exactly the three team queues', () => {
-    expect.assertions(2);
-    expect(ALL_QUEUE_NAMES).toHaveLength(3);
-    expect(ALL_QUEUE_NAMES).toEqual([
-      'tasks-frontend',
-      'tasks-backend',
-      'tasks-qa',
-    ]);
   });
 });

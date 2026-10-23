@@ -59,7 +59,7 @@ describe('Redis Connection', () => {
     });
 
     it('handles connection error and connection drops without crashing (reconnect strategy)', () => {
-      expect.assertions(5);
+      expect.assertions(10);
       const onError = vi.fn();
       const client = createRedisConnection(DEFAULT_REDIS_URL, {
         onError,
@@ -67,18 +67,27 @@ describe('Redis Connection', () => {
       });
 
       try {
-        // 1. Verify retryStrategy provides backoff delay on disconnect/failure
+        // 1. Verify retryStrategy provides backoff delay and never gives up on large attempt counts
         const retryStrategy = client.options.retryStrategy as (
           times: number,
-        ) => number;
+        ) => number | false | null;
         expect(typeof retryStrategy).toBe('function');
 
         const delay1 = retryStrategy(1);
         const delay5 = retryStrategy(5);
-        expect(delay1).toBeGreaterThan(0);
-        expect(delay5).toBeGreaterThanOrEqual(delay1);
+        const delay100 = retryStrategy(100);
+        const delay1000 = retryStrategy(1000);
 
-        // 2. Simulate connection error - verify it does NOT crash the process
+        expect(typeof delay1).toBe('number');
+        expect(delay1).toBeGreaterThan(0);
+        expect(delay5).toBeGreaterThanOrEqual(delay1 as number);
+        // Large attempt counts must never return false or null (never give up) and stay capped at maxDelayMs
+        expect(typeof delay100).toBe('number');
+        expect(delay100).toBe(500);
+        expect(typeof delay1000).toBe('number');
+        expect(delay1000).toBe(500);
+
+        // 2. Simulate connection error with configured onError
         const simulatedError = new Error('connect ECONNREFUSED 127.0.0.1:6379');
         expect(() => {
           client.emit('error', simulatedError);
@@ -87,6 +96,21 @@ describe('Redis Connection', () => {
         expect(onError).toHaveBeenCalledWith(simulatedError);
       } finally {
         client.disconnect();
+      }
+    });
+
+    it('does not throw when an error event is emitted without a configured onError handler', () => {
+      expect.assertions(1);
+      const clientWithoutOnError = createRedisConnection();
+      try {
+        expect(() => {
+          clientWithoutOnError.emit(
+            'error',
+            new Error('unhandled connection error'),
+          );
+        }).not.toThrow();
+      } finally {
+        clientWithoutOnError.disconnect();
       }
     });
   });
