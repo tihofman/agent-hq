@@ -8,6 +8,8 @@ DELEGATE_PID=
 cleanup() {
   [ -z "$DELEGATE_PID" ] || kill -TERM "$DELEGATE_PID" 2>/dev/null || true
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
+  rm -f "$ROOT/docs/tickets/T-89-local-test.md"
+  rmdir "$ROOT/docs/tickets" 2>/dev/null || true
   rm -rf "$TEST_DIR"
 }
 trap cleanup EXIT
@@ -32,6 +34,20 @@ fi
 exit "${FAKE_EXIT:-0}"
 WORKER
 chmod +x "$TEST_DIR/bin/agy"
+cat > "$TEST_DIR/bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [ "${FAKE_GH_MODE:-}" = "hang" ]; then
+  trap 'exit 143' TERM
+  while :; do sleep 0.05; done
+elif [ "${FAKE_GH_MODE:-}" = "error" ]; then
+  exit 1
+elif [ "${FAKE_GH_MODE:-}" = "title" ]; then
+  echo "${FAKE_GH_TITLE:-Default Ticket Title}"
+  exit 0
+fi
+exit 1
+GH
+chmod +x "$TEST_DIR/bin/gh"
 cat > "$TEST_DIR/server.cjs" <<'SERVER'
 const http = require('node:http');
 const fs = require('node:fs');
@@ -306,4 +322,107 @@ jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$TEST_DIR/w
 
 unset AGENT_MODEL
 pass 'AGENT_MODEL passed to agy and codex, logged, and omitted when unset or empty'
+
+# Ticket title via gh (success)
+export FAKE_EXIT=0
+export FAKE_GH_MODE=title
+export FAKE_GH_TITLE='Feature: Ticket Title for Bubble'
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful worker exit code with gh title'
+jq -se --arg title "$FAKE_GH_TITLE" '
+  map(.body) as $e |
+  $e[0].event == "TASK_HANDOVER" and $e[0].data.title == $title and
+  $e[1].event == "TASK_START" and $e[1].data.title == $title and
+  $e[2].event == "TASK_COMPLETE" and ($e[2].data | has("title") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'title present in TASK_HANDOVER and TASK_START, absent in TASK_COMPLETE'
+
+# Ticket title via gh with special characters (quotes, symbols, backslashes)
+export FAKE_GH_TITLE='feat(#89): "Quotes", $dollar, &amp, \backslash und Sonderzeichen äöü'
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful exit with special chars in title'
+jq -se --arg title "$FAKE_GH_TITLE" '
+  map(.body) as $e |
+  $e[0].data.title == $title and
+  $e[1].data.title == $title
+' "$TEST_DIR/events" >/dev/null || fail 'special characters in title safely embedded'
+
+# Ticket title via gh error (exits 1)
+export FAKE_GH_MODE=error
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful worker exit code when gh fails'
+jq -se '
+  map(.body) as $e |
+  all($e[]; .data | has("title") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'no title field when gh returns error'
+
+# Ticket title when gh is absent / missing
+MOCK_BIN_NO_GH="$TEST_DIR/bin_no_gh"
+mkdir -p "$MOCK_BIN_NO_GH"
+for cmd in bash sh node jq curl mktemp mkfifo rm kill wait date grep sed cut head tail tr mkdir cat tee; do
+  p="$(command -v "$cmd" 2>/dev/null || true)"
+  [ -z "$p" ] || ln -sf "$p" "$MOCK_BIN_NO_GH/$cmd"
+done
+ln -sf "$TEST_DIR/bin/agy" "$MOCK_BIN_NO_GH/agy"
+
+: > "$TEST_DIR/events"
+PATH="$MOCK_BIN_NO_GH" bash "$ROOT/scripts/delegate.sh" agy 'Implement #7 "quoted" prompt' > "$TEST_DIR/stdout" 2>&1
+CODE=$?
+[ "$CODE" = 0 ] || fail 'successful worker exit code when gh is missing'
+jq -se '
+  map(.body) as $e |
+  all($e[]; .data | has("title") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'no title field when gh is missing'
+
+# Ticket title when gh hangs (timeout triggers)
+export FAKE_GH_MODE=hang
+export DELEGATE_GH_TIMEOUT=1
+START="$(now)"
+run_delegate
+ELAPSED=$(( $(now) - START ))
+unset DELEGATE_GH_TIMEOUT
+unset FAKE_GH_MODE
+[ "$CODE" = 0 ] || fail 'successful worker exit code when gh hangs'
+[ "$ELAPSED" -ge 900 ] && [ "$ELAPSED" -lt 3000 ] || fail "hanging gh timeout took unexpected duration (${ELAPSED}ms)"
+jq -se '
+  map(.body) as $e |
+  all($e[]; .data | has("title") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'no title field when gh times out'
+pass 'ticket title via gh: success, special characters, error, missing gh, and timeout'
+
+# Local ticket T-N with file in docs/tickets/T-N-*.md
+mkdir -p "$ROOT/docs/tickets"
+TEST_TICKET_FILE="$ROOT/docs/tickets/T-89-local-test.md"
+cat > "$TEST_TICKET_FILE" <<'TICKET'
+# Lokales Ticket: "Sprechblasen-Titel" & mehr
+
+## 1. Kurzbeschreibung
+Test ticket
+TICKET
+
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" agy 'Implement T-89 local ticket' > "$TEST_DIR/stdout" 2>&1
+CODE=$?
+rm -f "$TEST_TICKET_FILE"
+rmdir "$ROOT/docs/tickets" 2>/dev/null || true
+[ "$CODE" = 0 ] || fail 'successful worker exit code with local T-N ticket'
+jq -se --arg title 'Lokales Ticket: "Sprechblasen-Titel" & mehr' '
+  map(.body) as $e |
+  $e[0].ticketId == "T-89" and
+  $e[0].data.title == $title and
+  $e[1].data.title == $title and
+  ($e[2].data | has("title") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'T-N ticket title extracted from file for TASK_HANDOVER and TASK_START'
+
+# Local ticket T-N when file does not exist
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" agy 'Implement T-999 missing ticket' > "$TEST_DIR/stdout" 2>&1
+CODE=$?
+[ "$CODE" = 0 ] || fail 'successful worker exit code with missing T-N ticket file'
+jq -se '
+  map(.body) as $e |
+  $e[0].ticketId == "T-999" and
+  all($e[]; .data | has("title") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'no title field when T-N ticket file does not exist'
+pass 'local T-N ticket: extracted from docs/tickets/T-N-*.md when present, omitted when missing'
+
 stop_server

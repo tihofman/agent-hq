@@ -19,13 +19,19 @@ hq_event() { # <event> [pid] [exitCode]
   if [ "$1" = TASK_COMPLETE ] || [ "$1" = TASK_FAILED ]; then
     pr="$(pr_from_log)"
   fi
+  local title=""
+  if [ "$1" = TASK_HANDOVER ] || [ "$1" = TASK_START ]; then
+    title="${TICKET_TITLE:-}"
+  fi
   curl --connect-timeout 0.1 --max-time 0.5 -s -X POST "$HQ/api/events" \
     -H "Content-Type: application/json" \
     -d "$(jq -nc --arg e "$1" --arg a "$AGENT" --arg r "$RUN_ID" --arg t "$TICKET_ID" \
             --arg cwd "$PWD" --arg log "$LOG" --argjson pid "${2:-null}" --argjson code "${3:-null}" \
-            --arg pr "$pr" \
+            --arg pr "$pr" --arg title "$title" \
             '{event:$e, agent:$a, runId:$r, ticketId:$t, pid:$pid, cwd:$cwd,
-              data:({logFile:$log, exitCode:$code} + (if $pr != "" and ($pr | test("^[0-9]+$")) then {prNumber:($pr | tonumber)} else {} end))}')" \
+              data:({logFile:$log, exitCode:$code}
+                    + (if $pr != "" and ($pr | test("^[0-9]+$")) then {prNumber:($pr | tonumber)} else {} end)
+                    + (if $title != "" then {title:$title} else {} end))}')" \
     >/dev/null 2>&1 || true
 }
 
@@ -89,6 +95,55 @@ pr_from_log() {
   num="$(grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/[0-9]+\b' "$LOG" 2>/dev/null | tail -n1 | sed 's#.*/##' || true)"
   [[ "$num" =~ ^[0-9]+$ ]] && printf '%s\n' "$num"
 }
+
+ticket_title() {
+  local id="${1#\#}"
+  if [[ "$id" =~ ^[0-9]+$ ]]; then
+    command -v gh >/dev/null 2>&1 || return 0
+    local out_file
+    out_file="$(mktemp "${TMPDIR:-/tmp}/gh-title.XXXXXX")" || return 0
+    local timeout="${DELEGATE_GH_TIMEOUT:-3}"
+    (
+      set -m
+      gh issue view "$id" --json title -q .title > "$out_file" 2>/dev/null &
+      local cmd_pid=$!
+      (
+        sleep "$timeout" &
+        local spid=$!
+        trap 'kill -9 "$spid" 2>/dev/null; exit 0' TERM INT
+        wait "$spid" 2>/dev/null || true
+        kill -TERM -"$cmd_pid" 2>/dev/null || kill -TERM "$cmd_pid" 2>/dev/null || true
+        sleep 0.1
+        kill -KILL -"$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null || true
+      ) 2>/dev/null &
+      local timer_pid=$!
+      wait "$cmd_pid" 2>/dev/null
+      local status=$?
+      kill "$timer_pid" 2>/dev/null || true
+      wait "$timer_pid" 2>/dev/null || true
+      exit "$status"
+    ) 2>/dev/null
+    local status=$?
+    local title=""
+    if [ "$status" -eq 0 ] && [ -s "$out_file" ]; then
+      title="$(head -n 1 "$out_file" | tr -d '\r')"
+      title="${title#"${title%%[![:space:]]*}"}"
+      title="${title%"${title##*[![:space:]]}"}"
+    fi
+    rm -f "$out_file"
+    [ -z "$title" ] || printf '%s\n' "$title"
+  elif [[ "$id" =~ ^T-[0-9]+$ ]]; then
+    for f in docs/tickets/"$id"-*.md docs/tickets/"$id".md; do
+      [ -f "$f" ] || continue
+      local title
+      title="$(grep -m1 '^#\{1,6\}[[:space:]]' "$f" 2>/dev/null | sed -e 's/^#[#[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\r')"
+      [ -z "$title" ] || printf '%s\n' "$title"
+      break
+    done
+  fi
+}
+
+TICKET_TITLE="$(ticket_title "$TICKET_ID")"
 
 case "$AGENT" in
   agy|antigravity|codex) ;;
