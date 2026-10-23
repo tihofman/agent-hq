@@ -24,6 +24,7 @@ cat > "$TEST_DIR/bin/agy" <<'WORKER'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$WORKER_PID_FILE"
 jq -nc --args '$ARGS.positional' -- "$@" >> "$TMPDIR/worker.calls"
+printf '%s\n' "${HQ_ASK:-unset}" >> "$TMPDIR/worker.hq_ask"
 echo 'fake worker output'
 echo 'fake worker stderr' >&2
 if [ "${FAKE_WAIT:-0}" = 1 ]; then
@@ -347,10 +348,14 @@ jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" -
   ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
     .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and
     .sandbox.autoAllowBashIfSandboxed == true and
+    (.sandbox | has("excludedCommands") | not) and
+    (has("permissions") | not) and
     .sandbox.filesystem.allowWrite == [$cwd, $npm, $tmp, $git] and
     .sandbox.filesystem.denyWrite == [($git + "/hooks"), ($git + "/config")] and
     ((.sandbox.filesystem.denyWrite // []) | index("/") == null))
 ' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called with model and sandbox settings'
+grep -q 'Warnung: .* liegt unter dem Arbeitsverzeichnis' "$TEST_DIR/stdout" || fail 'expected warning when hq-ask.sh is under PWD'
+[ "$(tail -n1 "$TEST_DIR/worker.hq_ask")" = "unset" ] || fail 'HQ_ASK should be unset when hq-ask.sh is under PWD'
 
 # Test claude without AGENT_MODEL
 unset AGENT_MODEL
@@ -389,6 +394,47 @@ jq -se --argjson pid "$(cat "$WORKER_PID_FILE")" --arg cwd "$ROOT" '
   all($e[]; .agent == "claude" and .ticketId == "7" and .cwd == $cwd)
 ' "$TEST_DIR/events" >/dev/null || fail 'claude events and real worker PID'
 pass 'claude worker starts in background, reports real PID and events'
+
+# Test claude sandbox exclusion of hq-ask.sh when run outside script directory
+WORKTREE_DIR="$TEST_DIR/worktree"
+mkdir -p "$WORKTREE_DIR"
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+: > "$TEST_DIR/worker.hq_ask"
+(cd "$WORKTREE_DIR" && bash "$ROOT/scripts/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/stdout" 2>&1)
+[ "$?" = 0 ] || fail 'successful claude execution from outside script directory'
+EXPECTED_ASK="$ROOT/scripts/hq-ask.sh"
+[ "$(tail -n1 "$TEST_DIR/worker.hq_ask")" = "$EXPECTED_ASK" ] || fail 'HQ_ASK exported when hq-ask.sh is outside PWD'
+grep -q 'Warnung: .* liegt unter dem Arbeitsverzeichnis' "$TEST_DIR/stdout" && fail 'unexpected warning when hq-ask.sh is outside PWD'
+jq -se --arg ask "$EXPECTED_ASK" '
+  .[-1] as $call |
+  ($call | index("--settings")) as $settingsflag |
+  ($call[$settingsflag+1] | fromjson |
+    .sandbox.allowUnsandboxedCommands == false and
+    .sandbox.excludedCommands == [($ask + " *")] and
+    .permissions.allow == [("Bash(" + $ask + " *)")])
+' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude settings contain excludedCommands and permissions.allow with absolute path and " *"'
+pass 'claude sandbox excludes hq-ask.sh when outside PWD and exports HQ_ASK'
+
+# Test claude when hq-ask.sh does not exist alongside delegate.sh
+NO_ASK_DIR="$TEST_DIR/no_ask_dir"
+mkdir -p "$NO_ASK_DIR"
+cp "$ROOT/scripts/delegate.sh" "$NO_ASK_DIR/delegate.sh"
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+: > "$TEST_DIR/worker.hq_ask"
+(cd "$WORKTREE_DIR" && bash "$NO_ASK_DIR/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/stdout" 2>&1)
+[ "$?" = 0 ] || fail 'successful claude execution when hq-ask.sh does not exist'
+[ "$(tail -n1 "$TEST_DIR/worker.hq_ask")" = "unset" ] || fail 'HQ_ASK should be unset when hq-ask.sh does not exist'
+grep -q 'Warnung: .* liegt unter dem Arbeitsverzeichnis' "$TEST_DIR/stdout" && fail 'unexpected warning when hq-ask.sh does not exist'
+jq -se '
+  .[-1] as $call |
+  ($call | index("--settings")) as $settingsflag |
+  ($call[$settingsflag+1] | fromjson |
+    (.sandbox | has("excludedCommands") | not) and
+    (has("permissions") | not))
+' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude settings omit excludedCommands and permissions when hq-ask.sh does not exist'
+pass 'claude settings omit excludedCommands and permissions when hq-ask.sh does not exist'
 
 # Ticket title via gh (success)
 export FAKE_EXIT=0
