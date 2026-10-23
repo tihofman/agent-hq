@@ -13,6 +13,17 @@ import {
 import { getQueueName } from './queues.js';
 import type { TaskPayload, Team } from './types.js';
 
+export interface QueueManagerLike {
+  connection?: { ping?: () => Promise<string> };
+  getQueue(team: Team): Queue<TaskPayload>;
+  createWorker(
+    team: Team,
+    processor: Processor<TaskPayload, unknown, string>,
+    options?: Partial<WorkerOptions>,
+  ): Worker<TaskPayload>;
+  close(): Promise<void>;
+}
+
 export interface QueueManagerOptions {
   redisUrl?: string;
   connection?: Redis;
@@ -22,7 +33,7 @@ export interface QueueManagerOptions {
   onError?: (err: Error) => void;
 }
 
-export class QueueManager {
+export class QueueManager implements QueueManagerLike {
   readonly connection: Redis;
   private readonly ownsConnection: boolean;
   private readonly queueOptions: Partial<QueueOptions>;

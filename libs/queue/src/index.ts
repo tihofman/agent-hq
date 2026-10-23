@@ -1,5 +1,6 @@
 export type {
   Team,
+  Provider,
   QuestionStatus,
   QuestionPayload,
   TaskPayload,
@@ -21,4 +22,8 @@ export {
   type CreateRedisConnectionOptions,
 } from './connection.js';
 
-export { QueueManager, type QueueManagerOptions } from './manager.js';
+export {
+  QueueManager,
+  type QueueManagerLike,
+  type QueueManagerOptions,
+} from './manager.js';

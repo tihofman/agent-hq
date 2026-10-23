@@ -2,6 +2,7 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { isOriginAllowed } from '../../../../../lib/server/origin';
 import {
   answerQuestion,
+  MAX_ANSWER_LENGTH,
   QuestionConflictError,
   QuestionNotFoundError,
 } from '../../../../../lib/server/questions';
@@ -31,9 +32,15 @@ export const POST: RequestHandler = async ({ request, url, params }) => {
   const record = body as Record<string, unknown>;
   const answer = record.answer;
 
-  if (typeof answer !== 'string' || !answer.trim()) {
+  if (
+    typeof answer !== 'string' ||
+    !answer.trim() ||
+    answer.trim().length > MAX_ANSWER_LENGTH
+  ) {
     return json(
-      { error: 'answer must be a non-empty string' },
+      {
+        error: `answer must be a non-empty string up to ${MAX_ANSWER_LENGTH} characters`,
+      },
       { status: 400 },
     );
   }

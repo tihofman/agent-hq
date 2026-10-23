@@ -3,6 +3,9 @@ import { isOriginAllowed } from '../../../lib/server/origin';
 import {
   askQuestion,
   getOpenQuestions,
+  MAX_OPTION_LENGTH,
+  MAX_OPTIONS_COUNT,
+  MAX_QUESTION_LENGTH,
   QuestionConflictError,
   QuestionNotFoundError,
 } from '../../../lib/server/questions';
@@ -60,9 +63,15 @@ export const POST: RequestHandler = async ({ request, url }) => {
     );
   }
 
-  if (typeof question !== 'string' || !question.trim()) {
+  if (
+    typeof question !== 'string' ||
+    !question.trim() ||
+    question.trim().length > MAX_QUESTION_LENGTH
+  ) {
     return json(
-      { error: 'question must be a non-empty string' },
+      {
+        error: `question must be a non-empty string up to ${MAX_QUESTION_LENGTH} characters`,
+      },
       { status: 400 },
     );
   }
@@ -70,10 +79,18 @@ export const POST: RequestHandler = async ({ request, url }) => {
   if (options !== undefined) {
     if (
       !Array.isArray(options) ||
-      options.some((o) => typeof o !== 'string' || !o.trim())
+      options.length > MAX_OPTIONS_COUNT ||
+      options.some(
+        (o) =>
+          typeof o !== 'string' ||
+          !o.trim() ||
+          o.trim().length > MAX_OPTION_LENGTH,
+      )
     ) {
       return json(
-        { error: 'options must be an array of non-empty strings' },
+        {
+          error: `options must be an array of at most ${MAX_OPTIONS_COUNT} non-empty strings up to ${MAX_OPTION_LENGTH} characters each`,
+        },
         { status: 400 },
       );
     }

@@ -1,22 +1,29 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
+import { DelayedError, type Job, type Queue, type Worker } from 'bullmq';
 import {
-  DelayedError,
-  type Job,
-  type Processor,
-  type Queue,
-  type Worker,
-  type WorkerOptions,
-} from 'bullmq';
-import { QueueManager, type TaskPayload, type Team } from '@agent-hq/queue';
+  QueueManager,
+  type QueueManagerLike,
+  type TaskPayload,
+  type Team,
+} from '@agent-hq/queue';
+import {
+  finalizeWorktree,
+  prepareWorktree,
+  type FinishWorktreeResult,
+  type PreparedWorktree,
+  type WorktreeContext,
+} from './git-worktree';
 import { recordEvent } from './history';
+import { resetQuestionsState, setQueueManager } from './questions';
 import { parseEvent, type Agent } from './state';
-import { subscribe } from './store';
+import { dispatch, subscribe } from './store';
 import { SubscriptionPool } from './subscription-pool';
-import { setQueueManager, resetQuestionsState } from './questions';
+
+export type { QueueManagerLike };
 
 export const TEAMS: readonly Team[] = ['frontend', 'backend', 'qa'] as const;
 export const DEFAULT_CONCURRENCY: Record<Team, number> = {
@@ -32,32 +39,35 @@ const PING_TIMEOUT_MS = 2_000;
 const KILL_TIMEOUT_MS = 2_000;
 
 export type TeamStatus = 'idle' | 'working' | 'waiting_input';
-export type WorkerJob = Pick<
-  Job<TaskPayload>,
-  'id' | 'data' | 'updateData' | 'moveToDelayed'
->;
-
-export interface QueueManagerLike {
-  connection?: { ping?: () => Promise<string> };
-  getQueue(team: Team): Queue<TaskPayload>;
-  createWorker(
-    team: Team,
-    processor: Processor<TaskPayload, unknown, string>,
-    options?: Partial<WorkerOptions>,
-  ): Worker<TaskPayload>;
-  close(): Promise<void>;
-}
+export type WorkerTaskPayload = TaskPayload & { prUrl?: string };
+export type WorkerJob = Pick<Job<TaskPayload>, 'id' | 'moveToDelayed'> & {
+  data: WorkerTaskPayload;
+  updateData: (data: WorkerTaskPayload) => Promise<void>;
+};
 
 export type SubscriptionPoolLike = Pick<
   SubscriptionPool,
   'pick' | 'reportOutput' | 'on' | 'off' | 'close'
->;
+> & {
+  status?: SubscriptionPool['status'];
+};
 
 export interface WorkerPoolOptions {
   enabled?: boolean;
   concurrency?: Partial<Record<Team, number>>;
   delegateScript?: string;
   cwd?: string;
+  repoRoot?: string;
+  ghBinary?: string;
+  prepareWorktree?: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+  ) => Promise<PreparedWorktree>;
+  finalizeWorktree?: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+    worktree: PreparedWorktree,
+  ) => Promise<FinishWorktreeResult>;
   logDir?: string;
   env?: NodeJS.ProcessEnv;
   queueManager?: QueueManagerLike;
@@ -66,8 +76,6 @@ export interface WorkerPoolOptions {
   onError?: (err: unknown) => void;
   maxErrorLength?: number;
   questionGracePeriodMs?: number;
-  promptTemplatePath?: string;
-  hqAskPrompt?: string;
 }
 
 export function isV2WorkersEnabled(
@@ -89,36 +97,9 @@ export function extractSessionId(output: string): string | undefined {
   return undefined;
 }
 
-export function loadHqAskPrompt(
-  promptPath?: string,
-  hqAskPath?: string,
-): string {
-  const targetPromptPath =
-    promptPath ??
-    resolve(dirname(resolveDefaultDelegateScript()), 'prompts', 'hq-ask.md');
-  const targetHqAskPath =
-    hqAskPath ?? resolve(dirname(resolveDefaultDelegateScript()), 'hq-ask.sh');
-
-  if (!existsSync(targetPromptPath)) {
-    return '';
-  }
-  try {
-    const content = readFileSync(targetPromptPath, 'utf8');
-    return content.replaceAll('{{HQ_ASK}}', targetHqAskPath).trim();
-  } catch {
-    return '';
-  }
-}
-
-export interface BuildTaskPromptOptions {
-  delegateScript?: string;
-  promptTemplatePath?: string;
-  hqAskPrompt?: string;
-}
-
 export function buildTaskPrompt(
   payload: TaskPayload,
-  options?: BuildTaskPromptOptions,
+  delegateScript = resolveDefaultDelegateScript(),
 ): string {
   const sections = [`Ticket #${payload.issueId}: ${payload.title}`];
   if (payload.body?.trim()) sections.push(payload.body.trim());
@@ -133,20 +114,16 @@ export function buildTaskPrompt(
     );
   }
 
-  const delegateScript =
-    options?.delegateScript ?? resolveDefaultDelegateScript();
   const delegateDir = dirname(resolve(delegateScript));
-  const hqAskPath = resolve(delegateDir, 'hq-ask.sh');
-  const promptPath =
-    options?.promptTemplatePath ?? resolve(delegateDir, 'prompts', 'hq-ask.md');
-
-  const hqAskContent =
-    options?.hqAskPrompt !== undefined
-      ? options.hqAskPrompt
-      : loadHqAskPrompt(promptPath, hqAskPath);
-
-  if (hqAskContent.trim()) {
-    sections.push(hqAskContent.trim());
+  const promptPath = join(delegateDir, 'prompts', 'hq-ask.md');
+  const hqAskPath = join(delegateDir, 'hq-ask.sh');
+  try {
+    const content = readFileSync(promptPath, 'utf8')
+      .replaceAll('{{HQ_ASK}}', hqAskPath)
+      .trim();
+    if (content) sections.push(content);
+  } catch {
+    console.warn(`[worker-pool] Prompt template missing: ${promptPath}`);
   }
 
   return sections.join('\n\n');
@@ -197,6 +174,16 @@ export class WorkerPool {
 
   private readonly opts: WorkerPoolOptions;
   private readonly onError: (err: unknown) => void;
+  private repoRoot?: string;
+  private readonly prepareWorktreeFn: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+  ) => Promise<PreparedWorktree>;
+  private readonly finalizeWorktreeFn: (
+    ctx: WorktreeContext,
+    payload: TaskPayload,
+    worktree: PreparedWorktree,
+  ) => Promise<FinishWorktreeResult>;
   private queueManager?: QueueManagerLike;
   private subscriptionPool?: SubscriptionPoolLike;
   private unwireFailover?: () => void;
@@ -250,8 +237,21 @@ export class WorkerPool {
       this.concurrency.qa;
     this.onError =
       options.onError ?? ((err: unknown) => console.warn('[worker-pool]', err));
+    this.prepareWorktreeFn = options.prepareWorktree ?? prepareWorktree;
+    this.finalizeWorktreeFn = options.finalizeWorktree ?? finalizeWorktree;
+    if (options.repoRoot) {
+      this.repoRoot = resolve(options.repoRoot);
+    }
     this.queueManager = options.queueManager;
     this.subscriptionPool = options.subscriptionPool;
+  }
+
+  private getWorktreeContext(): WorktreeContext {
+    return {
+      repoRoot: this.repoRoot ?? resolve(this.opts.cwd ?? process.cwd()),
+      ghBinary: this.opts.ghBinary,
+      env: this.opts.env,
+    };
   }
 
   async start(): Promise<boolean> {
@@ -260,6 +260,19 @@ export class WorkerPool {
     this.closing = false;
 
     try {
+      if (!this.repoRoot) {
+        try {
+          this.repoRoot = resolve(
+            execFileSync('git', ['rev-parse', '--show-toplevel'], {
+              cwd: this.opts.cwd ?? process.cwd(),
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim(),
+          );
+        } catch {
+          this.repoRoot = resolve(this.opts.cwd ?? process.cwd());
+        }
+      }
       this.queueManager ??= new QueueManager({
         onError: (err) => this.onError(err),
         queueOptions: { defaultJobOptions: { attempts: DEFAULT_ATTEMPTS } },
@@ -288,7 +301,27 @@ export class WorkerPool {
 
       this.ensureSubscriptionPool();
       for (const team of TEAMS) {
-        this.queueManager.getQueue(team);
+        const queue = this.queueManager.getQueue(team);
+        if (typeof (queue as { getJobs?: unknown }).getJobs === 'function') {
+          const jobs = await queue.getJobs(['delayed', 'active', 'waiting']);
+          for (const job of jobs) {
+            const q = job.data?.question;
+            if (q?.status === 'PENDING') {
+              dispatch(
+                parseEvent({
+                  event: 'QUESTION_PENDING',
+                  data: {
+                    questionId: q.id,
+                    issueId: q.issueId,
+                    team: q.team,
+                    question: q.question,
+                    ...(q.options?.length ? { options: q.options } : {}),
+                  },
+                }),
+              );
+            }
+          }
+        }
         this.workers.set(
           team,
           this.queueManager.createWorker(
@@ -310,7 +343,11 @@ export class WorkerPool {
     }
   }
 
-  async processJob(team: Team, job: WorkerJob, token?: string): Promise<void> {
+  async processJob(
+    team: Team,
+    job: WorkerJob,
+    token?: string,
+  ): Promise<{ prUrl?: string } | void> {
     if (!this.enabled) return;
 
     if (job.data.question?.status === 'PENDING') {
@@ -322,7 +359,17 @@ export class WorkerPool {
     const pool = this.ensureSubscriptionPool();
     const restartedProviders = new Set<Agent>();
 
+    const worktree = await this.guard(() =>
+      this.prepareWorktreeFn(this.getWorktreeContext(), job.data),
+    );
+
     while (true) {
+      const hasAnsweredQuestion = job.data.question?.status === 'ANSWERED';
+      const savedSessionId = hasAnsweredQuestion
+        ? job.data.sessionId
+        : undefined;
+      const savedProvider = hasAnsweredQuestion ? job.data.provider : undefined;
+
       const picked = await this.guard(() => pool.pick(team));
       if (picked.provider === null) {
         const resetAt = Math.max(Date.now(), Date.parse(picked.cooldownUntil));
@@ -330,23 +377,42 @@ export class WorkerPool {
         throw new DelayedError();
       }
 
-      const { provider } = picked;
-      const script = this.opts.delegateScript ?? resolveDefaultDelegateScript();
+      let provider: Agent = picked.provider;
+      if (
+        savedSessionId &&
+        savedProvider &&
+        provider !== savedProvider &&
+        typeof pool.status === 'function'
+      ) {
+        const statuses = await this.guard(() => pool.status!());
+        if (statuses[savedProvider]?.status === 'AVAILABLE') {
+          provider = savedProvider;
+        }
+      }
+
+      const script = resolve(
+        this.opts.cwd ?? process.cwd(),
+        this.opts.delegateScript ?? resolveDefaultDelegateScript(),
+      );
       const isResumed =
-        Boolean(job.data.sessionId) && job.data.question?.status === 'ANSWERED';
+        hasAnsweredQuestion &&
+        Boolean(savedSessionId) &&
+        savedProvider === provider;
+      const answeredBeforeRun = hasAnsweredQuestion
+        ? job.data.question?.id
+        : undefined;
       const prompt = isResumed
         ? job.data.question!.answer!
-        : buildTaskPrompt(job.data, {
-            delegateScript: script,
-            promptTemplatePath: this.opts.promptTemplatePath,
-            hqAskPrompt: this.opts.hqAskPrompt,
-          });
+        : buildTaskPrompt(job.data, script);
 
       const { exitCode, output } = await this.runDelegate(
         team,
         provider,
         prompt,
         job.data,
+        worktree.worktreePath,
+        isResumed ? savedSessionId : undefined,
+        script,
       );
 
       if (this.queueManager && job.id) {
@@ -357,16 +423,25 @@ export class WorkerPool {
         }
       }
 
-      const extractedSession = extractSessionId(output);
-      if (extractedSession) {
-        job.data = { ...job.data, sessionId: extractedSession };
-        await job.updateData(job.data).catch(this.onError);
-      }
-
       await this.opts.afterProcessExit?.(job);
 
-      if (job.data.question?.status === 'PENDING') {
-        const delayUntil = Date.now() + SEVEN_DAYS_MS;
+      const hasUnprocessedQuestion =
+        job.data.question?.status === 'PENDING' ||
+        (job.data.question?.status === 'ANSWERED' &&
+          job.data.question.id !== answeredBeforeRun);
+
+      if (hasUnprocessedQuestion) {
+        const extractedSession =
+          extractSessionId(output) ?? (isResumed ? savedSessionId : undefined);
+        const { sessionId: _s, provider: _p, ...restData } = job.data;
+        job.data = extractedSession
+          ? { ...restData, sessionId: extractedSession, provider }
+          : restData;
+        await job.updateData(job.data).catch(this.onError);
+        const delayUntil =
+          job.data.question!.status === 'PENDING'
+            ? Date.now() + SEVEN_DAYS_MS
+            : Date.now();
         await this.guard(() => job.moveToDelayed(delayUntil, token));
         throw new DelayedError();
       }
@@ -387,7 +462,27 @@ export class WorkerPool {
         }
       }
 
-      if (exitCode === 0) return;
+      const { sessionId: _s, provider: _p, ...cleanedData } = job.data;
+      job.data = cleanedData;
+
+      if (exitCode === 0) {
+        if (isResumed) {
+          await job.updateData(job.data).catch(this.onError);
+        }
+        const result = await this.guard(() =>
+          this.finalizeWorktreeFn(
+            this.getWorktreeContext(),
+            job.data,
+            worktree,
+          ),
+        );
+        job.data = {
+          ...job.data,
+          prUrl: result.prUrl,
+        } as WorkerTaskPayload;
+        await job.updateData(job.data).catch(this.onError);
+        return result;
+      }
 
       const maxLen = this.opts.maxErrorLength ?? MAX_ERROR_LENGTH;
       const lastError = truncateError(output, exitCode, maxLen);
@@ -437,6 +532,9 @@ export class WorkerPool {
     provider: Agent,
     prompt: string,
     payload: TaskPayload,
+    cwd?: string,
+    sessionId?: string,
+    resolvedScript?: string,
   ): Promise<{ exitCode: number; output: string }> {
     return new Promise((resolveRun) => {
       const env = this.opts.env ?? process.env;
@@ -450,21 +548,21 @@ export class WorkerPool {
         AGENT_HQ_LOG_DIR: logDir,
         HQ_ISSUE_ID: String(payload.issueId),
         HQ_TEAM: team,
-        ...(payload.sessionId
-          ? {
-              SESSION: payload.sessionId,
-              HQ_SESSION_ID: payload.sessionId,
-            }
-          : {}),
+        ...(sessionId ? { HQ_SESSION_ID: sessionId } : {}),
       };
 
       let stdout = '';
       let stderr = '';
       let settled = false;
 
-      const script = this.opts.delegateScript ?? resolveDefaultDelegateScript();
+      const script =
+        resolvedScript ??
+        resolve(
+          this.opts.cwd ?? process.cwd(),
+          this.opts.delegateScript ?? resolveDefaultDelegateScript(),
+        );
       const child = spawn(script, [provider, prompt], {
-        cwd: this.opts.cwd ?? process.cwd(),
+        cwd: cwd ?? this.opts.cwd ?? process.cwd(),
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,

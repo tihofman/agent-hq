@@ -68,18 +68,66 @@ claude_command() {
   local tmpdir=""
   tmpdir="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd || echo /tmp)"
   [ -n "$tmpdir" ] || tmpdir="/tmp"
-  local settings
-  settings="$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg tmp "$tmpdir" --arg git "$gitdir" \
-    '{sandbox:{enabled:true,failIfUnavailable:true,allowUnsandboxedCommands:false,autoAllowBashIfSandboxed:true,filesystem:{allowWrite:([$cwd,$npm,$tmp]+(if $git != "" then [$git] else [] end)),denyWrite:(if $git != "" then [($git+"/hooks"),($git+"/config")] else [] end)},network:{allowedDomains:["github.com","api.github.com","codeload.github.com","raw.githubusercontent.com","objects.githubusercontent.com","registry.npmjs.org","npmjs.org"]}}}')"
-  CMD=(claude -p "$prompt")
-  if [ -n "$SESSION" ] || [ "$ATTEMPT" -gt 0 ]; then
-    if [ -n "$CLAUDE_SESSION_ID" ]; then
-      CMD+=(--resume "$CLAUDE_SESSION_ID")
-    elif [ -n "$SESSION" ]; then
-      CMD+=(--resume "$SESSION")
+  local ask
+  ask="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hq-ask.sh"
+  local exclude_ask=false
+  if [ -f "$ask" ]; then
+    local pwd_prefix="${PWD%/}"
+    local pwd_phys
+    pwd_phys="$(pwd -P 2>/dev/null || echo "$pwd_prefix")"
+    pwd_phys="${pwd_phys%/}"
+    local ask_phys
+    ask_phys="$(cd "$(dirname "$ask")" 2>/dev/null && pwd -P || echo "")/$(basename "$ask")"
+    if [[ "$ask" == "$pwd_prefix/"* ]] || [ "$ask" = "$pwd_prefix" ] || \
+       [[ "$ask_phys" == "$pwd_phys/"* ]] || [ "$ask_phys" = "$pwd_phys" ]; then
+      echo "Warnung: $ask liegt unter dem Arbeitsverzeichnis ($PWD) und wird nicht aus der Claude-Sandbox ausgeschlossen." >&2
+      unset HQ_ASK
+    else
+      exclude_ask=true
+      export HQ_ASK="$ask"
     fi
-  elif [ "$ATTEMPT" -eq 0 ]; then
+  else
+    unset HQ_ASK
+  fi
+  local settings
+  settings="$(jq -nc \
+    --arg cwd "$PWD" \
+    --arg npm "$HOME/.npm" \
+    --arg tmp "$tmpdir" \
+    --arg git "$gitdir" \
+    --arg ask "$ask" \
+    --argjson exclude "$exclude_ask" \
+    '{
+      sandbox: ({
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        autoAllowBashIfSandboxed: true
+      } + (if $exclude then {excludedCommands: [($ask + " *")]} else {} end) + {
+        filesystem: {
+          allowWrite: ([$cwd, $npm, $tmp] + (if $git != "" then [$git] else [] end)),
+          denyWrite: (if $git != "" then [($git + "/hooks"), ($git + "/config")] else [] end)
+        },
+        network: {
+          allowedDomains: [
+            "github.com",
+            "api.github.com",
+            "codeload.github.com",
+            "raw.githubusercontent.com",
+            "objects.githubusercontent.com",
+            "registry.npmjs.org",
+            "npmjs.org"
+          ]
+        }
+      })
+    } + (if $exclude then {permissions: {allow: [("Bash(" + $ask + " *)")]}} else {} end)')"
+  CMD=(claude -p "$prompt")
+  if [ "$ATTEMPT" -eq 0 ] && [ -z "$SESSION" ]; then
     [ -z "$CLAUDE_SESSION_ID" ] || CMD+=(--session-id "$CLAUDE_SESSION_ID")
+  elif [ -n "$CLAUDE_SESSION_ID" ]; then
+    CMD+=(--resume "$CLAUDE_SESSION_ID")
+  elif [ -n "$SESSION" ]; then
+    CMD+=(--resume "$SESSION")
   fi
   CMD+=(--settings "$settings" --permission-mode acceptEdits --add-dir "$HOME/.npm")
   [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
@@ -193,7 +241,7 @@ case "$AGENT" in
   *) echo "Unknown agent: $AGENT (must be agy, codex, or claude)" >&2; exit 1 ;;
 esac
 
-SESSION="${SESSION:-${HQ_SESSION_ID:-}}"
+SESSION="${HQ_SESSION_ID:-}"
 CLAUDE_SESSION_ID=
 if [ "$AGENT" = claude ]; then
   if [ -n "$SESSION" ]; then

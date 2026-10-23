@@ -98,6 +98,11 @@ describe('Questions API: POST & GET /api/questions', () => {
     ghCalls = [];
     setGhRunner(async (args) => {
       ghCalls.push(args);
+      if (args[1] === 'view') {
+        return JSON.stringify({
+          labels: [{ name: 'team:frontend' }, { name: 'status:in-progress' }],
+        });
+      }
       return '';
     });
   });
@@ -167,16 +172,18 @@ describe('Questions API: POST & GET /api/questions', () => {
     expect(job.data.question?.id).toBe('101-1');
     expect(job.data.question?.status).toBe('PENDING');
 
-    // Verified GitHub CLI call
-    expect(ghCalls).toHaveLength(1);
-    expect(ghCalls[0]).toEqual([
-      'issue',
-      'edit',
-      '101',
-      '--add-label',
-      'status:blocked',
-      '--remove-label',
-      'status:queued,status:in-progress,status:done',
+    // Verified GitHub CLI calls (view then edit removing only present status:in-progress)
+    expect(ghCalls).toEqual([
+      ['issue', 'view', '101', '--json', 'labels'],
+      [
+        'issue',
+        'edit',
+        '101',
+        '--add-label',
+        'status:blocked',
+        '--remove-label',
+        'status:in-progress',
+      ],
     ]);
 
     // Verified QUESTION_PENDING in state
@@ -194,7 +201,6 @@ describe('Questions API: POST & GET /api/questions', () => {
       status: 'ANSWERED',
       answer: 'First answer',
     };
-    (job.data as { questionCount?: number }).questionCount = 1;
 
     const request = new Request('http://localhost:3333/api/questions', {
       method: 'POST',
@@ -233,14 +239,27 @@ describe('Questions API: POST & GET /api/questions', () => {
     expect(response.status).toBe(409);
   });
 
-  it('returns 400 for invalid body payloads', async () => {
+  it('returns 400 for invalid body payloads and length limits', async () => {
     const tests = [
       'invalid json',
       {},
       { issueId: 'invalid', team: 'frontend', question: 'Valid' },
       { issueId: 101, team: 'unknown-team', question: 'Valid' },
       { issueId: 101, team: 'frontend', question: '' },
+      { issueId: 101, team: 'frontend', question: 'x'.repeat(2001) },
       { issueId: 101, team: 'frontend', question: 'Valid', options: [123] },
+      {
+        issueId: 101,
+        team: 'frontend',
+        question: 'Valid',
+        options: Array.from({ length: 11 }, (_, i) => `Opt ${i}`),
+      },
+      {
+        issueId: 101,
+        team: 'frontend',
+        question: 'Valid',
+        options: ['y'.repeat(201)],
+      },
     ];
 
     for (const testBody of tests) {

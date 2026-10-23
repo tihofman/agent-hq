@@ -323,10 +323,9 @@ describe('GET /api/stream', () => {
     const init1 = await readSSEMessage(reader);
     expect(init1).toContain('event: INIT_STATE');
 
-    // 2. Dispatch QUESTION_PENDING
+    // 2. Dispatch QUESTION_PENDING without agent
     const questionEvent = {
       event: 'QUESTION_PENDING',
-      agent: 'claude',
       data: {
         questionId: '101-1',
         issueId: 101,

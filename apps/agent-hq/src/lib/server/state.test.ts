@@ -342,7 +342,7 @@ describe('reduce', () => {
     expect(progressed.runs['run-1'].data.statusText).toBe('Building');
   });
 
-  it('manages question lifecycle in state for QUESTION_PENDING and QUESTION_RESOLVED', () => {
+  it('manages question lifecycle in state for QUESTION_PENDING and QUESTION_RESOLVED without agent', () => {
     const pendingEvent = parseEvent({
       event: 'QUESTION_PENDING',
       data: {
@@ -353,7 +353,7 @@ describe('reduce', () => {
         options: ['Yes', 'No'],
       },
     });
-    expect(pendingEvent.agent).toBe('claude');
+    expect(pendingEvent.agent).toBeUndefined();
     expect(pendingEvent.room).toBe('dev');
 
     const stateWithQuestion = reduce(initialState, pendingEvent);
@@ -375,6 +375,7 @@ describe('reduce', () => {
         answer: 'Yes',
       },
     });
+    expect(resolvedEvent.agent).toBeUndefined();
     const stateResolved = reduce(stateWithQuestion, resolvedEvent);
     expect(stateResolved.questions?.['101-1']).toBeUndefined();
     expect(Object.keys(stateResolved.questions ?? {})).toHaveLength(0);

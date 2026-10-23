@@ -1,5 +1,7 @@
 export type Team = 'frontend' | 'backend' | 'qa';
 
+export type Provider = 'claude' | 'agy' | 'codex';
+
 export type QuestionStatus = 'PENDING' | 'ANSWERED';
 
 export interface QuestionPayload {
@@ -20,6 +22,7 @@ export interface TaskPayload {
   labels: string[];
   question?: QuestionPayload;
   sessionId?: string;
+  provider?: Provider;
   lastError?: string;
 }
 

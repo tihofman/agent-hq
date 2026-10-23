@@ -64,7 +64,7 @@ describe('issue ingest', () => {
     stop();
   });
 
-  it('translates queue lifecycle events to issue status labels', async () => {
+  it('translates queue lifecycle events to issue status labels and removes only present status labels', async () => {
     const listeners = new Map<string, (data: { jobId: string }) => void>();
     const eventsFor = () => ({
       on: (name: string, listener: (data: { jobId: string }) => void) => {
@@ -74,8 +74,16 @@ describe('issue ingest', () => {
       close: vi.fn().mockResolvedValue(undefined),
     });
     const events = eventsFor();
+    let currentLabel = 'status:queued';
     const runGh = vi.fn(async (args: string[]) => {
-      void args;
+      if (args[1] === 'view') {
+        return JSON.stringify({
+          labels: [{ name: 'team:backend' }, { name: currentLabel }],
+        });
+      }
+      if (args[1] === 'edit') {
+        currentLabel = args[4];
+      }
       return '[]';
     });
     const stop = startIssueIngest({
@@ -100,11 +108,39 @@ describe('issue ingest', () => {
     listeners.get('active')?.({ jobId: 'issue-14' });
     listeners.get('failed')?.({ jobId: 'issue-14' });
     listeners.get('completed')?.({ jobId: 'issue-14' });
-    await vi.waitFor(() => expect(runGh).toHaveBeenCalledTimes(3));
-    expect(runGh.mock.calls.map(([args]) => args?.[4])).toEqual([
-      'status:in-progress',
-      'status:blocked',
-      'status:done',
+    const editCalls = () =>
+      runGh.mock.calls
+        .filter(([args]) => args?.[1] === 'edit')
+        .map(([args]) => args);
+    await vi.waitFor(() => expect(editCalls()).toHaveLength(3));
+    expect(editCalls()).toEqual([
+      [
+        'issue',
+        'edit',
+        '14',
+        '--add-label',
+        'status:in-progress',
+        '--remove-label',
+        'status:queued',
+      ],
+      [
+        'issue',
+        'edit',
+        '14',
+        '--add-label',
+        'status:blocked',
+        '--remove-label',
+        'status:in-progress',
+      ],
+      [
+        'issue',
+        'edit',
+        '14',
+        '--add-label',
+        'status:done',
+        '--remove-label',
+        'status:blocked',
+      ],
     ]);
     stop();
   });

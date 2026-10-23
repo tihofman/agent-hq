@@ -11,6 +11,7 @@ import {
 } from '../../../../../lib/server/store';
 import {
   setQueueManager,
+  setGhRunner,
   resetQuestionsState,
 } from '../../../../../lib/server/questions';
 import type {
@@ -91,6 +92,7 @@ class MockQueueManager implements QueueManagerLike {
 describe('POST /api/questions/:id/answer', () => {
   let tempDir: string;
   let manager: MockQueueManager;
+  let ghCalls: string[][];
   const originalHome = process.env.AGENT_HQ_HOME;
 
   beforeEach(async () => {
@@ -101,6 +103,17 @@ describe('POST /api/questions/:id/answer', () => {
 
     manager = new MockQueueManager();
     setQueueManager(manager);
+
+    ghCalls = [];
+    setGhRunner(async (args) => {
+      ghCalls.push(args);
+      if (args[1] === 'view') {
+        return JSON.stringify({
+          labels: [{ name: 'team:frontend' }, { name: 'status:blocked' }],
+        });
+      }
+      return '';
+    });
   });
 
   afterEach(async () => {
@@ -132,8 +145,14 @@ describe('POST /api/questions/:id/answer', () => {
     expect(response.status).toBe(403);
   });
 
-  it('rejects invalid answer with 400', async () => {
-    const tests = ['not json', {}, { answer: '' }, { answer: 123 }];
+  it('rejects invalid answer and length limits with 400', async () => {
+    const tests = [
+      'not json',
+      {},
+      { answer: '' },
+      { answer: 123 },
+      { answer: 'a'.repeat(5001) },
+    ];
 
     for (const testBody of tests) {
       const request = new Request(
@@ -211,8 +230,78 @@ describe('POST /api/questions/:id/answer', () => {
     // Job promoted back to queue
     expect(job.promote).toHaveBeenCalled();
 
+    // Label updated: status:blocked removed and status:queued added
+    expect(ghCalls).toEqual([
+      ['issue', 'view', '101', '--json', 'labels'],
+      [
+        'issue',
+        'edit',
+        '101',
+        '--add-label',
+        'status:queued',
+        '--remove-label',
+        'status:blocked',
+      ],
+    ]);
+
     // QUESTION_RESOLVED emitted -> removed from open questions in state
     expect(getState().questions?.['101-1']).toBeUndefined();
+  });
+
+  it('accepts answer while job is still active (grace period) without calling promote()', async () => {
+    const job = manager.addJob('frontend', 101, 'active');
+    job.data.question = {
+      id: '101-1',
+      issueId: 101,
+      team: 'frontend',
+      question: 'Answer during grace period?',
+      status: 'PENDING',
+    };
+
+    const request = new Request(
+      'http://localhost:3333/api/questions/101-1/answer',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: 'Quick answer' }),
+      },
+    );
+
+    const response = await POST(createEvent(request, '101-1'));
+    expect(response.status).toBe(200);
+    expect(job.data.question?.status).toBe('ANSWERED');
+    expect(job.data.question?.answer).toBe('Quick answer');
+    expect(job.promote).not.toHaveBeenCalled();
+  });
+
+  it('atomically prevents concurrent double answers with 409', async () => {
+    const job = manager.addJob('frontend', 101, 'delayed');
+    job.data.question = {
+      id: '101-1',
+      issueId: 101,
+      team: 'frontend',
+      question: 'Concurrent answer?',
+      status: 'PENDING',
+    };
+
+    const makeReq = (answer: string) =>
+      POST(
+        createEvent(
+          new Request('http://localhost:3333/api/questions/101-1/answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answer }),
+          }),
+          '101-1',
+        ),
+      );
+
+    const [res1, res2] = await Promise.all([
+      makeReq('First'),
+      makeReq('Second'),
+    ]);
+    expect([res1.status, res2.status].sort()).toEqual([200, 409]);
+    expect(job.data.question?.answer).toBe('First');
   });
 
   it('returns 409 when answering a question that was already answered', async () => {

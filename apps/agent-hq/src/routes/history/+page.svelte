@@ -433,7 +433,7 @@
                                         event.agent,
                                       )}"
                                     >
-                                      {event.agent}
+                                      {event.agent ?? '—'}
                                     </span>
                                   </td>
                                   <td

@@ -48,7 +48,7 @@ export interface EventData {
 export type HQEvent = {
   [T in EventType]: {
     event: T;
-    agent: Agent;
+    agent?: Agent;
     timestamp: string;
     room: Room;
     runId?: string;
@@ -84,15 +84,16 @@ export function parseEvent(
   if (typeof raw.event !== 'string' || !Object.hasOwn(eventRooms, raw.event))
     throw new Error('event must be a supported event type');
   const data = raw.data === undefined ? {} : object(raw.data, 'data');
+  const isQuestionEvent =
+    raw.event === 'QUESTION_PENDING' || raw.event === 'QUESTION_RESOLVED';
   const rawAgent =
     raw.agent === undefined && raw.event === 'SUBSCRIPTION_FAILOVER'
       ? data.from
-      : raw.agent === undefined &&
-          (raw.event === 'QUESTION_PENDING' ||
-            raw.event === 'QUESTION_RESOLVED')
-        ? 'claude'
-        : raw.agent;
-  if (!['claude', 'agy', 'codex'].includes(rawAgent as string))
+      : raw.agent;
+  if (
+    !(isQuestionEvent && rawAgent === undefined) &&
+    !['claude', 'agy', 'codex'].includes(rawAgent as string)
+  )
     throw new Error('agent must be claude, agy or codex');
   if (
     raw.room !== undefined &&
@@ -102,13 +103,13 @@ export function parseEvent(
   const timestamp = raw.timestamp === undefined ? now() : raw.timestamp;
   if (!validDate(timestamp))
     throw new Error('timestamp must be an ISO timestamp');
-  const result: HQEvent = {
+  const result = {
     event: raw.event as EventType,
-    agent: rawAgent as Agent,
+    ...(rawAgent !== undefined ? { agent: rawAgent as Agent } : {}),
     timestamp,
     room: (raw.room as Room | undefined) ?? eventRooms[raw.event as EventType],
-    data: {},
-  };
+    data: {} as EventData,
+  } as HQEvent;
   for (const field of ['runId', 'ticketId', 'cwd'] as const) {
     const value = raw[field];
     if (value !== undefined) {
@@ -350,6 +351,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     }
     return state;
   }
+  if (!event.agent) return state;
   const previousRun =
     event.runId && Object.hasOwn(state.runs, event.runId)
       ? state.runs[event.runId]
