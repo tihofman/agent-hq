@@ -39,33 +39,30 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "Warnung: Docker läuft nicht oder ist nicht verfügbar. Agent-HQ startet ohne Redis/BullMQ (V2-Features deaktiviert)." >&2
 elif [ "${RUN_SH_DRY_RUN:-0}" != "1" ]; then
   echo "Starte Redis via Docker Compose..."
-  (cd "$ROOT" && docker compose up -d redis)
-
-  # Auf PONG warten mit Timeout (15 Sekunden Standard)
-  REDIS_READY=0
-  ATTEMPTS=0
-  MAX_ATTEMPTS="${RUN_SH_REDIS_ATTEMPTS:-30}"
-  SLEEP_INTERVAL="${RUN_SH_REDIS_SLEEP:-0.5}"
-  while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
-    PING_OUTPUT=""
-    if command -v redis-cli >/dev/null 2>&1; then
-      PING_OUTPUT="$(redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null || true)"
-    else
-      PING_OUTPUT="$( (cd "$ROOT" && docker compose exec -T redis redis-cli ping 2>/dev/null) || true)"
-    fi
-
-    if echo "$PING_OUTPUT" | grep -q "PONG"; then
-      REDIS_READY=1
-      break
-    fi
-    sleep "$SLEEP_INTERVAL"
-    ATTEMPTS=$((ATTEMPTS + 1))
-  done
-
-  if [ "$REDIS_READY" = "1" ]; then
-    echo "Redis ist bereit (PONG empfangen)."
+  if ! (cd "$ROOT" && docker compose up -d redis); then
+    echo "Warnung: 'docker compose up -d redis' fehlgeschlagen. Server startet ohne Redis." >&2
   else
-    echo "Warnung: Redis hat innerhalb des Timeouts nicht auf PING geantwortet. Server startet trotzdem." >&2
+    # Auf PONG warten mit Timeout (15 Sekunden Standard)
+    REDIS_READY=0
+    ATTEMPTS=0
+    MAX_ATTEMPTS="${RUN_SH_REDIS_ATTEMPTS:-30}"
+    SLEEP_INTERVAL="${RUN_SH_REDIS_SLEEP:-0.5}"
+    while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
+      PING_OUTPUT="$( (cd "$ROOT" && docker compose exec -T redis redis-cli ping 2>/dev/null) || true)"
+
+      if echo "$PING_OUTPUT" | grep -q "PONG"; then
+        REDIS_READY=1
+        break
+      fi
+      sleep "$SLEEP_INTERVAL"
+      ATTEMPTS=$((ATTEMPTS + 1))
+    done
+
+    if [ "$REDIS_READY" = "1" ]; then
+      echo "Redis ist bereit (PONG empfangen)."
+    else
+      echo "Warnung: Redis hat innerhalb des Timeouts nicht auf PING geantwortet. Server startet trotzdem." >&2
+    fi
   fi
 fi
 

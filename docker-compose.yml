@@ -9,12 +9,12 @@ services:
     restart: unless-stopped
 
   bull-board:
-    image: ghcr.io/felixmosh/bull-board:latest
+    image: ghcr.io/felixmosh/bull-board:9.10.5
     profiles:
       - dev
     ports:
       - '127.0.0.1:3334:3000'
-    command: ['--redis', 'redis://redis:6379', '--host', '0.0.0.0']
+    command: ['--redis', 'redis://redis:6379']
     depends_on:
       - redis
     restart: unless-stopped

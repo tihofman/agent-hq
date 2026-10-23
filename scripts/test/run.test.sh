@@ -233,6 +233,13 @@ exit 0
 EOF
 chmod +x "$MOCK_BIN/docker"
 
+# Mock npm so CI environments without node_modules don't trigger real npm ci
+cat << 'EOF' > "$MOCK_BIN/npm"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npm"
+
 # Mock npx so actual nx/node server is not launched
 cat << 'EOF' > "$MOCK_BIN/npx"
 #!/bin/sh
@@ -274,6 +281,12 @@ exit 0
 EOF
 chmod +x "$MOCK_BIN/docker"
 
+cat << 'EOF' > "$MOCK_BIN/npm"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npm"
+
 cat << 'EOF' > "$MOCK_BIN/npx"
 #!/bin/sh
 exit 0
@@ -293,6 +306,105 @@ elif ! grep -q "Warnung: Redis hat innerhalb des Timeouts" "$STDERR_FILE"; then
   fail "Warnung auf stderr fehlt bei Redis Timeout (stderr: $(cat "$STDERR_FILE"))"
 else
   pass "Redis Timeout -> Warnung auf stderr, Server startet trotzdem"
+fi
+
+# -----------------------------------------------------------------------------
+# Test 10: 'docker compose up' schlägt fehl -> Warnung auf stderr, keine Warteschleife, Server startet trotzdem
+# -----------------------------------------------------------------------------
+MOCK_BIN="$TEST_DIR/bin_docker_up_fail"
+mkdir -p "$MOCK_BIN"
+DOCKER_CALLS="$TEST_DIR/docker_calls_up_fail"
+cat << EOF > "$MOCK_BIN/docker"
+#!/bin/sh
+echo "\$@" >> "$DOCKER_CALLS"
+if [ "\$1" = "info" ]; then
+  exit 0
+fi
+if [ "\$1" = "compose" ] && [ "\$2" = "up" ]; then
+  echo "compose up failed" >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/docker"
+
+cat << 'EOF' > "$MOCK_BIN/npm"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npm"
+
+cat << 'EOF' > "$MOCK_BIN/npx"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npx"
+
+STDOUT_FILE="$TEST_DIR/out_docker_up_fail_stdout"
+STDERR_FILE="$TEST_DIR/out_docker_up_fail_stderr"
+set +e
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+set -e
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  fail "docker compose up Fehler erwartete Exit 0, bekam $EXIT_CODE (stderr: $(cat "$STDERR_FILE"))"
+elif ! grep -q "Warnung: 'docker compose up -d redis' fehlgeschlagen" "$STDERR_FILE"; then
+  fail "Warnung auf stderr fehlt bei compose up Fehler (stderr: $(cat "$STDERR_FILE"))"
+elif grep -q "compose exec" "$DOCKER_CALLS" 2>/dev/null; then
+  fail "Warteschleife wurde trotz fehlschlagendem compose up aufgerufen (Aufrufe: $(cat "$DOCKER_CALLS"))"
+else
+  pass "docker compose up Fehler -> Warnung auf stderr, Server startet trotzdem (Exit 0)"
+fi
+
+# -----------------------------------------------------------------------------
+# Test 11: Nicht-Dry-Run ohne node_modules ruft gefaktes npm ci auf (kein echtes npm)
+# -----------------------------------------------------------------------------
+TEMP_ROOT="$TEST_DIR/temp_root_no_nm"
+mkdir -p "$TEMP_ROOT"
+cp "$ROOT/run.sh" "$TEMP_ROOT/run.sh"
+touch "$TEMP_ROOT/package-lock.json"
+
+MOCK_BIN="$TEST_DIR/bin_no_node_modules"
+mkdir -p "$MOCK_BIN"
+NPM_CALLS="$TEST_DIR/npm_calls_no_nm"
+cat << EOF > "$MOCK_BIN/npm"
+#!/bin/sh
+echo "\$@" >> "$NPM_CALLS"
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npm"
+
+cat << 'EOF' > "$MOCK_BIN/npx"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npx"
+
+cat << 'EOF' > "$MOCK_BIN/docker"
+#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/docker"
+
+STDOUT_FILE="$TEST_DIR/out_no_nm_stdout"
+STDERR_FILE="$TEST_DIR/out_no_nm_stderr"
+set +e
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$TEMP_ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+set -e
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  fail "Fehlendes node_modules erwartete Exit 0, bekam $EXIT_CODE (stderr: $(cat "$STDERR_FILE"))"
+elif ! grep -q "ci" "$NPM_CALLS" 2>/dev/null; then
+  fail "npm ci wurde nicht aufgerufen (Aufrufe: $(cat "$NPM_CALLS" 2>/dev/null))"
+elif ! grep -q "Installiere Abhängigkeiten via npm ci" "$STDOUT_FILE"; then
+  fail "Meldung zur Abhängigkeitsinstallation fehlt (stdout: $(cat "$STDOUT_FILE"))"
+else
+  pass "Nicht-Dry-Run ohne node_modules nutzt gefaktes npm ci"
 fi
 
 # -----------------------------------------------------------------------------
