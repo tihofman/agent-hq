@@ -25,36 +25,33 @@ flowchart TD
     subgraph Lead ["Lead Architect & Orchestrator (Claude Code)"]
         direction TB
         L1["Ticket-Planung & Scope"]
-        L2["Gatekeeping & Review-Delegation"]
+        L2["Gatekeeping & PR-Review (kostengünstiges Modell)"]
         L3["PR Ready schalten (gh pr ready)"]
         L4["Merge-Gate (CI Check & Auto-Merge)"]
         L5["Worktree Cleanup & Pruning"]
     end
 
+    subgraph AutoSizer ["AutoSelect Helper (agy: gemini-3.8-flash-high)"]
+        direction TB
+        A1["Pre-Flight Ticket Analyse & Modell-Auswahl"]
+        A2["Findings-Analyse & Remediation Modell-Auswahl"]
+    end
+
     subgraph Worker ["Execution Subagent (agy / codex)"]
         direction TB
-        W1["Code-Implementierung im Feature-Worktree"]
+        W1["Code-Implementierung mit gewähltem Modell"]
         W2["Lokale Test-Ausführung (nx test / pytest)"]
         W3["Conventional Commit feat(#ID): ..."]
         W4["Push auf Feature-Branch & Draft PR erstellen"]
     end
 
-    subgraph Reviewer ["Review Subagent (Task / subagent-reviewer)"]
-        direction TB
-        R1["PR-Diff & Ticket abrufen (isoliert)"]
-        R2["Akzeptanzkriterien Punkt-für-Punkt prüfen"]
-        R3["Code-Qualität & Ponytail validieren"]
-        R4["Kompaktes Verdikt: APPROVED / CHANGES_REQUESTED"]
-    end
-
-    L1 -->|Delegiert via Task / delegate.sh| W1
+    L1 -->|Pre-Flight Check| A1
+    A1 -->|AGENT_MODEL & Agent| W1
     W1 --> W2 --> W3 --> W4
     W4 -->|Draft PR URL| L2
-    L2 -->|Spawnt Review-Subagent| R1
-    R1 --> R2 --> R3 --> R4
-    R4 -->|Kompaktes Verdikt| L2
-    L2 -->|Findings: Remediation Loop| W1
-    L2 -->|Approved: PR freigeben| L3
+    L2 -->|Approved| L3
+    L2 -->|Review-Findings| A2
+    A2 -->|Delegierte Nachbesserung| W1
     L3 --> L4
     L4 --> L5
 ```
@@ -79,16 +76,31 @@ flowchart TD
   - **Akzeptanzkriterien & Definition of Done (DoD)** als nummerierte/abzählbare Checkliste.
 - Ausführung erfolgt immer in einem isolierten Feature-Worktree (`.worktrees/feat-<ID>-<slug>`).
 
-### Schritt 2: Delegation an Subagent-Runner (Claude ➔ agy)
+### Schritt 2: Pre-Flight Task & Model AutoSelect (`autoselect.sh`)
 
-Claude ruft das Delegationsskript in einem isolierten Subagent-Kontext auf:
+Bevor die Implementierung startet, analysiert ein schneller, leichtgewichtiger Helper-Task das Ticket:
 
 ```bash
-~/.claude/skills/subagent-orchestrator/delegate.sh agy \
+~/.claude/skills/subagent-orchestrator/autoselect.sh <TICKET_ID>
+```
+
+- **Funktionsweise:** Läuft über `agy` mit `gemini-3.8-flash-high` (verbraucht 0 Claude-Tokens, reagiert in wenigen Sekunden).
+- **Modell-Sizing:**
+  - _Standard Frontend, Svelte, Tailwind, CRUD, Unit-Tests_: `agy` mit `gemini-3.8-flash-high`
+  - _Tiefe Architektur-Refactorings, Concurrency, schwierige Debug-Loops_: `agy` mit `gemini-4-argon-high`
+  - _Mathematische Algorithmen, Compiler/Parser-Logik_: `codex` mit `gpt-6.1-sol`
+- Gibt das ermittelte `AGENT_MODEL` und den Ziel-Agenten zurück.
+
+### Schritt 3: Delegation an Subagent-Runner (Claude ➔ Subagent)
+
+Claude ruft das Delegationsskript mit dem vom AutoSelect gewählten Modell auf:
+
+```bash
+AGENT_MODEL="<selected-model>" ~/.claude/skills/subagent-orchestrator/delegate.sh <selected-agent> \
   "Ticket #<ID>: <Ziel & Akzeptanzkriterien>. Nach erfolgreichen Tests: Committen, ausschließlich auf aktuellen Feature-Branch pushen und Draft PR erstellen via gh pr create --draft --title \"feat(#<ID>): <Titel>\" --body \"Closes #<ID>\"."
 ```
 
-### Schritt 3: Ausführung, Push & Draft PR (Subagent)
+### Schritt 4: Ausführung, Push & Draft PR (Subagent)
 
 - **Code & Tests:** Subagent editiert die Dateien und führt die Testsuite aus.
 - **Commit:** Erstellt Conventional Commit (`feat(#<ID>): ...`).
@@ -131,25 +143,32 @@ Stößt der Subagent auf Mängel, veralteten Code oder Sicherheitsrisiken außer
    ```
 3. **Meldung an den Lead Architect**: Das Ticket wird in der Abschlussmeldung übergeben, damit Claude es priorisieren und regulär einplanen kann.
 
-### Schritt 4: Review gegen Akzeptanzkriterien via isoliertem Subagent (Claude – Pflicht-Gate)
+### Schritt 5: Review gegen Akzeptanzkriterien (Claude – mit leichtem Modell)
 
-- **Isolierter Review-Subagent (Schutz vor Context-Bloat & Blockaden)**:
-  Um den Kontext des Lead Architects schlank zu halten und den Orchestrator nicht mit Hunderten Zeilen Diff zu blockieren, spawnt Claude einen isolierten Review-Subagent (`subagent-reviewer` via `Task`-Tool):
-  - **Prüfung gegen Original-Ticket**: Der Reviewer ruft das Ticket ab (`gh issue view <ID>`) und zieht den gesamten PR-Diff (`gh pr diff <PR_ID>`).
-  - **Punkt-für-Punkt-Abgleich**: Jedes einzelne **Akzeptanzkriterium** der Definition of Done wird systematisch mit den Code-Änderungen und Tests abgeglichen.
-  - **Qualitätsprüfung**: Code-Architektur, Testabdeckung, Edge Cases und strikte Einhaltung von Ponytail (kein unaufgeforderter Boilerplate-Code).
-  - **Kompaktes Ergebnis**: Der Review-Subagent liefert an Claude ausschließlich ein strukturiertes Kurz-Verdikt zurück:
-    - **Status**: `APPROVED` oder `CHANGES_REQUESTED`
-    - **Akzeptanzkriterien-Check**: `[x]` bzw. `[ ]` pro Kriterium
-    - **Findings**: Konkrete Mängel mit Dateinamen, Zeilennummer und Handlungsempfehlung.
-- **Entscheidung & Remediation Loop (Ping-Pong)**:
-  - Bei `CHANGES_REQUESTED`: Claude übernimmt das Gatekeeping, postet die Mängel und beauftragt den Worker-Subagent auf demselben Branch zur Nachbesserung:
-    ```bash
-    delegate.sh agy "Ticket #<ID>: Behebe die folgenden Review-Findings auf diesem Branch, teste und pushe: <Findings>"
-    ```
-  - Bei `APPROVED`: Alle Kriterien sind nachweislich erfüllt – Claude schaltet den PR scharf (Schritt 5).
+- **Kostengünstiges Review-Modell**: Claude führt die PR-Prüfung gegen das Ticket (`gh issue view <ID>`) und den Diff (`gh pr diff <PR_ID>`) durch. Um Token-Budget zu schonen, nutzt Claude hierfür immer ein leichtes, kosteneffizientes Modell (z.B. Sonnet/Haiku).
+- **Punkt-für-Punkt-Abgleich**: Jedes einzelne **Akzeptanzkriterium** der Definition of Done wird mit dem PR-Diff abgeglichen.
+- **Entscheidung**:
+  - Sind alle Kriterien zu 100 % erfüllt: Weiter zu Schritt 7 (Mark Ready).
+  - Liegen Mängel oder unerfüllte Kriterien vor: Weiter zu Schritt 6 (Remediation AutoSelect & Delegation).
 
-### Schritt 5: Mark Ready for Review (Claude)
+### Schritt 6: Remediation AutoSelect & Delegierte Ausbesserung (Ping-Pong)
+
+**Claude bessert niemals Code selbst aus.** Alle Nacharbeiten müssen an Subagents delegiert werden:
+
+1. **AutoSelect anhand der Findings**:
+   ```bash
+   ~/.claude/skills/subagent-orchestrator/autoselect.sh "Findings: <Findings-Text>"
+   ```
+   - Kleine CSS-Anpassungen, Typos, einfache Test-Assertions ➔ `gemini-3.8-flash-high`
+   - Komplexe Race-Conditions, Architektur-Mängel, Logikfehler ➔ `gemini-4-argon-high` oder `gpt-6.1-sol`
+2. **Delegierte Nachbesserung**:
+   ```bash
+   AGENT_MODEL="<remediation-model>" ~/.claude/skills/subagent-orchestrator/delegate.sh <agent> \
+     "Ticket #<ID>: Behebe die folgenden Review-Findings auf diesem Branch, teste und pushe: <Findings>"
+   ```
+3. Subagent pusht auf denselben Branch, und Claude prüft erneut.
+
+### Schritt 7: Mark Ready for Review (Claude)
 
 Erst wenn alle Akzeptanzkriterien zu 100 % erfüllt und alle Findings behoben sind, schaltet Claude den PR scharf:
 
@@ -157,7 +176,7 @@ Erst wenn alle Akzeptanzkriterien zu 100 % erfüllt und alle Findings behoben si
 gh pr ready <PR_ID>
 ```
 
-### Schritt 6: CI Pipeline Check & Conditional Merge Gate (Claude)
+### Schritt 8: CI Pipeline Check & Conditional Merge Gate (Claude)
 
 Claude überprüft, ob für das Repository eine Feature-Branch CI-Pipeline existiert:
 
@@ -173,7 +192,7 @@ gh pr checks <PR_ID>
 - **Fall B (Keine Pipeline vorhanden):**
   Claude mergt **nicht** automatisiert. Claude informiert den User, dass Review und lokale Tests grün sind, und bittet den User, den PR manuell im GitHub Web-UI freizugeben/zu mergen.
 
-### Schritt 7: Worktree Cleanup (Claude)
+### Schritt 9: Worktree Cleanup (Claude)
 
 Nach erfolgtem Merge wird der lokale Feature-Worktree aufgeräumt:
 
