@@ -6,6 +6,7 @@ import {
   appendHistory,
   getHistoryDir,
   getHistoryPath,
+  isProcessAlive,
   readHistory,
   readRecentRuns,
 } from './history';
@@ -368,73 +369,75 @@ describe('history', () => {
         event: 'TASK_START',
         agent: 'codex',
         runId: 'run-dead-pid',
-        pid: 999999999,
+        pid: 12345,
         timestamp: '2026-10-23T10:00:00.000Z',
       });
       await appendHistory(event);
 
-      const beforeEvents = await readHistory();
-      expect(beforeEvents).toHaveLength(1);
-
-      const runs = await readRecentRuns();
+      const runs = await readRecentRuns(20, { isAlive: () => false });
       expect(runs).toHaveLength(1);
       expect(runs[0].runId).toBe('run-dead-pid');
       expect(runs[0].status).toBe('stale');
 
-      // Verify history.jsonl is NOT rewritten
       const afterEvents = await readHistory();
       expect(afterEvents).toHaveLength(1);
       expect(afterEvents[0].event).toBe('TASK_START');
-      expect(afterEvents[0].runId).toBe('run-dead-pid');
     });
 
-    it('marks active run without PID older than 15 min as stale', async () => {
-      const now = Date.now();
-      const event = parseEvent({
-        event: 'TASK_HANDOVER',
-        agent: 'agy',
-        runId: 'run-old-handover',
-        timestamp: new Date(now - 20 * 60 * 1000).toISOString(),
-      });
-      await appendHistory(event);
+    it('evaluates staleness by threshold when no PID and keeps living PID active', async () => {
+      const now = Date.parse('2026-10-23T12:00:00.000Z');
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_HANDOVER',
+          agent: 'agy',
+          runId: 'run-old-handover',
+          timestamp: new Date(now - 20 * 60 * 1000).toISOString(),
+        }),
+      );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_HANDOVER',
+          agent: 'agy',
+          runId: 'run-fresh-handover',
+          timestamp: new Date(now - 5 * 60 * 1000).toISOString(),
+        }),
+      );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'claude',
+          runId: 'run-alive-long',
+          pid: 54321,
+          timestamp: new Date(now - 60 * 60 * 1000).toISOString(),
+        }),
+      );
 
-      const runs = await readRecentRuns(20, { now });
-      expect(runs).toHaveLength(1);
-      expect(runs[0].runId).toBe('run-old-handover');
-      expect(runs[0].status).toBe('stale');
+      const runs = await readRecentRuns(20, { now, isAlive: () => true });
+      const byId = Object.fromEntries(runs.map((r) => [r.runId, r.status]));
+      expect(byId).toEqual({
+        'run-old-handover': 'stale',
+        'run-fresh-handover': 'handover',
+        'run-alive-long': 'running',
+      });
     });
+  });
 
-    it('keeps active run without PID within 15 min in active status', async () => {
-      const now = Date.now();
-      const event = parseEvent({
-        event: 'TASK_HANDOVER',
-        agent: 'agy',
-        runId: 'run-fresh-handover',
-        timestamp: new Date(now - 5 * 60 * 1000).toISOString(),
+  describe('isProcessAlive', () => {
+    it('returns true for current process.pid and EPERM, false for ESRCH', () => {
+      expect(isProcessAlive(process.pid)).toBe(true);
+      const spy = vi.spyOn(process, 'kill').mockImplementationOnce(() => {
+        const err = new Error('no such process') as NodeJS.ErrnoException;
+        err.code = 'ESRCH';
+        throw err;
       });
-      await appendHistory(event);
-
-      const runs = await readRecentRuns(20, { now });
-      expect(runs).toHaveLength(1);
-      expect(runs[0].runId).toBe('run-fresh-handover');
-      expect(runs[0].status).toBe('handover');
-    });
-
-    it('keeps running run with living PID as running even if timestamp is old', async () => {
-      const now = Date.now();
-      const event = parseEvent({
-        event: 'TASK_START',
-        agent: 'claude',
-        runId: 'run-alive-long',
-        pid: process.pid,
-        timestamp: new Date(now - 60 * 60 * 1000).toISOString(),
+      expect(isProcessAlive(1234)).toBe(false);
+      spy.mockImplementationOnce(() => {
+        const err = new Error('not permitted') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
       });
-      await appendHistory(event);
-
-      const runs = await readRecentRuns(20, { now });
-      expect(runs).toHaveLength(1);
-      expect(runs[0].runId).toBe('run-alive-long');
-      expect(runs[0].status).toBe('running');
+      expect(isProcessAlive(1234)).toBe(true);
+      spy.mockRestore();
     });
   });
 });

@@ -6,7 +6,6 @@ import type {
   RunStatus,
   AgentState,
 } from '../server/state';
-import { isRunStale, type RunStaleOptions } from '../runs';
 import claudeMeta from '../assets/sprites/claude.json';
 import agyMeta from '../assets/sprites/agy.json';
 import codexMeta from '../assets/sprites/codex.json';
@@ -431,7 +430,6 @@ export function deriveCharacters(
     runs?: Record<string, Run>;
     agents?: Record<Agent, AgentState>;
   } | null,
-  options?: RunStaleOptions,
 ): Character[] {
   const agents: Agent[] = ['claude', 'agy', 'codex'];
   if (!state) {
@@ -443,12 +441,7 @@ export function deriveCharacters(
 
   return agents.flatMap((agent): Character[] => {
     const agentRuns = runs
-      .filter(
-        (r) =>
-          r.agent === agent &&
-          activeSet.has(r.status) &&
-          !isRunStale(r, options),
-      )
+      .filter((r) => r.agent === agent && activeSet.has(r.status))
       .sort(
         (a, b) =>
           (a.timestamp ?? '').localeCompare(b.timestamp ?? '') ||

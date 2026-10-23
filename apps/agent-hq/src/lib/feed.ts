@@ -199,6 +199,9 @@ export function getFeedMessageText(item: HQEvent | InternalAction): string {
     if (item.event === 'TASK_ABORTED') {
       return item.data?.statusText || 'Task abgebrochen';
     }
+    if (item.event === 'RUN_STALE') {
+      return item.data?.statusText || 'Task verwaist';
+    }
     if (item.event === 'TASK_HANDOVER') {
       return item.data?.title || item.data?.statusText || 'Task-Übergabe';
     }

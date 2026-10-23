@@ -100,6 +100,7 @@ describe('audio logic (lib/audio.ts)', () => {
         'TASK_PROGRESS',
         'TASK_COMPLETE',
         'TASK_ABORTED',
+        'RUN_STALE',
         'DRAFT_PR_CREATED',
         'REVIEW_START',
         'CI_CHECK_PASS',

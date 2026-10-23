@@ -10,6 +10,7 @@ import {
   startServerTail,
   stopServerTail,
 } from './hooks.server';
+import { readHistory, recordEvent } from './lib/server/history';
 import { dispatch, getState, resetStore, subscribe } from './lib/server/store';
 import { parseEvent } from './lib/server/state';
 import { POST } from './routes/api/events/+server';
@@ -73,7 +74,7 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
         }),
       );
       init();
-      expect(vi.getTimerCount()).toBe(1);
+      expect(vi.getTimerCount()).toBe(2);
       vi.advanceTimersByTime(5_000);
       expect(ticks).toEqual([
         { type: 'TICK', timestamp: '2026-10-22T12:00:10.000Z' },
@@ -250,6 +251,101 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       expect(progressEvents).toHaveLength(1);
     } finally {
       unsubscribe();
+    }
+  });
+
+  it('sweeps stale runs (dead PID, no PID > 15m) while keeping living PIDs active, broadcasting and appending RUN_STALE', async () => {
+    const now = Date.parse('2026-10-23T12:00:00.000Z');
+    const oldTime = new Date(now - 20 * 60 * 1000).toISOString();
+    const veryOldTime = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+
+    await recordEvent(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-dead-pid',
+        pid: 1001,
+        timestamp: new Date(now - 60 * 1000).toISOString(),
+      }),
+    );
+    await recordEvent(
+      parseEvent({
+        event: 'TASK_HANDOVER',
+        agent: 'codex',
+        runId: 'run-old-no-pid',
+        timestamp: oldTime,
+      }),
+    );
+    await recordEvent(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'claude',
+        runId: 'run-alive-pid',
+        pid: 2002,
+        timestamp: veryOldTime,
+      }),
+    );
+
+    const broadcasted: unknown[] = [];
+    const unsubscribe = subscribe((_state, event) => {
+      if ('event' in event && event.event === 'RUN_STALE') {
+        broadcasted.push(event);
+      }
+    });
+
+    try {
+      vi.useFakeTimers();
+      startServerTail({
+        dir: tempDir,
+        now: () => now,
+        isAlive: (pid) => pid === 2002,
+      });
+
+      vi.advanceTimersByTime(29_000);
+      expect(getState().runs['run-dead-pid'].status).toBe('running');
+      expect(broadcasted).toHaveLength(0);
+
+      vi.advanceTimersByTime(1_000);
+
+      const state = getState();
+      expect(state.runs['run-dead-pid'].status).toBe('stale');
+      expect(state.agents.agy).toMatchObject({
+        status: 'idle',
+        room: 'lounge',
+      });
+      expect(state.runs['run-old-no-pid'].status).toBe('stale');
+      expect(state.agents.codex).toMatchObject({
+        status: 'idle',
+        room: 'lounge',
+      });
+      expect(state.runs['run-alive-pid'].status).toBe('running');
+      expect(state.agents.claude).toMatchObject({
+        status: 'coding',
+        room: 'dev',
+      });
+
+      expect(broadcasted).toHaveLength(2);
+
+      // Second sweep at 60s is a no-op because stale runs are no longer active
+      vi.advanceTimersByTime(30_000);
+      expect(broadcasted).toHaveLength(2);
+
+      vi.useRealTimers();
+      await expect
+        .poll(async () =>
+          (await readHistory()).map((e) => `${e.event}:${e.runId}`),
+        )
+        .toEqual([
+          'TASK_START:run-dead-pid',
+          'TASK_HANDOVER:run-old-no-pid',
+          'TASK_START:run-alive-pid',
+          'RUN_STALE:run-dead-pid',
+          'RUN_STALE:run-old-no-pid',
+        ]);
+    } finally {
+      stopServerTail();
+      unsubscribe();
+      vi.useRealTimers();
     }
   });
 });

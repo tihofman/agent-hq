@@ -1,8 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { resolveRepo } from '../../../lib/server/git';
-import { appendHistory } from '../../../lib/server/history';
+import { recordEvent } from '../../../lib/server/history';
 import { parseEvent } from '../../../lib/server/state';
-import { dispatch } from '../../../lib/server/store';
 
 import { isOriginAllowed } from '../../../lib/server/origin';
 
@@ -35,8 +34,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
     }
   }
 
-  dispatch(event);
-  void appendHistory(event);
+  void recordEvent(event);
 
   return json({ ok: true }, { status: 202 });
 };

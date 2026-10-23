@@ -594,7 +594,6 @@ describe('office/sprites', () => {
             runId: 'run-1',
             agent: 'agy' as const,
             status: 'running' as const,
-            pid: process.pid,
             timestamp: '2026-10-23T10:00:00Z',
             data: {},
           },
@@ -602,7 +601,6 @@ describe('office/sprites', () => {
             runId: 'run-2',
             agent: 'agy' as const,
             status: 'running' as const,
-            pid: process.pid,
             timestamp: '2026-10-23T10:05:00Z',
             data: {},
           },
@@ -640,7 +638,6 @@ describe('office/sprites', () => {
             runId: 'run-2',
             agent: 'agy' as const,
             status: 'running' as const,
-            pid: process.pid,
             timestamp: '2026-10-23T10:05:00Z',
             data: {},
           },
@@ -733,102 +730,11 @@ describe('office/sprites', () => {
         },
       };
       expect(ACTIVE_RUN_STATUSES).toEqual(['handover', 'running', 'cooldown']);
-      const chars = deriveCharacters(state, {
-        now: Date.parse('2026-10-23T10:06:00Z'),
-      });
+      const chars = deriveCharacters(state);
       const agyRuns = chars
         .filter((c) => c.agent === 'agy')
         .map((c) => c.runId);
       expect(agyRuns).toEqual(['r-handover', 'r-running', 'r-cooldown']);
-    });
-
-    it('does not derive character for run with dead PID (ghost character prevention)', () => {
-      const state = {
-        runs: {
-          'run-dead-pid': {
-            runId: 'run-dead-pid',
-            agent: 'agy' as const,
-            status: 'running' as const,
-            pid: 999999999,
-            timestamp: new Date().toISOString(),
-            data: {},
-          },
-        },
-      };
-      const chars = deriveCharacters(state);
-      const agyChars = chars.filter((c) => c.agent === 'agy');
-      expect(agyChars).toEqual([{ id: 'agy', agent: 'agy', instanceIndex: 0 }]);
-    });
-
-    it('does not derive character for run without PID older than threshold (15m)', () => {
-      const now = Date.now();
-      const state = {
-        runs: {
-          'run-stale-handover': {
-            runId: 'run-stale-handover',
-            agent: 'codex' as const,
-            status: 'handover' as const,
-            timestamp: new Date(now - 16 * 60 * 1000).toISOString(),
-            data: {},
-          },
-        },
-      };
-      const chars = deriveCharacters(state, { now });
-      const codexChars = chars.filter((c) => c.agent === 'codex');
-      expect(codexChars).toEqual([
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
-      ]);
-    });
-
-    it('derives character for run without PID within threshold (15m)', () => {
-      const now = Date.now();
-      const state = {
-        runs: {
-          'run-fresh-handover': {
-            runId: 'run-fresh-handover',
-            agent: 'codex' as const,
-            status: 'handover' as const,
-            timestamp: new Date(now - 5 * 60 * 1000).toISOString(),
-            data: {},
-          },
-        },
-      };
-      const chars = deriveCharacters(state, { now });
-      const codexChars = chars.filter((c) => c.agent === 'codex');
-      expect(codexChars).toEqual([
-        {
-          id: 'run-fresh-handover',
-          agent: 'codex',
-          runId: 'run-fresh-handover',
-          instanceIndex: 0,
-        },
-      ]);
-    });
-
-    it('derives character for running run with living PID even with old timestamp', () => {
-      const now = Date.now();
-      const state = {
-        runs: {
-          'run-alive-long': {
-            runId: 'run-alive-long',
-            agent: 'agy' as const,
-            status: 'running' as const,
-            pid: process.pid,
-            timestamp: new Date(now - 3 * 60 * 60 * 1000).toISOString(),
-            data: {},
-          },
-        },
-      };
-      const chars = deriveCharacters(state, { now });
-      const agyChars = chars.filter((c) => c.agent === 'agy');
-      expect(agyChars).toEqual([
-        {
-          id: 'run-alive-long',
-          agent: 'agy',
-          runId: 'run-alive-long',
-          instanceIndex: 0,
-        },
-      ]);
     });
 
     it('does not derive character for run with status stale', () => {
@@ -838,7 +744,7 @@ describe('office/sprites', () => {
             runId: 'run-stale-status',
             agent: 'claude' as const,
             status: 'stale' as const,
-            timestamp: new Date().toISOString(),
+            timestamp: '2026-10-23T10:00:00Z',
             data: {},
           },
         },
@@ -848,38 +754,6 @@ describe('office/sprites', () => {
       expect(claudeChars).toEqual([
         { id: 'claude', agent: 'claude', instanceIndex: 0 },
       ]);
-    });
-
-    it('filters out only the stale run among parallel runs', () => {
-      const state = {
-        runs: {
-          'run-dead': {
-            runId: 'run-dead',
-            agent: 'agy' as const,
-            status: 'running' as const,
-            pid: 999999999,
-            timestamp: '2026-10-23T10:00:00Z',
-            data: {},
-          },
-          'run-alive': {
-            runId: 'run-alive',
-            agent: 'agy' as const,
-            status: 'running' as const,
-            pid: process.pid,
-            timestamp: '2026-10-23T10:05:00Z',
-            data: {},
-          },
-        },
-      };
-      const chars = deriveCharacters(state);
-      const agyChars = chars.filter((c) => c.agent === 'agy');
-      expect(agyChars).toHaveLength(1);
-      expect(agyChars[0]).toEqual({
-        id: 'run-alive',
-        agent: 'agy',
-        runId: 'run-alive',
-        instanceIndex: 0,
-      });
     });
   });
 
