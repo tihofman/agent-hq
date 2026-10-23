@@ -50,8 +50,14 @@ Fehlt eine gültige Session-ID, startet der Worker mit Originalprompt und bisher
 claude läuft nicht-interaktiv mit aktivierter Sandbox und `--permission-mode acceptEdits`.
 Bash-Befehle innerhalb der Sandbox werden ohne Rückfrage freigegeben; ein unsandboxed Retry
 ist deaktiviert und Claude Code muss beim Fehlen der Sandbox abbrechen. Schreibzugriff ist
-auf den Worktree und `~/.npm` beschränkt; andere Pfade einschließlich `/tmp` sind gesperrt.
-Netzwerkzugriff ist auf GitHub und die npm-Registry begrenzt. Die Einstellungen
+auf den Worktree, `~/.npm` und das Git-Common-Verzeichnis beschränkt; letzteres wird absolut
+ermittelt (`git rev-parse --git-common-dir`), damit Commits und `index.lock` im Git-Worktree
+funktionieren. Pfade außerhalb von `allowWrite` blockiert die Sandbox bereits standardmäßig
+(ein globales `denyWrite: ["/"]` darf nicht gesetzt werden, da `denyWrite` Vorrang vor `allowWrite`
+hat und alle Schreibzugriffe blockieren würde). Zum Schutz vor Privilegieneskalation sind
+`$GITDIR/hooks` und `$GITDIR/config` explizit per `denyWrite` gesperrt: So kann ein Worker keine
+bösartigen Git-Hooks oder Git-Konfigurationen einschleusen, die später außerhalb der Sandbox beim Host
+ausgeführt werden. Netzwerkzugriff ist auf GitHub und die npm-Registry begrenzt. Die Einstellungen
 werden mit `--settings '<json>'` übergeben; `~/.npm` wird zusätzlich mit `--add-dir` freigegeben.
 Die Sandbox beschränkt Shell-Befehle und deren Kindprozesse auf Betriebssystemebene.
 

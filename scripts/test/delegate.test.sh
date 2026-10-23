@@ -330,7 +330,8 @@ bash "$ROOT/scripts/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/s
 CLAUDE_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
 grep -q '>>> Dispatching to claude \[model: claude-3-7-sonnet\]' "$TEST_DIR/stdout" || fail 'stdout contains claude model'
 grep -q '>>> Dispatching to claude \[model: claude-3-7-sonnet\]' "$CLAUDE_LOG" || fail 'log contains claude model'
-jq -se --arg model "claude-3-7-sonnet" '
+CLAUDE_GITDIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$CLAUDE_GITDIR" '
   .[-1] as $call |
   ($call | index("--model")) != null and
   $call[($call | index("--model")) + 1] == $model and
@@ -344,7 +345,9 @@ jq -se --arg model "claude-3-7-sonnet" '
   ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
     .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and
     .sandbox.autoAllowBashIfSandboxed == true and
-    (.sandbox.filesystem.allowWrite | length) == 2)
+    .sandbox.filesystem.allowWrite == [$cwd, $npm, $git] and
+    .sandbox.filesystem.denyWrite == [($git + "/hooks"), ($git + "/config")] and
+    ((.sandbox.filesystem.denyWrite // []) | index("/") == null))
 ' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called with model and sandbox settings'
 
 # Test claude without AGENT_MODEL
