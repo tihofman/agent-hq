@@ -103,7 +103,27 @@ export async function startServerWorkers(
     return null;
   }
 
+  const statusTimer = setInterval(async () => {
+    if (pool.enabled && pool.started) {
+      try {
+        const statuses = await pool.deriveAllTeamStatuses();
+        dispatch({ type: 'SET_TEAM_STATUSES', teams: statuses });
+      } catch {
+        // ignore
+      }
+    }
+  }, 2_000);
+  statusTimer.unref();
+
+  try {
+    const initialStatuses = await pool.deriveAllTeamStatuses();
+    dispatch({ type: 'SET_TEAM_STATUSES', teams: initialStatuses });
+  } catch {
+    // ignore
+  }
+
   const stop = async () => {
+    clearInterval(statusTimer);
     await pool.close();
     if (globalRef[GLOBAL_WORKER_POOL_KEY] === stop) {
       delete globalRef[GLOBAL_WORKER_POOL_KEY];

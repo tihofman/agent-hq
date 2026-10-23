@@ -13,7 +13,11 @@ import {
   tileBg,
   USED_TILE_NAMES,
   WAYPOINTS,
+  TEAM_DESKS,
+  getTeamDesk,
+  TEAMS,
   type RoomId,
+  type Team,
 } from './layout';
 
 describe('office/layout', () => {
@@ -208,5 +212,45 @@ describe('office/layout', () => {
         }
       },
     );
+  });
+
+  describe('Team areas and desks (V2 / #102)', () => {
+    it('defines team desks for frontend, backend, and qa', () => {
+      expect(TEAMS).toEqual(['frontend', 'backend', 'qa']);
+      for (const team of TEAMS) {
+        const desk = getTeamDesk(team);
+        expect(desk.team).toBe(team);
+        expect(desk.name).toBeTruthy();
+        expect(ROOM_IDS).toContain(desk.roomId);
+        expect(WAYPOINTS[desk.waypointId]).toBeDefined();
+        expect(WAYPOINTS[desk.waypointId].roomId).toBe(desk.roomId);
+      }
+    });
+
+    it('assigns frontend and backend desks to dev lab, qa desk to qa station', () => {
+      expect(TEAM_DESKS.frontend.roomId).toBe('dev');
+      expect(TEAM_DESKS.backend.roomId).toBe('dev');
+      expect(TEAM_DESKS.qa.roomId).toBe('qa');
+
+      expect(TEAM_DESKS.frontend.waypointId).toBe('dev_desk');
+      expect(TEAM_DESKS.backend.waypointId).toBe('dev_meeting');
+      expect(TEAM_DESKS.qa.waypointId).toBe('qa_desk');
+    });
+
+    it('throws when requesting an unknown team desk', () => {
+      expect(() => getTeamDesk('devops' as unknown as Team)).toThrow(
+        'Unknown team: "devops"',
+      );
+    });
+
+    it('ensures each team desk waypoint is reachable from hallway', () => {
+      for (const team of TEAMS) {
+        const desk = TEAM_DESKS[team];
+        const path = findWaypointPath('hall_center', desk.waypointId);
+        expect(path.length).toBeGreaterThan(1);
+        expect(path[0].id).toBe('hall_center');
+        expect(path[path.length - 1].id).toBe(desk.waypointId);
+      }
+    });
   });
 });

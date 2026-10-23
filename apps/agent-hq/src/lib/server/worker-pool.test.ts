@@ -361,6 +361,17 @@ describe('WorkerPool (#98)', () => {
       status: 'PENDING',
     };
     expect(await deriveTeamStatus(qaQueue)).toBe('waiting_input');
+
+    // Test WorkerPool status methods (#102)
+    const activePool = createPool();
+    await activePool.start();
+    expect(await activePool.deriveTeamStatus('qa')).toBe('waiting_input');
+    expect(await activePool.deriveAllTeamStatuses()).toEqual({
+      frontend: 'idle',
+      backend: 'working',
+      qa: 'waiting_input',
+    });
+    await activePool.close();
   });
 
   it('registers synchronous exit fallback to SIGKILL running children, ignores errors, and unregisters on close', async () => {

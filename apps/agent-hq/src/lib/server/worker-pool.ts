@@ -131,7 +131,7 @@ export class WorkerPool {
   private unwireFailover?: () => void;
   private readonly workers = new Map<Team, Worker<TaskPayload>>();
   private readonly children = new Set<ChildProcess>();
-  private started = false;
+  started = false;
   private closing = false;
   private exitHandlerRegistered = false;
 
@@ -236,6 +236,28 @@ export class WorkerPool {
       await this.close();
       return false;
     }
+  }
+
+  getQueue(team: Team): Queue<TaskPayload> | undefined {
+    return this.queueManager?.getQueue(team);
+  }
+
+  async deriveTeamStatus(team: Team): Promise<TeamStatus> {
+    const queue = this.getQueue(team);
+    if (!queue) return 'idle';
+    return deriveTeamStatus(queue);
+  }
+
+  async deriveAllTeamStatuses(): Promise<Record<Team, TeamStatus>> {
+    const statuses: Record<Team, TeamStatus> = {
+      frontend: 'idle',
+      backend: 'idle',
+      qa: 'idle',
+    };
+    for (const team of TEAMS) {
+      statuses[team] = await this.deriveTeamStatus(team);
+    }
+    return statuses;
   }
 
   async processJob(team: Team, job: WorkerJob, token?: string): Promise<void> {

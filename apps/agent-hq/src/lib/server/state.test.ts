@@ -339,4 +339,75 @@ describe('reduce', () => {
     expect(progressed.runs['run-1'].data.branch).toBe('feat/13-repo-branch');
     expect(progressed.runs['run-1'].data.statusText).toBe('Building');
   });
+
+  describe('team states (#102)', () => {
+    it('initializes all teams with status idle in initialState', () => {
+      expect(initialState.teams).toEqual({
+        frontend: { status: 'idle' },
+        backend: { status: 'idle' },
+        qa: { status: 'idle' },
+      });
+    });
+
+    it('sets team status to working on TASK_START and back to idle on TASK_COMPLETE', () => {
+      const running = apply(initialState, 'TASK_START', {
+        data: { team: 'frontend' },
+      });
+      expect(running.teams?.frontend.status).toBe('working');
+      expect(running.teams?.backend.status).toBe('idle');
+      expect(running.teams?.qa.status).toBe('idle');
+
+      const completed = apply(running, 'TASK_COMPLETE', {
+        data: { team: 'frontend' },
+      });
+      expect(completed.teams?.frontend.status).toBe('idle');
+    });
+
+    it('keeps team status working if another run for the team is still running', () => {
+      const run1 = apply(initialState, 'TASK_START', {
+        runId: 'run-fe-1',
+        data: { team: 'frontend' },
+      });
+      const run2 = apply(run1, 'TASK_START', {
+        runId: 'run-fe-2',
+        data: { team: 'frontend' },
+      });
+      expect(run2.teams?.frontend.status).toBe('working');
+
+      const done1 = apply(run2, 'TASK_COMPLETE', {
+        runId: 'run-fe-1',
+        data: { team: 'frontend' },
+      });
+      expect(done1.teams?.frontend.status).toBe('working');
+
+      const done2 = apply(done1, 'TASK_COMPLETE', {
+        runId: 'run-fe-2',
+        data: { team: 'frontend' },
+      });
+      expect(done2.teams?.frontend.status).toBe('idle');
+    });
+
+    it('updates team status via TEAM_STATUS and SET_TEAM_STATUSES internal actions', () => {
+      const waiting = reduce(initialState, {
+        type: 'TEAM_STATUS',
+        team: 'qa',
+        status: 'waiting_input',
+      });
+      expect(waiting.teams?.qa.status).toBe('waiting_input');
+
+      const bulk = reduce(initialState, {
+        type: 'SET_TEAM_STATUSES',
+        teams: {
+          frontend: 'working',
+          backend: 'waiting_input',
+          qa: 'idle',
+        },
+      });
+      expect(bulk.teams).toEqual({
+        frontend: { status: 'working' },
+        backend: { status: 'waiting_input' },
+        qa: { status: 'idle' },
+      });
+    });
+  });
 });

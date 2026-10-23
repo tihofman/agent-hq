@@ -1,14 +1,30 @@
-import { findWaypointPath, WAYPOINTS, TILE_SIZE, type RoomId } from './layout';
+import {
+  findWaypointPath,
+  WAYPOINTS,
+  TILE_SIZE,
+  TEAM_DESKS,
+  type RoomId,
+  type Team,
+} from './layout';
 import type {
   Agent,
   AgentStatus,
   Run,
   RunStatus,
   AgentState,
+  TeamState,
 } from '../server/state';
 import claudeMeta from '../assets/sprites/claude.json';
 import agyMeta from '../assets/sprites/agy.json';
 import codexMeta from '../assets/sprites/codex.json';
+
+export type CharacterStatus = AgentStatus | 'waiting_input';
+
+export const TEAM_LEADS: Record<Team, Agent> = {
+  frontend: 'agy',
+  backend: 'claude',
+  qa: 'codex',
+};
 
 export type Direction = 'down' | 'left' | 'right' | 'up';
 
@@ -104,10 +120,11 @@ const STATUS_ANIMATION: Partial<Record<AgentStatus, AnimationName>> = {
 };
 
 export function statusToAnimation(
-  status: AgentStatus,
+  status: CharacterStatus,
   direction: Direction = 'down',
 ): AnimationName {
   if (status === 'walking') return walkAnimationForDirection(direction);
+  if (status === 'waiting_input') return 'idle';
   return STATUS_ANIMATION[status] ?? 'idle';
 }
 
@@ -166,7 +183,7 @@ export function formatCooldown(remainingMs: number): string {
 }
 
 export function getSpeechBubble(
-  status: AgentStatus,
+  status: CharacterStatus,
   options?: {
     ticketId?: string;
     title?: string;
@@ -176,6 +193,14 @@ export function getSpeechBubble(
     now?: number;
   },
 ): SpeechBubble | null {
+  if (status === 'waiting_input') {
+    return {
+      type: 'alert',
+      text: '?',
+      icon: '❓',
+      tooltip: options?.statusText || 'Rückfrage wartet auf Antwort',
+    };
+  }
   if (status === 'testing') {
     return {
       type: 'testing',
@@ -402,6 +427,51 @@ export function getAgentSpot(
   };
 }
 
+export function getTeamSpot(
+  team: Team,
+  instanceIndex = 0,
+): { x: number; y: number; wpId: string } {
+  const desk = TEAM_DESKS[team];
+  const wp = WAYPOINTS[desk.waypointId] ?? WAYPOINTS['hall_center'];
+
+  let extraDx = 0;
+  let extraDy = 0;
+
+  if (instanceIndex > 0) {
+    const offsets: Record<Team, readonly InstanceOffset[]> = {
+      frontend: [
+        { dx: -36, dy: 0 },
+        { dx: -72, dy: 0 },
+        { dx: 0, dy: 36 },
+      ],
+      backend: [
+        { dx: 36, dy: 0 },
+        { dx: -36, dy: 0 },
+        { dx: 0, dy: 36 },
+      ],
+      qa: [
+        { dx: -36, dy: 0 },
+        { dx: 36, dy: 0 },
+        { dx: 0, dy: 36 },
+      ],
+    };
+    const list = offsets[team];
+    const off = list?.[instanceIndex - 1];
+    if (off) {
+      extraDx = off.dx;
+      extraDy = off.dy;
+    } else {
+      extraDy = instanceIndex * 36;
+    }
+  }
+
+  return {
+    x: wp.x * TILE_SIZE + extraDx,
+    y: wp.y * TILE_SIZE + extraDy,
+    wpId: desk.waypointId,
+  };
+}
+
 export function doSpotsOverlap(
   posA: { x: number; y: number },
   posB: { x: number; y: number },
@@ -415,6 +485,8 @@ export interface Character {
   agent: Agent;
   runId?: string;
   instanceIndex: number;
+  team?: Team;
+  isTeamLead?: boolean;
 }
 
 export type OfficeCharacter = Character;
@@ -429,8 +501,60 @@ export function deriveCharacters(
   state?: {
     runs?: Record<string, Run>;
     agents?: Record<Agent, AgentState>;
+    teams?: Record<Team, TeamState>;
   } | null,
 ): Character[] {
+  if (state?.teams) {
+    const teams: Team[] = ['frontend', 'backend', 'qa'];
+    const activeSet = new Set<string>(ACTIVE_RUN_STATUSES);
+    const runs = Object.values(state.runs ?? {});
+
+    const teamLeads: Character[] = teams.map((team) => ({
+      id: `team-lead-${team}`,
+      agent: TEAM_LEADS[team],
+      team,
+      isTeamLead: true,
+      instanceIndex: 0,
+    }));
+
+    const activeRuns = runs
+      .filter((r) => activeSet.has(r.status))
+      .sort(
+        (a, b) =>
+          (a.timestamp ?? '').localeCompare(b.timestamp ?? '') ||
+          a.runId.localeCompare(b.runId),
+      );
+
+    const teamWorkerCounts: Record<Team, number> = {
+      frontend: 0,
+      backend: 0,
+      qa: 0,
+    };
+    const agentCounts: Record<Agent, number> = {
+      claude: 0,
+      agy: 0,
+      codex: 0,
+    };
+
+    const workerChars: Character[] = activeRuns.map((run) => {
+      const team = run.data?.team;
+      const instanceIndex =
+        team && team in teamWorkerCounts
+          ? ++teamWorkerCounts[team]
+          : agentCounts[run.agent]++;
+      return {
+        id: run.runId,
+        agent: run.agent,
+        runId: run.runId,
+        team,
+        isTeamLead: false,
+        instanceIndex,
+      };
+    });
+
+    return [...teamLeads, ...workerChars];
+  }
+
   const agents: Agent[] = ['claude', 'agy', 'codex'];
   if (!state) {
     return agents.map((agent) => ({ id: agent, agent, instanceIndex: 0 }));
@@ -516,6 +640,8 @@ export type HandoverPhase =
 export class AgentController {
   agent: Agent;
   instanceIndex: number;
+  team?: Team;
+  isTeamLead: boolean;
   x: number;
   y: number;
   direction: Direction = 'down';
@@ -526,16 +652,32 @@ export class AgentController {
   private deferredRoom: RoomId | null = null;
   readonly walkSpeed = 96;
 
-  constructor(agent: Agent, initialRoom: RoomId = 'lounge', instanceIndex = 0) {
+  constructor(
+    agent: Agent,
+    initialRoom: RoomId = 'lounge',
+    instanceIndex = 0,
+    team?: Team,
+    isTeamLead = false,
+  ) {
     this.agent = agent;
     this.instanceIndex = instanceIndex;
+    this.team = team;
+    this.isTeamLead = isTeamLead;
     this.currentRoom = initialRoom;
-    const spot = getAgentSpot(agent, initialRoom, instanceIndex);
+    const spot = this.getSpot(initialRoom);
     this.x = spot.x;
     this.y = spot.y;
   }
 
+  getSpot(room: RoomId): { x: number; y: number; wpId: string } {
+    if (this.team && room === TEAM_DESKS[this.team].roomId) {
+      return getTeamSpot(this.team, this.instanceIndex);
+    }
+    return getAgentSpot(this.agent, room, this.instanceIndex);
+  }
+
   startHandover(): void {
+    if (this.isTeamLead) return;
     this.handoverPhase = 'walking_to_hall';
     this.meetingElapsedMs = 0;
     const hallSpot = getAgentSpot(this.agent, 'hall', this.instanceIndex);
@@ -543,6 +685,10 @@ export class AgentController {
   }
 
   setTargetRoom(room: RoomId): void {
+    if (this.isTeamLead) {
+      this.snapToRoom(room);
+      return;
+    }
     if (
       this.handoverPhase === 'walking_to_hall' ||
       this.handoverPhase === 'meeting'
@@ -550,7 +696,7 @@ export class AgentController {
       this.deferredRoom = room;
       return;
     }
-    const spot = getAgentSpot(this.agent, room, this.instanceIndex);
+    const spot = this.getSpot(room);
     if (
       room === this.currentRoom &&
       this.path.length === 0 &&
@@ -569,7 +715,7 @@ export class AgentController {
     this.deferredRoom = null;
     this.handoverPhase = 'idle';
     this.path = [];
-    const spot = getAgentSpot(this.agent, room, this.instanceIndex);
+    const spot = this.getSpot(room);
     this.x = spot.x;
     this.y = spot.y;
     this.direction = 'down';
@@ -595,7 +741,7 @@ export class AgentController {
 
   tick(
     dt: number,
-    stateStatus: AgentStatus,
+    stateStatus: CharacterStatus,
     stateRoom: RoomId,
   ): {
     x: number;
@@ -644,11 +790,7 @@ export class AgentController {
         const targetRoom = this.deferredRoom ?? stateRoom ?? this.currentRoom;
         this.deferredRoom = null;
         this.currentRoom = targetRoom;
-        const targetSpot = getAgentSpot(
-          this.agent,
-          targetRoom,
-          this.instanceIndex,
-        );
+        const targetSpot = this.getSpot(targetRoom);
         this.walkTo(targetSpot.x, targetSpot.y, targetSpot.wpId);
       }
     } else if (this.handoverPhase === 'walking_to_target') {

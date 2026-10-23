@@ -16,12 +16,15 @@ import {
   deriveCharacters,
   doSpotsOverlap,
   ACTIVE_RUN_STATUSES,
+  TEAM_LEADS,
+  getTeamSpot,
 } from './sprites';
 import {
   WAYPOINTS,
   TILE_SIZE,
   ROOM_IDS,
   findWaypointPath,
+  TEAMS,
   type RoomId,
 } from './layout';
 import type { Agent, AgentStatus } from '../server/state';
@@ -804,6 +807,145 @@ describe('office/sprites', () => {
       const spot0 = getAgentSpot('agy', 'hall', 0);
       const spot1 = getAgentSpot('agy', 'hall', 1);
       expect(doSpotsOverlap(spot0, spot1)).toBe(false);
+    });
+  });
+
+  describe('TeamLeads and Team-Bereiche (V2 / #102)', () => {
+    it('maps teams to primary team leads (frontend->agy, backend->claude, qa->codex)', () => {
+      expect(TEAM_LEADS).toEqual({
+        frontend: 'agy',
+        backend: 'claude',
+        qa: 'codex',
+      });
+    });
+
+    it('derives team spots at team desks with non-overlapping worker offsets', () => {
+      for (const team of TEAMS) {
+        const leadSpot = getTeamSpot(team, 0);
+        const worker1Spot = getTeamSpot(team, 1);
+        const worker2Spot = getTeamSpot(team, 2);
+
+        expect(leadSpot.x).toBeGreaterThan(0);
+        expect(leadSpot.y).toBeGreaterThan(0);
+        expect(doSpotsOverlap(leadSpot, worker1Spot)).toBe(false);
+        expect(doSpotsOverlap(leadSpot, worker2Spot)).toBe(false);
+        expect(doSpotsOverlap(worker1Spot, worker2Spot)).toBe(false);
+      }
+    });
+
+    it('derives exactly 3 visible TeamLead characters when state has teams even without running jobs', () => {
+      const state = {
+        teams: {
+          frontend: { status: 'idle' as const },
+          backend: { status: 'idle' as const },
+          qa: { status: 'idle' as const },
+        },
+        runs: {},
+      };
+      const chars = deriveCharacters(state);
+      expect(chars).toHaveLength(3);
+
+      expect(chars).toEqual([
+        {
+          id: 'team-lead-frontend',
+          agent: 'agy',
+          team: 'frontend',
+          isTeamLead: true,
+          instanceIndex: 0,
+        },
+        {
+          id: 'team-lead-backend',
+          agent: 'claude',
+          team: 'backend',
+          isTeamLead: true,
+          instanceIndex: 0,
+        },
+        {
+          id: 'team-lead-qa',
+          agent: 'codex',
+          team: 'qa',
+          isTeamLead: true,
+          instanceIndex: 0,
+        },
+      ]);
+    });
+
+    it('places sub-runs of a team alongside their TeamLead at the team area', () => {
+      const state = {
+        teams: {
+          frontend: { status: 'working' as const },
+          backend: { status: 'idle' as const },
+          qa: { status: 'idle' as const },
+        },
+        runs: {
+          'job-frontend-1': {
+            runId: 'job-frontend-1',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: { team: 'frontend' as const, title: 'Build UI' },
+          },
+          'job-frontend-2': {
+            runId: 'job-frontend-2',
+            agent: 'claude' as const, // Fallback provider for frontend
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:05:00Z',
+            data: { team: 'frontend' as const, title: 'Fix Layout' },
+          },
+        },
+      };
+      const chars = deriveCharacters(state);
+
+      // 3 TeamLeads + 2 Frontend Workers
+      expect(chars).toHaveLength(5);
+
+      const frontendChars = chars.filter((c) => c.team === 'frontend');
+      expect(frontendChars).toHaveLength(3);
+
+      // TeamLead
+      expect(frontendChars[0]).toEqual({
+        id: 'team-lead-frontend',
+        agent: 'agy',
+        team: 'frontend',
+        isTeamLead: true,
+        instanceIndex: 0,
+      });
+
+      // Worker 1
+      expect(frontendChars[1]).toEqual({
+        id: 'job-frontend-1',
+        agent: 'agy',
+        runId: 'job-frontend-1',
+        team: 'frontend',
+        isTeamLead: false,
+        instanceIndex: 1,
+      });
+
+      // Worker 2 (fallback provider claude mapped to frontend team desk)
+      expect(frontendChars[2]).toEqual({
+        id: 'job-frontend-2',
+        agent: 'claude',
+        runId: 'job-frontend-2',
+        team: 'frontend',
+        isTeamLead: false,
+        instanceIndex: 2,
+      });
+    });
+
+    it('generates a question speech bubble with ? for waiting_input', () => {
+      const bubble = getSpeechBubble('waiting_input', {
+        statusText: 'Welche Farbe?',
+      });
+      expect(bubble).toEqual({
+        type: 'alert',
+        text: '?',
+        icon: '❓',
+        tooltip: 'Welche Farbe?',
+      });
+    });
+
+    it('maps waiting_input status to idle animation', () => {
+      expect(statusToAnimation('waiting_input')).toBe('idle');
     });
   });
 });

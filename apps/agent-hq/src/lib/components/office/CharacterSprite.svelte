@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Agent, AgentStatus, HQEvent } from '../../server/state';
+  import type { Agent, HQEvent } from '../../server/state';
   import {
     getSpriteMetadata,
     getFrameIndex,
@@ -9,18 +9,28 @@
     getSpeechBubble,
     AgentController,
     type AnimationName,
+    type CharacterStatus,
   } from '../../office/sprites';
   import { formatCharacterAriaLabel } from '../../office/log-filter';
-  import type { RoomId } from '../../office/layout';
+  import { TEAM_DESKS, type RoomId, type Team } from '../../office/layout';
 
   interface Props {
     agent: Agent;
     runId?: string;
     instanceIndex?: number;
+    team?: Team;
+    isTeamLead?: boolean;
     onclick?: (event: MouseEvent) => void;
   }
 
-  let { agent, runId, instanceIndex = 0, onclick }: Props = $props();
+  let {
+    agent,
+    runId,
+    instanceIndex = 0,
+    team,
+    isTeamLead = false,
+    onclick,
+  }: Props = $props();
 
   // The feed also carries InternalActions (no event/runId), so narrow to HQEvents.
   function findLastHandover(): HQEvent | undefined {
@@ -39,6 +49,10 @@
     liveStore.state?.agents?.[agent] ?? { status: 'idle', room: 'lounge' },
   );
 
+  const teamState = $derived(
+    team ? liveStore.state?.teams?.[team] : undefined,
+  );
+
   const activeRun = $derived(
     runId
       ? liveStore.state?.runs?.[runId]
@@ -47,48 +61,86 @@
         : undefined,
   );
 
-  const characterStatus = $derived<AgentStatus>(
-    runId
-      ? activeRun
-        ? activeRun.status === 'cooldown'
-          ? 'cooldown'
-          : activeRun.status === 'handover'
-            ? 'handover'
-            : activeRun.status === 'running'
-              ? runId === agentState.runId &&
-                (agentState.status === 'testing' ||
-                  agentState.status === 'reviewing' ||
-                  agentState.status === 'coding')
-                ? agentState.status
-                : activeRun.room === 'qa'
-                  ? 'reviewing'
-                  : 'coding'
-              : activeRun.status === 'failed'
-                ? 'errorAlert'
-                : 'idle'
-        : 'idle'
-      : agentState.status,
+  const activeTeamRun = $derived(
+    team
+      ? Object.values(liveStore.state?.runs ?? {}).find(
+          (r) =>
+            r.data?.team === team &&
+            (r.status === 'running' || r.status === 'handover'),
+        )
+      : undefined,
   );
 
-  const characterRoom = $derived<RoomId>(
-    runId
-      ? (activeRun?.room as RoomId) ??
-          (runId === agentState.runId
-            ? (agentState.room as RoomId)
-            : undefined) ??
-          (activeRun?.status === 'handover'
-            ? 'hall'
-            : activeRun?.status === 'cooldown'
-              ? 'lounge'
-              : 'dev')
-      : (agentState.room as RoomId) ?? 'lounge',
-  );
+  const characterStatus = $derived.by<CharacterStatus>(() => {
+    if (isTeamLead && team) {
+      if (teamState?.status === 'waiting_input') return 'waiting_input';
+      if (teamState?.status === 'working' || activeTeamRun) {
+        return team === 'qa' ? 'reviewing' : 'coding';
+      }
+      return 'idle';
+    }
+    if (runId) {
+      if (!activeRun) return 'idle';
+      if (activeRun.status === 'cooldown') return 'cooldown';
+      if (activeRun.status === 'handover') return 'handover';
+      if (activeRun.status === 'running') {
+        if (
+          runId === agentState.runId &&
+          (agentState.status === 'testing' ||
+            agentState.status === 'reviewing' ||
+            agentState.status === 'coding')
+        ) {
+          return agentState.status;
+        }
+        return activeRun.room === 'qa' ? 'reviewing' : 'coding';
+      }
+      if (activeRun.status === 'failed') return 'errorAlert';
+      return 'idle';
+    }
+    return agentState.status;
+  });
+
+  const characterRoom = $derived.by<RoomId>(() => {
+    if (isTeamLead && team) {
+      return TEAM_DESKS[team].roomId;
+    }
+    if (runId) {
+      if (activeRun?.data?.team && TEAM_DESKS[activeRun.data.team]) {
+        if (activeRun.status === 'handover') return 'hall';
+        if (activeRun.status === 'cooldown') return 'lounge';
+        return TEAM_DESKS[activeRun.data.team].roomId;
+      }
+      return (
+        (activeRun?.room as RoomId) ??
+        (runId === agentState.runId
+          ? (agentState.room as RoomId)
+          : undefined) ??
+        (activeRun?.status === 'handover'
+          ? 'hall'
+          : activeRun?.status === 'cooldown'
+            ? 'lounge'
+            : 'dev')
+      );
+    }
+    return (agentState.room as RoomId) ?? 'lounge';
+  });
 
   const activePR = $derived(liveStore.state?.activePR);
   const ticketId = $derived(activeRun?.ticketId);
   const title = $derived(activeRun?.data?.title);
+  const teamLabel = $derived(
+    isTeamLead && team
+      ? team === 'qa'
+        ? 'QA Lead'
+        : team === 'frontend'
+          ? 'Frontend Lead'
+          : 'Backend Lead'
+      : undefined,
+  );
   const ariaLabel = $derived(
-    formatCharacterAriaLabel(metadata.displayName, ticketId),
+    teamLabel
+      ? `${teamLabel} (${metadata.displayName})`
+      : formatCharacterAriaLabel(metadata.displayName, ticketId),
   );
   const prNumber = $derived(activeRun?.data?.prNumber ?? activePR?.prNumber);
 
@@ -100,8 +152,16 @@
 
   // Synchronous initial position
   const initialRoom: RoomId = (() => {
+    if (isTeamLead && team) {
+      return TEAM_DESKS[team].roomId;
+    }
     if (runId) {
       const run = liveStore.state?.runs?.[runId];
+      if (run?.data?.team && TEAM_DESKS[run.data.team]) {
+        if (run.status === 'handover') return 'hall';
+        if (run.status === 'cooldown') return 'lounge';
+        return TEAM_DESKS[run.data.team].roomId;
+      }
       if (run?.room) return run.room as RoomId;
       if (run?.status === 'handover') return 'hall';
       if (run?.status === 'cooldown') return 'lounge';
@@ -110,7 +170,13 @@
     return (agentState.room as RoomId) ?? 'lounge';
   })();
 
-  const controller = new AgentController(agent, initialRoom, instanceIndex);
+  const controller = new AgentController(
+    agent,
+    initialRoom,
+    instanceIndex,
+    team,
+    isTeamLead,
+  );
 
   let currentX = $state(controller.x);
   let currentY = $state(controller.y);
@@ -130,6 +196,11 @@
     }
 
     const targetRoom = characterRoom;
+    if (isTeamLead) {
+      controller.snapToRoom(targetRoom);
+      return;
+    }
+
     const feedLen = liveStore.feed.length; // Ensure reactive tracking on feed updates
 
     if (feedLen === 0) {
@@ -189,14 +260,27 @@
   });
 
   const bubble = $derived(
-    getSpeechBubble(characterStatus, {
-      ticketId,
-      title,
-      prNumber,
-      statusText,
-      cooldownUntil,
-      now,
-    }),
+    isTeamLead && characterStatus === 'waiting_input'
+      ? {
+          type: 'alert' as const,
+          text: '?',
+          icon: '❓',
+          tooltip: 'Rückfrage wartet auf Antwort',
+        }
+      : isTeamLead &&
+          (characterStatus === 'coding' || characterStatus === 'reviewing')
+        ? getSpeechBubble(characterStatus, {
+            ticketId: activeTeamRun?.ticketId,
+            title: activeTeamRun?.data?.title ?? 'Working…',
+          })
+        : getSpeechBubble(characterStatus, {
+            ticketId,
+            title,
+            prNumber,
+            statusText,
+            cooldownUntil,
+            now,
+          }),
   );
 
   function tick(dt: number) {
@@ -272,10 +356,13 @@
   "
   data-testid="character-sprite-{agent}"
   data-agent={agent}
+  data-team-lead={isTeamLead && team ? team : undefined}
+  data-team={team}
+  data-is-team-lead={isTeamLead ? 'true' : undefined}
   data-run-id={runId}
   data-instance-index={instanceIndex}
   aria-label={ariaLabel}
-  title="{metadata.displayName} ({metadata.role}) • {characterStatus}"
+  title="{teamLabel ? `${teamLabel} • ` : ''}{metadata.displayName} ({metadata.role}) • {characterStatus}"
   {onclick}
 >
   <!-- Retro Status Speech Bubble -->
@@ -304,7 +391,11 @@
 
   <!-- Agent Retro Nametag Badge -->
   <span class="agent-badge">
-    {metadata.displayName}
+    {#if isTeamLead && team}
+      {team === 'qa' ? 'QA Lead' : team === 'frontend' ? 'Frontend Lead' : 'Backend Lead'}
+    {:else}
+      {metadata.displayName}
+    {/if}
   </span>
 </button>
 

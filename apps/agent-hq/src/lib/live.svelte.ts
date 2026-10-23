@@ -8,6 +8,11 @@ const initial = (): State => ({
   },
   runs: {},
   activePR: null,
+  teams: {
+    frontend: { status: 'idle' },
+    backend: { status: 'idle' },
+    qa: { status: 'idle' },
+  },
 });
 
 export interface LiveStore {
