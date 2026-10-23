@@ -13,12 +13,7 @@ const GITHUB_REMOTE_REGEX = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/;
 
 function isInsideDir(childPath: string, parentDir: string): boolean {
   const rel = relative(parentDir, childPath);
-  return (
-    rel !== '' &&
-    rel !== '..' &&
-    !rel.startsWith('..' + sep) &&
-    !isAbsolute(rel)
-  );
+  return rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
 }
 
 function isLogFileValid(filePath?: string | null): boolean {
