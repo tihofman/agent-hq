@@ -34,6 +34,7 @@ describe('parseEvent', () => {
     ['MERGED', 'ceo'],
     ['PR_CLOSED', 'lounge'],
     ['RATE_LIMITED', 'lounge'],
+    ['SUBSCRIPTION_FAILOVER', 'lounge'],
   ] as const)('accepts %s and derives %s', (type, room) => {
     expect(event(type)).toMatchObject({ event: type, room, timestamp });
   });
@@ -113,6 +114,38 @@ describe('parseEvent', () => {
     });
     expect(parsed.data.repo).toBe('agent-hq');
     expect(parsed.data.branch).toBe('feat/13-repo-branch');
+  });
+  it('validates SUBSCRIPTION_FAILOVER event data and puts source agent into cooldown', () => {
+    const parsed = parseEvent(
+      {
+        event: 'SUBSCRIPTION_FAILOVER',
+        data: {
+          team: 'frontend',
+          from: 'agy',
+          to: 'claude',
+          cooldownUntil: '2026-10-22T17:00:00.000Z',
+        },
+      },
+      () => timestamp,
+    );
+    expect(parsed).toMatchObject({
+      event: 'SUBSCRIPTION_FAILOVER',
+      agent: 'agy',
+      room: 'lounge',
+      timestamp,
+      data: {
+        team: 'frontend',
+        from: 'agy',
+        to: 'claude',
+        cooldownUntil: '2026-10-22T17:00:00.000Z',
+      },
+    });
+    const next = reduce(initialState, parsed);
+    expect(next.agents.agy).toEqual({
+      status: 'cooldown',
+      room: 'lounge',
+      cooldownUntil: '2026-10-22T17:00:00.000Z',
+    });
   });
 });
 

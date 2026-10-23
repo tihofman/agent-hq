@@ -19,6 +19,7 @@ export interface QueueManagerOptions {
   connectionOptions?: CreateRedisConnectionOptions;
   queueOptions?: Partial<QueueOptions>;
   workerOptions?: Partial<WorkerOptions>;
+  onError?: (err: Error) => void;
 }
 
 export class QueueManager {
@@ -26,19 +27,25 @@ export class QueueManager {
   private readonly ownsConnection: boolean;
   private readonly queueOptions: Partial<QueueOptions>;
   private readonly workerOptions: Partial<WorkerOptions>;
+  private readonly onError: (err: Error) => void;
 
   private readonly queues = new Map<Team, Queue<TaskPayload>>();
   private readonly workers = new Set<Worker<TaskPayload>>();
 
   constructor(options: QueueManagerOptions = {}) {
+    this.onError =
+      options.onError ??
+      options.connectionOptions?.onError ??
+      ((err) => console.warn('[queue]', err));
+
     if (options.connection) {
       this.connection = options.connection;
       this.ownsConnection = false;
     } else {
-      this.connection = createRedisConnection(
-        options.redisUrl,
-        options.connectionOptions,
-      );
+      this.connection = createRedisConnection(options.redisUrl, {
+        onError: this.onError,
+        ...options.connectionOptions,
+      });
       this.ownsConnection = true;
     }
 
@@ -54,6 +61,7 @@ export class QueueManager {
         connection: this.connection,
         ...this.queueOptions,
       });
+      queue.on('error', this.onError);
       this.queues.set(team, queue);
     }
     return queue;
@@ -78,6 +86,7 @@ export class QueueManager {
       ...this.workerOptions,
       ...options,
     });
+    worker.on('error', this.onError);
     this.workers.add(worker);
     worker.on('closed', () => {
       this.workers.delete(worker);
