@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { sweepStaleRuns } from './lib/server/history';
 import { dispatch, getState } from './lib/server/store';
 import { startTail } from './lib/server/tail';
+import { startConfiguredIssueIngest } from './lib/server/issue-ingest';
 
 export { sweepStaleRuns };
 
@@ -80,4 +81,5 @@ export function stopServerTail(): void {
 
 export const init: ServerInit = () => {
   startServerTail();
+  startConfiguredIssueIngest();
 };
