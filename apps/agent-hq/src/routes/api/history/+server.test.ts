@@ -147,67 +147,71 @@ describe('GET /api/history', () => {
 
   it('returns logExists: false when logFile is outside logDir or is a directory', async () => {
     const outsideDir = await mkdtemp(join(tmpdir(), 'hq-outside-'));
-    const outsideFile = join(outsideDir, 'secret.log');
-    await writeFile(outsideFile, 'secret\n', 'utf8');
+    try {
+      const outsideFile = join(outsideDir, 'secret.log');
+      await writeFile(outsideFile, 'secret\n', 'utf8');
 
-    const subDir = join(logDir, 'subfolder');
-    await mkdir(subDir, { recursive: true });
+      const subDir = join(logDir, 'subfolder');
+      await mkdir(subDir, { recursive: true });
 
-    await appendHistory(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'claude',
-        runId: 'run-outside',
-        data: { logFile: outsideFile },
-      }),
-    );
-    await appendHistory(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'claude',
-        runId: 'run-dir',
-        data: { logFile: subDir },
-      }),
-    );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'claude',
+          runId: 'run-outside',
+          data: { logFile: outsideFile },
+        }),
+      );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'claude',
+          runId: 'run-dir',
+          data: { logFile: subDir },
+        }),
+      );
 
-    const res = await GET(createRequest('/api/history'));
-    expect(res.status).toBe(200);
-    const runs = (await res.json()) as HistoryRunItem[];
-    expect(runs).toHaveLength(2);
+      const res = await GET(createRequest('/api/history'));
+      expect(res.status).toBe(200);
+      const runs = (await res.json()) as HistoryRunItem[];
+      expect(runs).toHaveLength(2);
 
-    const outsideRun = runs.find((r) => r.runId === 'run-outside');
-    expect(outsideRun?.logExists).toBe(false);
+      const outsideRun = runs.find((r) => r.runId === 'run-outside');
+      expect(outsideRun?.logExists).toBe(false);
 
-    const dirRun = runs.find((r) => r.runId === 'run-dir');
-    expect(dirRun?.logExists).toBe(false);
-
-    await rm(outsideDir, { recursive: true, force: true });
+      const dirRun = runs.find((r) => r.runId === 'run-dir');
+      expect(dirRun?.logExists).toBe(false);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it('returns logExists: false when logFile is a symlink in logDir pointing outside', async () => {
     const outsideDir = await mkdtemp(join(tmpdir(), 'hq-outside-symlink-'));
-    const outsideFile = join(outsideDir, 'secret.log');
-    await writeFile(outsideFile, 'outside content\n', 'utf8');
+    try {
+      const outsideFile = join(outsideDir, 'secret.log');
+      await writeFile(outsideFile, 'outside content\n', 'utf8');
 
-    const symlinkPath = join(logDir, 'symlink-outside.log');
-    await symlink(outsideFile, symlinkPath);
+      const symlinkPath = join(logDir, 'symlink-outside.log');
+      await symlink(outsideFile, symlinkPath);
 
-    await appendHistory(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'agy',
-        runId: 'run-symlink-outside',
-        data: { logFile: symlinkPath },
-      }),
-    );
+      await appendHistory(
+        parseEvent({
+          event: 'TASK_START',
+          agent: 'agy',
+          runId: 'run-symlink-outside',
+          data: { logFile: symlinkPath },
+        }),
+      );
 
-    const res = await GET(createRequest('/api/history'));
-    expect(res.status).toBe(200);
-    const runs = (await res.json()) as HistoryRunItem[];
-    const run = runs.find((r) => r.runId === 'run-symlink-outside');
-    expect(run?.logExists).toBe(false);
-
-    await rm(outsideDir, { recursive: true, force: true });
+      const res = await GET(createRequest('/api/history'));
+      expect(res.status).toBe(200);
+      const runs = (await res.json()) as HistoryRunItem[];
+      const run = runs.find((r) => r.runId === 'run-symlink-outside');
+      expect(run?.logExists).toBe(false);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it('returns logExists: false for <logdir>/../x and <logdir>-evil/x', async () => {
