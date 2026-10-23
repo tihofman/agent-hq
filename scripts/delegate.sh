@@ -95,11 +95,13 @@ while :; do
   fi
 
   # Wait for the output reader too, so session discovery sees the complete log.
-  exec 3> >(worker_output | tee -a "$LOG")
+  FIFO_DIR="$(mktemp -d)"
+  FIFO="$FIFO_DIR/fifo"
+  mkfifo "$FIFO"
+  worker_output < "$FIFO" | tee -a "$LOG" &
   OUTPUT_PID=$!
-  "${CMD[@]}" >&3 2>&1 &
+  "${CMD[@]}" > "$FIFO" 2>&1 &
   PID=$!
-  exec 3>&-
   trap 'kill -TERM "$PID" 2>/dev/null || true' TERM INT
   hq_event TASK_START "$PID"
 
@@ -107,6 +109,7 @@ while :; do
   # A signal interrupts wait before the worker has necessarily exited.
   while kill -0 "$PID" 2>/dev/null; do wait "$PID"; CODE=$?; done
   wait "$OUTPUT_PID" || true
+  rm -rf "$FIFO_DIR"
 
   if [ "$CODE" -eq 0 ]; then
     hq_event TASK_COMPLETE "$PID" 0
