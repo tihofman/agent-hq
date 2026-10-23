@@ -176,7 +176,7 @@ Der Lead überwacht keine Terminals. Der TeamLead fungiert als autonomer Supervi
 
 Wenn ein Worker oder TeamLead eine Designentscheidung oder fehlende Spezifikation benötigt:
 
-1. **Job-Pausierung:** Der Worker schreibt seine Frage nach `.agent-hq/question.json` und beendet sich. Der TeamLead schreibt den Job **als pausiert auf seine Team-Queue** zurück (BullMQ-Zustand `delayed`); die Frage steht in den Job-Daten. Der TeamLead ist sofort frei für den nächsten Job ([ADR-0006](../adr/0006-queue-architektur-v2.md)):
+1. **Job-Pausierung:** Der Worker sendet seine Frage per `scripts/hq-ask.sh` an `POST /api/questions`; der Server schreibt sie in die Job-Daten. Danach beendet sich der Worker. Der Worker-Slot schreibt den Job **als pausiert auf die Team-Queue** zurück (BullMQ-Zustand `delayed`) und ist sofort frei für den nächsten Job ([ADR-0006](../adr/0006-queue-architektur-v2.md)):
    ```json
    {
      "id": "q-123",
@@ -196,7 +196,7 @@ Wenn ein Worker oder TeamLead eine Designentscheidung oder fehlende Spezifikatio
 4. **Wiederaufnahme:**
    - Die Antwort wird über `POST /api/questions/:id/answer` an den Server gesendet.
    - Der Server schreibt die Entscheidung des Users in die Job-Daten und stellt den Job wieder als umsetzbar in die Team-Queue (`QUESTION_RESOLVED`).
-   - Der TeamLead nimmt den Job erneut auf und setzt die Worker-Session mit der Entscheidung fort (Session-Resume, ADR 0005).
+   - Ein Worker-Slot des Teams nimmt den Job erneut auf und setzt die Worker-Session mit der Entscheidung fort (Session-Resume, ADR 0005).
 
 ---
 
