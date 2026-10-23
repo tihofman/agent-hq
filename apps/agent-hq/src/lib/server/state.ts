@@ -14,6 +14,7 @@ const eventRooms = {
   CI_CHECK_PASS: 'qa',
   CI_CHECK_FAIL: 'qa',
   MERGED: 'ceo',
+  PR_CLOSED: 'lounge',
   RATE_LIMITED: 'lounge',
 } as const satisfies Record<string, Room>;
 export type EventType = keyof typeof eventRooms;
@@ -184,7 +185,7 @@ export interface State {
   runs: Record<string, Run>;
   activePR:
     | (EventData & {
-        status?: 'draft' | 'reviewing' | 'ready' | 'merged';
+        status?: 'draft' | 'reviewing' | 'ready' | 'merged' | 'closed';
         ci?: 'pass' | 'fail';
       })
     | null;
@@ -267,6 +268,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     REVIEW_START: 'reviewing',
     PR_READY: 'idle',
     MERGED: 'idle',
+    PR_CLOSED: 'idle',
     RATE_LIMITED: 'cooldown',
   };
   const runStatuses: Partial<Record<EventType, RunStatus>> = {
@@ -338,6 +340,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     REVIEW_START: 'reviewing',
     PR_READY: 'ready',
     MERGED: 'merged',
+    PR_CLOSED: 'closed',
   } as const;
   if (
     Object.hasOwn(prStatuses, event.event) ||

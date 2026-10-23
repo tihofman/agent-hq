@@ -39,7 +39,8 @@ export function isGitEvent(event: string): boolean {
     event === 'REVIEW_START' ||
     event === 'PR_READY' ||
     event.startsWith('CI_CHECK_') ||
-    event === 'MERGED'
+    event === 'MERGED' ||
+    event === 'PR_CLOSED'
   );
 }
 
@@ -230,6 +231,11 @@ export function getFeedMessageText(item: HQEvent | InternalAction): string {
       return item.data?.prNumber
         ? `PR #${item.data.prNumber} gemergt`
         : 'PR gemergt';
+    }
+    if (item.event === 'PR_CLOSED') {
+      return item.data?.prNumber
+        ? `PR #${item.data.prNumber} geschlossen`
+        : 'PR geschlossen';
     }
     if (item.event === 'RATE_LIMITED') {
       return item.data?.cooldownUntil

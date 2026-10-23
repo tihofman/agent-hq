@@ -31,6 +31,7 @@ describe('parseEvent', () => {
     ['CI_CHECK_PASS', 'qa'],
     ['CI_CHECK_FAIL', 'qa'],
     ['MERGED', 'ceo'],
+    ['PR_CLOSED', 'lounge'],
     ['RATE_LIMITED', 'lounge'],
   ] as const)('accepts %s and derives %s', (type, room) => {
     expect(event(type)).toMatchObject({ event: type, room, timestamp });
@@ -149,16 +150,30 @@ describe('reduce', () => {
       expect(apply(reviewing, 'TASK_START').agents.codex.status).toBe('coding');
     },
   );
-  it.each(['PR_READY', 'MERGED'] as const)(
+  it.each(['PR_READY', 'MERGED', 'PR_CLOSED'] as const)(
     '%s returns reviewing agent to idle',
     (type) => {
       const state = apply(apply(coding(), 'REVIEW_START'), type);
       expect(state.agents.codex.status).toBe('idle');
       expect(state.activePR?.status).toBe(
-        type === 'MERGED' ? 'merged' : 'ready',
+        type === 'MERGED' ? 'merged' : type === 'PR_CLOSED' ? 'closed' : 'ready',
       );
     },
   );
+  it('overwrites activePR when PR_CLOSED arrives for a different PR number', () => {
+    const reviewing = apply(coding(), 'REVIEW_START', {
+      data: { prNumber: 42, title: 'Old PR', ci: 'pass' },
+    });
+    expect(reviewing.activePR).toMatchObject({ prNumber: 42, status: 'reviewing' });
+    const closed = apply(reviewing, 'PR_CLOSED', {
+      data: { prNumber: 74 },
+    });
+    expect(closed.agents.codex.status).toBe('idle');
+    expect(closed.activePR).toEqual({
+      prNumber: 74,
+      status: 'closed',
+    });
+  });
   it('enters error alert and dismisses it', () => {
     const failed = apply(coding(), 'TASK_FAILED', { data: { exitCode: 1 } });
     expect(failed.agents.codex.status).toBe('errorAlert');

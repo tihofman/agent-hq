@@ -84,6 +84,8 @@ else
     EVENT="CI_CHECK_PASS"
   elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$) ]]; then
     EVENT="MERGED"
+  elif [[ "$COMMAND" =~ (^|[[:space:];&|])gh[[:space:]]+pr[[:space:]]+close([[:space:]]|$) ]]; then
+    EVENT="PR_CLOSED"
   else
     # Non-matching command: send nothing
     exit 0
@@ -98,7 +100,7 @@ PR_NUMBER=""
 
 if [[ "$COMMAND" =~ /pull/([0-9]+)([^0-9]|$) ]]; then
   PR_NUMBER="${BASH_REMATCH[1]}"
-elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge)[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
+elif [[ "$COMMAND" =~ gh[[:space:]]+pr[[:space:]]+(diff|view|ready|checks|merge|close)[[:space:]]+#?([0-9]+)([^0-9]|$) ]]; then
   PR_NUMBER="${BASH_REMATCH[2]}"
 fi
 

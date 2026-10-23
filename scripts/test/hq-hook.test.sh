@@ -214,6 +214,33 @@ run_case "Pattern: gh pr merge -> MERGED" '{
   }
 }' "MERGED" 42
 
+# 6b. gh pr close -> PR_CLOSED
+run_case "Pattern: gh pr close 74 -> PR_CLOSED" '{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr close 74"
+  },
+  "tool_response": {
+    "stdout": "Closed pull request #74\n",
+    "stderr": ""
+  }
+}' "PR_CLOSED" 74
+
+run_case "Pattern: gh pr close URL -> PR_CLOSED" '{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr close https://github.com/o/r/pull/74"
+  },
+  "tool_response": {
+    "stdout": "Closed pull request #74\n",
+    "stderr": ""
+  }
+}' "PR_CLOSED" 74
+
 # 7. Non-matching command sends nothing
 run_case "Non-matching command sends nothing" '{
   "hook_event_name": "PostToolUse",
@@ -340,6 +367,17 @@ run_case "PostToolUseFailure: gh pr merge with Exit 1 -> sends nothing" '{
     "command": "gh pr merge 42 --squash"
   },
   "error": "Exit code 1\nPull request is not mergeable\n"
+}' "NONE"
+
+# 15b. PostToolUseFailure: gh pr close with Exit 1 -> sends nothing
+run_case "PostToolUseFailure: gh pr close with Exit 1 -> sends nothing" '{
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "cwd": "/workspace/agent-hq",
+  "tool_input": {
+    "command": "gh pr close 74"
+  },
+  "error": "Exit code 1\nPull request #74 does not exist\n"
 }' "NONE"
 
 # 16. PR number precedence: command argument over body URL (/pull/5 in body -> prNumber 28)

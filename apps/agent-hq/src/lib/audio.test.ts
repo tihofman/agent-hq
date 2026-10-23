@@ -103,6 +103,7 @@ describe('audio logic (lib/audio.ts)', () => {
         'DRAFT_PR_CREATED',
         'REVIEW_START',
         'CI_CHECK_PASS',
+        'PR_CLOSED',
         'RATE_LIMITED',
       ];
 

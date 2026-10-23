@@ -124,8 +124,12 @@
         <span
           class={activePR.status === 'merged'
             ? 'text-purple-400 font-bold'
-            : 'text-slate-500'}>Merged</span
+            : activePR.status === 'closed'
+              ? 'text-rose-400 font-bold'
+              : 'text-slate-500'}
         >
+          {activePR.status === 'closed' ? 'Closed' : 'Merged'}
+        </span>
       </div>
       {#if activePR?.ci}
         <span
