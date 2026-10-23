@@ -2,6 +2,10 @@ import type { ServerInit } from '@sveltejs/kit/hooks';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sweepStaleRuns } from './lib/server/history';
+import {
+  startConfiguredIssueIngest,
+  stopConfiguredIssueIngest,
+} from './lib/server/issue-ingest';
 import { dispatch, getState } from './lib/server/store';
 import { startTail } from './lib/server/tail';
 import {
@@ -121,20 +125,65 @@ export async function stopServerWorkers(): Promise<void> {
   const globalRef = globalThis as TailerGlobal;
   const stop = globalRef[GLOBAL_WORKER_POOL_KEY];
   delete globalRef[GLOBAL_WORKER_POOL_KEY];
-  await stop?.();
+  try {
+    await stop?.();
+  } catch (err) {
+    console.warn('[hooks] could not stop server workers:', err);
+  }
 }
+
+export const init: ServerInit = () => {
+  try {
+    startServerTail();
+  } catch (err) {
+    console.warn('[hooks] could not start server tail:', err);
+  }
+
+  if (isV2WorkersEnabled()) {
+    try {
+      startConfiguredIssueIngest();
+    } catch (err) {
+      console.warn('[hooks] could not start issue ingest:', err);
+    }
+    try {
+      void startServerWorkers().catch((err) => {
+        console.warn('[hooks] could not start server workers:', err);
+      });
+    } catch (err) {
+      console.warn('[hooks] could not start server workers:', err);
+    }
+  }
+};
+
+function stopServer(): void {
+  try {
+    stopConfiguredIssueIngest();
+  } catch (err) {
+    console.warn('[hooks] could not stop issue ingest:', err);
+  }
+  void stopServerWorkers();
+  try {
+    stopServerTail();
+  } catch (err) {
+    console.warn('[hooks] could not stop server tail:', err);
+  }
+}
+
+const onSignal = () => {
+  stopServer();
+};
+
+process.once('SIGTERM', onSignal);
+process.once('SIGINT', onSignal);
+process.once('sveltekit:shutdown', onSignal);
 
 (
   import.meta as ImportMeta & {
     hot?: { dispose(cb: () => void): void };
   }
 ).hot?.dispose(() => {
-  void stopServerWorkers();
+  stopServer();
+  process.off('SIGTERM', onSignal);
+  process.off('SIGINT', onSignal);
+  process.off('sveltekit:shutdown', onSignal);
 });
-
-export const init: ServerInit = () => {
-  startServerTail();
-  if (isV2WorkersEnabled()) {
-    void startServerWorkers();
-  }
-};

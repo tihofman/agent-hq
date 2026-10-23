@@ -6,7 +6,13 @@ export type {
   EventPayload,
 } from './types.js';
 
-export { QUEUE_NAMES, type QueueName, getQueueName } from './queues.js';
+export {
+  QUEUE_NAMES,
+  type QueueName,
+  getQueueName,
+  jobIdForIssue,
+  issueIdFromJobId,
+} from './queues.js';
 
 export {
   DEFAULT_REDIS_URL,

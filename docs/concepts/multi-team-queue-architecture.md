@@ -271,7 +271,7 @@ flowchart LR
 - **Agent:** `agent:agy`
 - **Ziel:** Service, der per `gh issue list` offene Issues mit Label `team:*` liest und in die entsprechende Queue einsteuert.
 - **Akzeptanzkriterien:**
-  - Vermeidung von Duplikaten (Job-ID = Issue-Nummer).
+  - Vermeidung von Duplikaten (Job-ID ist `issue-<Nummer>` (BullMQ verbietet rein numerische IDs)).
   - Aktualisiert GitHub Labels (z. B. `status:in-progress`, `status:blocked`).
 
 #### Ticket 3.2: `feat(git): Automatisches Worktree-Handling im TeamLead`
