@@ -379,12 +379,14 @@ export function doSpotsOverlap(
   return Math.abs(posA.x - posB.x) < size && Math.abs(posA.y - posB.y) < size;
 }
 
-export interface OfficeCharacter {
+export interface Character {
   id: string;
   agent: Agent;
   runId?: string;
   instanceIndex: number;
 }
+
+export type OfficeCharacter = Character;
 
 export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = [
   'handover',
@@ -397,7 +399,7 @@ export function deriveCharacters(
     runs?: Record<string, Run>;
     agents?: Record<Agent, AgentState>;
   } | null,
-): OfficeCharacter[] {
+): Character[] {
   const agents: Agent[] = ['claude', 'agy', 'codex'];
   if (!state) {
     return agents.map((agent) => ({ id: agent, agent, instanceIndex: 0 }));
@@ -406,7 +408,7 @@ export function deriveCharacters(
   const runs = Object.values(state.runs ?? {});
   const activeSet = new Set<string>(ACTIVE_RUN_STATUSES);
 
-  return agents.flatMap((agent) => {
+  return agents.flatMap((agent): Character[] => {
     const agentRuns = runs
       .filter((r) => r.agent === agent && activeSet.has(r.status))
       .sort(

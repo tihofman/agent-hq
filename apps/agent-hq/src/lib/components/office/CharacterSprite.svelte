@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Agent, HQEvent } from '../../server/state';
+  import type { Agent, AgentStatus, HQEvent } from '../../server/state';
   import {
     getSpriteMetadata,
     getFrameIndex,
