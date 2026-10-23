@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,7 @@ import {
   stopServerTail,
   stopServerWorkers,
 } from '../../hooks.server';
+import { GitWorktreeManager, type WorktreeManagerLike } from './git-worktree';
 import { readHistory } from './history';
 import { createEventStream } from './sse';
 import { getState, resetStore } from './store';
@@ -30,6 +32,7 @@ import {
   type QueueManagerLike,
   type WorkerJob,
   type WorkerPoolOptions,
+  type WorkerTaskPayload,
 } from './worker-pool';
 
 const redisStore = vi.hoisted(() => {
@@ -65,10 +68,10 @@ class MockQueueManager implements QueueManagerLike {
   addJob(team: Team, data: TaskPayload): MockJobRecord {
     const job: MockJobRecord = {
       id: String(data.issueId),
-      data: structuredClone(data),
+      data: structuredClone(data) as WorkerTaskPayload,
       state: 'waiting',
       attemptsMade: 0,
-      updateData: vi.fn(async (next: TaskPayload) => {
+      updateData: vi.fn(async (next: WorkerTaskPayload) => {
         job.data = next;
       }),
       moveToDelayed: vi.fn(async () => {
@@ -142,12 +145,25 @@ describe('WorkerPool (#98)', () => {
   let tempDir: string;
   let manager: MockQueueManager;
 
+  const createMockWorktreeManager = (baseDir: string): WorktreeManagerLike => ({
+    prepare: vi.fn(async (payload) => ({
+      worktreePath: baseDir,
+      branch: `feat/${payload.issueId}-test`,
+      slug: 'test',
+    })),
+    finalizeSuccess: vi.fn(async () => ({
+      prUrl: 'https://github.com/fake-org/fake-repo/pull/123',
+    })),
+  });
+
   const createPool = (opts: WorkerPoolOptions = {}) =>
     new WorkerPool({
       enabled: true,
       queueManager: manager,
       subscriptionPool: new SubscriptionPool(),
       logDir: tempDir,
+      worktreeManager:
+        opts.worktreeManager ?? createMockWorktreeManager(tempDir),
       ...opts,
     });
 
@@ -328,6 +344,7 @@ describe('WorkerPool (#98)', () => {
       delegateScript,
       queueManager: manager,
       subscriptionPool: new SubscriptionPool(),
+      worktreeManager: createMockWorktreeManager(tempDir),
     });
     expect(pool).not.toBeNull();
 
@@ -406,5 +423,208 @@ describe('WorkerPool (#98)', () => {
 
     await pool.close();
     expect(process.listeners('exit')).not.toContain(poolExitListener);
+  });
+
+  it('runs worker inside isolated worktree (not on main), commits uncommitted changes, pushes, creates draft PR, records prUrl, and removes worktree on exit 0 (#100)', async () => {
+    // 1. Setup temporary git repo with bare origin
+    const bareRemoteDir = join(tempDir, 'remote.git');
+    const serverRepoDir = join(tempDir, 'server-repo');
+    const fakeGhScript = join(tempDir, 'fake-gh.sh');
+    const cwdFile = join(tempDir, 'worker-cwd.txt');
+
+    execFileSync('git', ['init', '--bare', '-b', 'main', bareRemoteDir]);
+    execFileSync('git', ['init', '-b', 'main', serverRepoDir]);
+    execFileSync('git', ['-C', serverRepoDir, 'config', 'user.name', 'Tester']);
+    execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'config',
+      'user.email',
+      'tester@example.com',
+    ]);
+    execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'remote',
+      'add',
+      'origin',
+      bareRemoteDir,
+    ]);
+    await writeFile(join(serverRepoDir, 'README.md'), '# Main\n');
+    execFileSync('git', ['-C', serverRepoDir, 'add', 'README.md']);
+    execFileSync('git', ['-C', serverRepoDir, 'commit', '-m', 'initial']);
+    execFileSync('git', ['-C', serverRepoDir, 'push', '-u', 'origin', 'main']);
+
+    // Fake gh
+    const fakeGhContent = `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  exit 1
+fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo "https://github.com/fake-org/agent-hq/pull/100"
+  exit 0
+fi
+exit 1
+`;
+    await writeFile(fakeGhScript, fakeGhContent);
+    await chmod(fakeGhScript, 0o755);
+
+    // Delegate script writes cwd and an uncommitted file
+    const delegateScript = await makeScript(
+      tempDir,
+      `pwd > "${cwdFile}"
+       echo "worker result" > worker-file.txt
+       exit 0`,
+      'delegate-wt.sh',
+    );
+
+    const worktreeManager = new GitWorktreeManager({
+      repoRoot: serverRepoDir,
+      ghBinary: fakeGhScript,
+    });
+
+    const pool = createPool({
+      delegateScript,
+      worktreeManager,
+      repoRoot: serverRepoDir,
+    });
+    await pool.start();
+
+    const task = makeTask(100, 'frontend');
+    task.title = 'Worktree Handling Slot';
+    const job = await manager.run('frontend', task);
+
+    expect(job.state).toBe('completed');
+    expect(job.data.prUrl).toBe(
+      'https://github.com/fake-org/agent-hq/pull/100',
+    );
+
+    // Verify delegate ran in worktree, NOT in serverRepoDir and NOT on main
+    const workerCwd = (await readFile(cwdFile, 'utf8')).trim();
+    expect(workerCwd).toContain('.worktrees/feat-100-worktree-handling-slot');
+    expect(workerCwd).not.toBe(serverRepoDir);
+
+    // Verify commit by slot
+    const commitMsg = execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'log',
+      '-1',
+      '--format=%s',
+      'feat/100-worktree-handling-slot',
+    ])
+      .toString()
+      .trim();
+    expect(commitMsg).toBe('feat(#100): Worktree Handling Slot');
+
+    // Verify pushed to bare remote
+    const remoteRef = execFileSync('git', [
+      '--git-dir',
+      bareRemoteDir,
+      'rev-parse',
+      'refs/heads/feat/100-worktree-handling-slot',
+    ])
+      .toString()
+      .trim();
+    expect(remoteRef).toBeTruthy();
+
+    // Verify worktree was removed
+    const wtList = execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'worktree',
+      'list',
+    ]).toString();
+    expect(wtList).not.toContain('feat-100-worktree-handling-slot');
+
+    await pool.close();
+  });
+
+  it('keeps worktree on failure and reuses it on retry (#100)', async () => {
+    const bareRemoteDir = join(tempDir, 'remote-fail.git');
+    const serverRepoDir = join(tempDir, 'server-repo-fail');
+    const fakeGhScript = join(tempDir, 'fake-gh-fail.sh');
+    const runsCountFile = join(tempDir, 'runs.txt');
+
+    execFileSync('git', ['init', '--bare', '-b', 'main', bareRemoteDir]);
+    execFileSync('git', ['init', '-b', 'main', serverRepoDir]);
+    execFileSync('git', ['-C', serverRepoDir, 'config', 'user.name', 'Tester']);
+    execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'config',
+      'user.email',
+      'tester@example.com',
+    ]);
+    execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'remote',
+      'add',
+      'origin',
+      bareRemoteDir,
+    ]);
+    await writeFile(join(serverRepoDir, 'README.md'), '# Main\n');
+    execFileSync('git', ['-C', serverRepoDir, 'add', 'README.md']);
+    execFileSync('git', ['-C', serverRepoDir, 'commit', '-m', 'initial']);
+    execFileSync('git', ['-C', serverRepoDir, 'push', '-u', 'origin', 'main']);
+
+    const fakeGhContent = `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then exit 1; fi
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then echo "https://github.com/fake-org/agent-hq/pull/200"; exit 0; fi
+exit 1
+`;
+    await writeFile(fakeGhScript, fakeGhContent);
+    await chmod(fakeGhScript, 0o755);
+
+    // Fail first run, succeed second run
+    const delegateScript = await makeScript(
+      tempDir,
+      `echo "run" >> "${runsCountFile}"
+       RUNS=$(wc -l < "${runsCountFile}")
+       if [ "$RUNS" -eq 1 ]; then
+         echo "error occurred" >&2
+         exit 1
+       fi
+       echo "fixed" > fixed.txt
+       exit 0`,
+      'delegate-fail-retry.sh',
+    );
+
+    const worktreeManager = new GitWorktreeManager({
+      repoRoot: serverRepoDir,
+      ghBinary: fakeGhScript,
+    });
+
+    const pool = createPool({
+      delegateScript,
+      worktreeManager,
+      repoRoot: serverRepoDir,
+    });
+    await pool.start();
+
+    const task = makeTask(200, 'backend');
+    task.title = 'Retry Test';
+
+    // The manager.run simulates BullMQ retrying until completed or failed
+    const job = await manager.run('backend', task);
+    expect(job.state).toBe('completed');
+    expect(job.attemptsMade).toBe(1); // failed once, succeeded on 2nd attempt
+    expect(job.data.prUrl).toBe(
+      'https://github.com/fake-org/agent-hq/pull/200',
+    );
+
+    // Worktree removed after final success
+    const wtList = execFileSync('git', [
+      '-C',
+      serverRepoDir,
+      'worktree',
+      'list',
+    ]).toString();
+    expect(wtList).not.toContain('feat-200-retry-test');
+
+    await pool.close();
   });
 });

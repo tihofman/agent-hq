@@ -12,6 +12,7 @@ import {
   type WorkerOptions,
 } from 'bullmq';
 import { QueueManager, type TaskPayload, type Team } from '@agent-hq/queue';
+import { GitWorktreeManager, type WorktreeManagerLike } from './git-worktree';
 import { recordEvent } from './history';
 import { parseEvent, type Agent } from './state';
 import { SubscriptionPool } from './subscription-pool';
@@ -28,10 +29,11 @@ const PING_TIMEOUT_MS = 2_000;
 const KILL_TIMEOUT_MS = 2_000;
 
 export type TeamStatus = 'idle' | 'working' | 'waiting_input';
-export type WorkerJob = Pick<
-  Job<TaskPayload>,
-  'id' | 'data' | 'updateData' | 'moveToDelayed'
->;
+export type WorkerTaskPayload = TaskPayload & { prUrl?: string };
+export type WorkerJob = Pick<Job<TaskPayload>, 'id' | 'moveToDelayed'> & {
+  data: WorkerTaskPayload;
+  updateData: (data: WorkerTaskPayload) => Promise<void>;
+};
 
 export interface QueueManagerLike {
   connection?: { ping?: () => Promise<string> };
@@ -54,6 +56,8 @@ export interface WorkerPoolOptions {
   concurrency?: Partial<Record<Team, number>>;
   delegateScript?: string;
   cwd?: string;
+  repoRoot?: string;
+  worktreeManager?: WorktreeManagerLike;
   logDir?: string;
   env?: NodeJS.ProcessEnv;
   queueManager?: QueueManagerLike;
@@ -126,6 +130,7 @@ export class WorkerPool {
 
   private readonly opts: WorkerPoolOptions;
   private readonly onError: (err: unknown) => void;
+  private readonly worktreeManager: WorktreeManagerLike;
   private queueManager?: QueueManagerLike;
   private subscriptionPool?: SubscriptionPoolLike;
   private unwireFailover?: () => void;
@@ -179,6 +184,12 @@ export class WorkerPool {
       this.concurrency.qa;
     this.onError =
       options.onError ?? ((err: unknown) => console.warn('[worker-pool]', err));
+    this.worktreeManager =
+      options.worktreeManager ??
+      new GitWorktreeManager({
+        repoRoot: options.repoRoot ?? options.cwd,
+        env: options.env,
+      });
     this.queueManager = options.queueManager;
     this.subscriptionPool = options.subscriptionPool;
   }
@@ -238,11 +249,19 @@ export class WorkerPool {
     }
   }
 
-  async processJob(team: Team, job: WorkerJob, token?: string): Promise<void> {
+  async processJob(
+    team: Team,
+    job: WorkerJob,
+    token?: string,
+  ): Promise<{ prUrl?: string } | void> {
     if (!this.enabled) return;
 
     const pool = this.ensureSubscriptionPool();
     const restartedProviders = new Set<Agent>();
+
+    const worktree = await this.guard(() =>
+      this.worktreeManager.prepare(job.data),
+    );
 
     while (true) {
       const picked = await this.guard(() => pool.pick(team));
@@ -259,6 +278,7 @@ export class WorkerPool {
         provider,
         prompt,
         job.data,
+        worktree.worktreePath,
       );
 
       if (exitCode !== 0 && !this.closing) {
@@ -278,7 +298,17 @@ export class WorkerPool {
       }
 
       await this.opts.afterProcessExit?.(job);
-      if (exitCode === 0) return;
+      if (exitCode === 0) {
+        const result = await this.guard(() =>
+          this.worktreeManager.finalizeSuccess(job.data, worktree),
+        );
+        job.data = {
+          ...job.data,
+          prUrl: result.prUrl,
+        } as TaskPayload;
+        await job.updateData(job.data).catch(this.onError);
+        return result;
+      }
 
       const maxLen = this.opts.maxErrorLength ?? MAX_ERROR_LENGTH;
       const lastError = truncateError(output, exitCode, maxLen);
@@ -328,6 +358,7 @@ export class WorkerPool {
     provider: Agent,
     prompt: string,
     payload: TaskPayload,
+    cwd?: string,
   ): Promise<{ exitCode: number; output: string }> {
     return new Promise((resolveRun) => {
       const env = this.opts.env ?? process.env;
@@ -349,7 +380,7 @@ export class WorkerPool {
 
       const script = this.opts.delegateScript ?? resolveDefaultDelegateScript();
       const child = spawn(script, [provider, prompt], {
-        cwd: this.opts.cwd ?? process.cwd(),
+        cwd: cwd ?? this.opts.cwd ?? process.cwd(),
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
