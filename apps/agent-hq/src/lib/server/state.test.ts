@@ -156,7 +156,11 @@ describe('reduce', () => {
       const state = apply(apply(coding(), 'REVIEW_START'), type);
       expect(state.agents.codex.status).toBe('idle');
       expect(state.activePR?.status).toBe(
-        type === 'MERGED' ? 'merged' : type === 'PR_CLOSED' ? 'closed' : 'ready',
+        type === 'MERGED'
+          ? 'merged'
+          : type === 'PR_CLOSED'
+            ? 'closed'
+            : 'ready',
       );
     },
   );
@@ -164,7 +168,10 @@ describe('reduce', () => {
     const reviewing = apply(coding(), 'REVIEW_START', {
       data: { prNumber: 42, title: 'Old PR', ci: 'pass' },
     });
-    expect(reviewing.activePR).toMatchObject({ prNumber: 42, status: 'reviewing' });
+    expect(reviewing.activePR).toMatchObject({
+      prNumber: 42,
+      status: 'reviewing',
+    });
     const closed = apply(reviewing, 'PR_CLOSED', {
       data: { prNumber: 74 },
     });
