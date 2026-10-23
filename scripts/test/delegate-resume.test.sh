@@ -13,6 +13,8 @@ fail() { echo "FAIL: $*"; [ ! -f "$TEST_DIR/stdout" ] || cat "$TEST_DIR/stdout";
 # Exercise parsing and argv construction without launching a worker.
 sed '/^case "$AGENT" in/,$d' "$ROOT/scripts/delegate.sh" > "$TEST_DIR/functions.sh"
 source "$TEST_DIR/functions.sh" codex 'unit prompt'
+ATTEMPT=0
+CLAUDE_SESSION_ID=
 check_session() {
   AGENT="$1"
   printf '%s\n' "$2" > "$TEST_DIR/session.log"
@@ -20,11 +22,18 @@ check_session() {
   [ "$(session_from_log)" = "$3" ] || fail "session validation: $1"
 }
 uuid=01234567-abcd-1234-abcd-012345678901
+CLAUDE_SESSION_ID="$uuid"
 check_session codex "session id: $uuid
 session id: --dangerously-bypass-approvals-and-sandbox
 session id: aaaaaaaa-abcd-1234-abcd-012345678901" "$uuid"
 for bad in '--dangerously-bypass-approvals-and-sandbox' 'invalid' "$uuid trailing"; do
   check_session codex "session id: $bad" ''
+done
+check_session claude "session id: $uuid
+session id: --dangerously-bypass-approvals-and-sandbox
+session id: aaaaaaaa-abcd-1234-abcd-012345678901" "$uuid"
+for bad in '--dangerously-bypass-approvals-and-sandbox' 'invalid' "$uuid trailing"; do
+  check_session claude "session id: $bad" ''
 done
 AGENT=agy
 printf '%s\n' \
@@ -48,8 +57,53 @@ codex_command
 [ "${CMD[${#CMD[@]}-2]}" = -- ] || fail 'codex exec prompt delimiter'
 agy_command
 [ "${CMD[2]}" = " $NEXT_PROMPT" ] || fail 'agy leading dash neutralized'
+claude_command
+[ "${CMD[2]}" = " $NEXT_PROMPT" ] || fail 'claude leading dash neutralized'
+settings_json=
+for ((i=0; i<${#CMD[@]}; i++)); do
+  [ "${CMD[i]}" = --settings ] && settings_json="${CMD[i+1]}"
+  [ "${CMD[i]}" != --dangerously-skip-permissions ] || fail 'claude bypass flag present'
+done
+[ -n "$settings_json" ] || fail 'claude settings missing'
+expected_gitdir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+printf '%s\n' "$settings_json" | jq -e --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$expected_gitdir" '
+  .sandbox.enabled == true and .sandbox.failIfUnavailable == true and
+  .sandbox.allowUnsandboxedCommands == false and .sandbox.autoAllowBashIfSandboxed == true and
+  .sandbox.filesystem.allowWrite == [$cwd, $npm, $git] and
+  .sandbox.filesystem.denyWrite == [($git + "/hooks"), ($git + "/config")] and
+  ((.sandbox.filesystem.denyWrite // []) | index("/") == null) and
+  (.sandbox.network.allowedDomains | index("registry.npmjs.org")) != null' >/dev/null || fail 'claude sandbox settings'
+(
+  cd "$TEST_DIR"
+  claude_command
+  no_git_settings=
+  for ((i=0; i<${#CMD[@]}; i++)); do
+    [ "${CMD[i]}" = --settings ] && no_git_settings="${CMD[i+1]}"
+  done
+  printf '%s\n' "$no_git_settings" | jq -e --arg cwd "$TEST_DIR" --arg npm "$HOME/.npm" '
+    .sandbox.filesystem.allowWrite == [$cwd, $npm] and
+    .sandbox.filesystem.denyWrite == [] and
+    ((.sandbox.filesystem.denyWrite // []) | index("/") == null)' >/dev/null || exit 1
+) || fail 'claude sandbox settings outside git repo'
+found=0
+for arg in "${CMD[@]}"; do [ "$arg" != --session-id ] || found=1; done
+[ "$found" = 1 ] || fail 'claude initial session ID missing'
+ATTEMPT=1; claude_command
+found=0
+for ((i=0; i<${#CMD[@]}; i++)); do
+  if [ "${CMD[i]}" = --resume ]; then
+    [ "${CMD[i+1]}" = "$CLAUDE_SESSION_ID" ] || fail 'claude resume changed session ID'
+    found=1
+  fi
+done
+[ "$found" = 1 ] || fail 'claude resume session flag missing'
+CLAUDE_SESSION_ID=; SESSION=; claude_command
+for arg in "${CMD[@]}"; do
+  [ "$arg" != --resume ] && [ "$arg" != --session-id ] || fail 'claude fallback unexpectedly pinned/resumed a session'
+done
+CLAUDE_SESSION_ID="$uuid"; ATTEMPT=0
 
-# Unit tests for AGENT_MODEL in codex and agy
+# Unit tests for AGENT_MODEL in codex, agy, and claude
 unset AGENT_MODEL
 SESSION="$uuid"; codex_command
 for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex resume unexpected model'; done
@@ -57,6 +111,10 @@ SESSION=; codex_command
 for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex exec unexpected model'; done
 agy_command
 for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'agy unexpected model'; done
+SESSION="$uuid"; ATTEMPT=1; claude_command
+for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'claude resume unexpected model'; done
+SESSION=; ATTEMPT=0; claude_command
+for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'claude exec unexpected model'; done
 
 AGENT_MODEL=""
 SESSION="$uuid"; codex_command
@@ -65,6 +123,10 @@ SESSION=; codex_command
 for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex exec unexpected model with empty variable'; done
 agy_command
 for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'agy unexpected model with empty variable'; done
+SESSION="$uuid"; ATTEMPT=1; claude_command
+for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'claude resume unexpected model with empty variable'; done
+SESSION=; ATTEMPT=0; claude_command
+for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'claude exec unexpected model with empty variable'; done
 
 AGENT_MODEL="unit-model"
 SESSION="$uuid"; codex_command
@@ -98,6 +160,33 @@ for ((i=0; i<${#CMD[@]}; i++)); do
   fi
 done
 [ "$found" = 1 ] || fail 'agy missing model'
+
+SESSION="$uuid"; ATTEMPT=1; claude_command
+found=0
+resume_found=0
+for ((i=0; i<${#CMD[@]}; i++)); do
+  if [ "${CMD[i]}" = "--model" ]; then
+    [ "${CMD[i+1]}" = "unit-model" ] || fail 'claude resume wrong model'
+    found=1
+  fi
+  if [ "${CMD[i]}" = "--resume" ]; then
+    [ "${CMD[i+1]}" = "$uuid" ] || fail 'claude resume wrong session'
+    resume_found=1
+  fi
+done
+[ "$found" = 1 ] || fail 'claude resume missing model'
+[ "$resume_found" = 1 ] || fail 'claude resume missing session flag'
+
+SESSION=; ATTEMPT=0; claude_command
+found=0
+for ((i=0; i<${#CMD[@]}; i++)); do
+  if [ "${CMD[i]}" = "--model" ]; then
+    [ "${CMD[i+1]}" = "unit-model" ] || fail 'claude exec wrong model'
+    found=1
+  fi
+  [ "${CMD[i]}" != "--resume" ] || fail 'claude exec unexpected resume flag'
+done
+[ "$found" = 1 ] || fail 'claude exec missing model'
 unset AGENT_MODEL
 check_pr() {
   printf '%s\n' "$1" > "$TEST_DIR/pr.log"
@@ -135,6 +224,7 @@ exit "${FINAL_EXIT:-23}"
 WORKER
 chmod +x "$TEST_DIR/bin/codex"
 ln -s codex "$TEST_DIR/bin/agy"
+ln -s codex "$TEST_DIR/bin/claude"
 cat > "$TEST_DIR/bin/curl" <<'CURL'
 #!/usr/bin/env bash
 while [ "$#" -gt 0 ]; do
@@ -182,8 +272,17 @@ run_case() {
     all(.[]; index("--dangerously-bypass-approvals-and-sandbox") == null) and
     length >= 2 and
     (.[1] | index("correction 1") != null or any(.[]; contains("original #35 prompt") and contains("correction 1"))) and
-    (if $fallback == 1 then .[1] | any(.[]; contains("original #35 prompt") and contains("correction 1"))
+    (if $fallback == 1 and $agent != "claude" then .[1] | any(.[]; contains("original #35 prompt") and contains("correction 1"))
      elif $agent == "agy" then .[1] | index("--conversation") != null and index("conv-123") != null and index("--dangerously-skip-permissions") != null
+     elif $agent == "claude" then
+       (.[0] | index("--session-id")) as $idflag |
+       (.[0][$idflag+1]) as $id |
+       (.[1] | index("--resume")) as $resume |
+       ($idflag != null) and ($id | test("^[0-9a-f-]{36}$")) and
+       ($resume != null) and .[1][$resume+1] == $id and
+       (.[0] | index("--dangerously-skip-permissions") == null) and
+       (.[1] | index("--dangerously-skip-permissions") == null) and
+       (.[0] | index("--settings") != null and index("--add-dir") != null and index("--permission-mode") != null)
      else .[1] | .[0:3] == ["exec","resume","01234567-abcd-1234-abcd-012345678901"] and
        index("sandbox_mode=\"workspace-write\"") != null and
        index("sandbox_workspace_write.network_access=true") != null and
@@ -211,10 +310,10 @@ run_case() {
   if [ -n "${AGENT_MODEL:-}" ]; then
     grep -q "\[model: $AGENT_MODEL\]" "$TEST_DIR/stdout" || fail 'model in stdout'
     grep -q "\[model: $AGENT_MODEL\]" "$AGENT_HQ_LOG_DIR"/*.log || fail 'model in log'
-    if [ "$agent" = agy ]; then
+    if [ "$agent" = agy ] || [ "$agent" = claude ]; then
       jq -se --arg model "$AGENT_MODEL" '
         all(.[]; index("--model") != null and index($model) != null)
-      ' "$CALLS" >/dev/null || fail 'all agy calls received AGENT_MODEL'
+      ' "$CALLS" >/dev/null || fail "all $agent calls received AGENT_MODEL"
     else
       jq -se --arg model "$AGENT_MODEL" '
         all(.[]; (index("-m") != null or index("--model") != null) and index($model) != null)
@@ -223,8 +322,8 @@ run_case() {
   else
     grep -q '\[model:' "$TEST_DIR/stdout" && fail 'unexpected model in stdout'
     grep -q '\[model:' "$AGENT_HQ_LOG_DIR"/*.log && fail 'unexpected model in log'
-    if [ "$agent" = agy ]; then
-      jq -se 'all(.[]; index("--model") == null)' "$CALLS" >/dev/null || fail 'unexpected --model in agy calls'
+    if [ "$agent" = agy ] || [ "$agent" = claude ]; then
+      jq -se 'all(.[]; index("--model") == null)' "$CALLS" >/dev/null || fail "unexpected --model in $agent calls"
     else
       jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$CALLS" >/dev/null || fail 'unexpected model flag in codex calls'
     fi
@@ -237,7 +336,11 @@ run_case codex 2 0 23
 run_case codex 2 1 23
 run_case agy 2 0 23
 run_case agy 1 1 23
+run_case claude 2 0 23
+run_case claude 1 1 23
 FINAL_EXIT=0 run_case codex 1 0 0
+FINAL_EXIT=0 run_case claude 1 0 0
 AGENT_MODEL="gpt-6-luna" run_case codex 1 0 23
 AGENT_MODEL="gemini-3.8-flash-high" run_case agy 1 0 23
+AGENT_MODEL="claude-3-7-sonnet" run_case claude 1 0 23
 # Plain cancellation is also covered by delegate.test.sh.

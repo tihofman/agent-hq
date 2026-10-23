@@ -248,6 +248,7 @@ stop_server
 
 start_server respond
 ln -s agy "$TEST_DIR/bin/codex"
+ln -s agy "$TEST_DIR/bin/claude"
 
 # Test agy without AGENT_MODEL
 unset AGENT_MODEL
@@ -320,8 +321,72 @@ grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model for codex w
 grep -q '\[model:' "$CODEX_LOG" && fail 'log contains model for codex with empty AGENT_MODEL'
 jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'codex called without model option when AGENT_MODEL is empty'
 
+# Test claude with AGENT_MODEL
+export AGENT_MODEL="claude-3-7-sonnet"
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful claude exit code with AGENT_MODEL'
+CLAUDE_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '>>> Dispatching to claude \[model: claude-3-7-sonnet\]' "$TEST_DIR/stdout" || fail 'stdout contains claude model'
+grep -q '>>> Dispatching to claude \[model: claude-3-7-sonnet\]' "$CLAUDE_LOG" || fail 'log contains claude model'
+CLAUDE_GITDIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$CLAUDE_GITDIR" '
+  .[-1] as $call |
+  ($call | index("--model")) != null and
+  $call[($call | index("--model")) + 1] == $model and
+  ($call | index("-p")) != null and
+  ($call | index("--dangerously-skip-permissions")) == null and
+  ($call | index("--session-id")) as $idflag |
+  ($call[$idflag+1] | test("^[0-9a-f-]{36}$")) and
+  ($call | index("--permission-mode")) as $modeflag |
+  $call[$modeflag+1] == "acceptEdits" and
+  ($call | index("--settings")) as $settingsflag |
+  ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
+    .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and
+    .sandbox.autoAllowBashIfSandboxed == true and
+    .sandbox.filesystem.allowWrite == [$cwd, $npm, $git] and
+    .sandbox.filesystem.denyWrite == [($git + "/hooks"), ($git + "/config")] and
+    ((.sandbox.filesystem.denyWrite // []) | index("/") == null))
+' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called with model and sandbox settings'
+
+# Test claude without AGENT_MODEL
 unset AGENT_MODEL
-pass 'AGENT_MODEL passed to agy and codex, logged, and omitted when unset or empty'
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful claude exit code without AGENT_MODEL'
+CLAUDE_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model for claude without AGENT_MODEL'
+grep -q '\[model:' "$CLAUDE_LOG" && fail 'log contains model for claude without AGENT_MODEL'
+jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called without model option when AGENT_MODEL is unset'
+
+# Test claude with empty AGENT_MODEL
+export AGENT_MODEL=""
+: > "$TEST_DIR/worker.calls"
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful claude exit code with empty AGENT_MODEL'
+CLAUDE_LOG="$(jq -sr '.[0].body.data.logFile' "$TEST_DIR/events")"
+grep -q '\[model:' "$TEST_DIR/stdout" && fail 'stdout contains model for claude with empty AGENT_MODEL'
+grep -q '\[model:' "$CLAUDE_LOG" && fail 'log contains model for claude with empty AGENT_MODEL'
+jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called without model option when AGENT_MODEL is empty'
+
+unset AGENT_MODEL
+pass 'AGENT_MODEL passed to agy, codex, and claude, logged, and omitted when unset or empty'
+
+# Test claude worker events, real PID, stdout and log
+: > "$TEST_DIR/events"
+bash "$ROOT/scripts/delegate.sh" claude 'Implement #7 for claude' > "$TEST_DIR/stdout" 2>&1
+[ "$?" = 0 ] || fail 'successful claude execution'
+jq -se --argjson pid "$(cat "$WORKER_PID_FILE")" --arg cwd "$ROOT" '
+  map(.body) as $e |
+  ($e | map(.event)) == ["TASK_HANDOVER", "TASK_START", "TASK_COMPLETE"] and
+  $e[0].pid == null and $e[1].pid == $pid and $e[2].pid == $pid and
+  $e[2].data.exitCode == 0 and
+  all($e[]; .agent == "claude" and .ticketId == "7" and .cwd == $cwd)
+' "$TEST_DIR/events" >/dev/null || fail 'claude events and real worker PID'
+pass 'claude worker starts in background, reports real PID and events'
 
 # Ticket title via gh (success)
 export FAKE_EXIT=0

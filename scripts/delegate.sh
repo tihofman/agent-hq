@@ -5,7 +5,7 @@ AGENT="${1:-}"
 [ "$#" -eq 0 ] || shift
 PROMPT="$*"
 if [ -z "$AGENT" ] || [ -z "$PROMPT" ]; then
-  echo "Usage: $0 <agy|codex> \"<prompt>\""
+  echo "Usage: $0 <agy|codex|claude> \"<prompt>\""
   exit 1
 fi
 
@@ -58,8 +58,46 @@ agy_command() {
   [ -z "$SESSION" ] || CMD+=(--conversation "$SESSION")
 }
 
+claude_command() {
+  local prompt="$NEXT_PROMPT"
+  [[ "$prompt" != -* ]] || prompt=" $prompt"
+  local gitdir=""
+  if git rev-parse --git-common-dir >/dev/null 2>&1; then
+    gitdir="$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
+  fi
+  local settings
+  settings="$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$gitdir" \
+    '{sandbox:{enabled:true,failIfUnavailable:true,allowUnsandboxedCommands:false,autoAllowBashIfSandboxed:true,filesystem:{allowWrite:([$cwd,$npm]+(if $git != "" then [$git] else [] end)),denyWrite:(if $git != "" then [($git+"/hooks"),($git+"/config")] else [] end)},network:{allowedDomains:["github.com","api.github.com","codeload.github.com","raw.githubusercontent.com","objects.githubusercontent.com","registry.npmjs.org","npmjs.org"]}}}')"
+  CMD=(claude -p "$prompt")
+  if [ "$ATTEMPT" -eq 0 ]; then
+    [ -z "$CLAUDE_SESSION_ID" ] || CMD+=(--session-id "$CLAUDE_SESSION_ID")
+  elif [ -n "$CLAUDE_SESSION_ID" ]; then
+    CMD+=(--resume "$CLAUDE_SESSION_ID")
+  elif [ -n "$SESSION" ]; then
+    CMD+=(--resume "$SESSION")
+  fi
+  CMD+=(--settings "$settings" --permission-mode acceptEdits --add-dir "$HOME/.npm")
+  [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
+}
+
+new_session_id() {
+  local id=""
+  if command -v uuidgen >/dev/null 2>&1; then
+    id="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+  fi
+  if ! [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    if [ -r /proc/sys/kernel/random/uuid ]; then
+      id="$(cat /proc/sys/kernel/random/uuid)"
+    elif command -v python3 >/dev/null 2>&1; then
+      id="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    fi
+  fi
+  [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  printf '%s\n' "$id"
+}
+
 worker_output() {
-  if [ "$AGENT" = codex ]; then
+  if [ "$AGENT" = codex ] || [ "$AGENT" = claude ]; then
     cat
   else
     # Keep diagnostics/unknown events verbatim; render assistant text for the tailer.
@@ -79,7 +117,7 @@ worker_output() {
 }
 
 session_from_log() {
-  if [ "$AGENT" = codex ]; then
+  if [ "$AGENT" = codex ] || [ "$AGENT" = claude ]; then
     grep -m1 -oE '^session id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "$LOG" | cut -d ' ' -f3
   else
     # Select the first init marker before validation; never accept a later replacement.
@@ -146,11 +184,15 @@ ticket_title() {
 TICKET_TITLE="$(ticket_title "$TICKET_ID")"
 
 case "$AGENT" in
-  agy|antigravity|codex) ;;
-  *) echo "Unknown agent: $AGENT (must be agy or codex)" >&2; exit 1 ;;
+  agy|antigravity|codex|claude) ;;
+  *) echo "Unknown agent: $AGENT (must be agy, codex, or claude)" >&2; exit 1 ;;
 esac
 
 SESSION=
+CLAUDE_SESSION_ID=
+if [ "$AGENT" = claude ]; then
+  CLAUDE_SESSION_ID="$(new_session_id 2>/dev/null || true)"
+fi
 NEXT_PROMPT="$PROMPT"
 CORRECTIONS=
 ATTEMPT=0
@@ -158,7 +200,11 @@ while :; do
   RUN_ID="$(date +%s)-$$-$ATTEMPT"
   LOG="$LOG_DIR/$RUN_ID.log"
   MSG="${LOG%.log}.msg"
-  if [ "$AGENT" = codex ]; then codex_command; else agy_command; fi
+  case "$AGENT" in
+    codex) codex_command ;;
+    claude) claude_command ;;
+    *) agy_command ;;
+  esac
   if [ -n "${AGENT_MODEL:-}" ]; then
     : > "$LOG"
     printf '>>> Dispatching to %s [model: %s] ...\n' "$AGENT" "$AGENT_MODEL" | tee -a "$LOG"
@@ -198,6 +244,9 @@ while :; do
   rm -f "$MSG"
   [ -n "$INSTRUCTION" ] || break
   SESSION="$(session_from_log)"
+  if [ "$AGENT" = claude ] && [ -n "$CLAUDE_SESSION_ID" ]; then
+    SESSION="$CLAUDE_SESSION_ID"
+  fi
   CORRECTIONS="${CORRECTIONS}
 $INSTRUCTION"
   if [ -n "$SESSION" ]; then
