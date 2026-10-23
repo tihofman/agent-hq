@@ -277,13 +277,24 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     TASK_ABORTED: 'aborted',
     RATE_LIMITED: 'cooldown',
   };
+  // Progress after an elapsed (or open-ended) cooldown means the run resumed.
+  const resumed = (status?: string, until?: string) =>
+    event.event === 'TASK_PROGRESS' &&
+    status === 'cooldown' &&
+    (!until || Date.parse(event.timestamp) >= Date.parse(until));
+  const runResumed = resumed(
+    previousRun?.status,
+    previousRun?.data.cooldownUntil,
+  );
   let runs = state.runs;
   if (event.runId) {
     const run: Run = {
       ...previousRun,
       runId: event.runId,
       agent: previousRun?.agent ?? event.agent,
-      status: runStatuses[event.event] ?? previousRun?.status ?? 'running',
+      status: runResumed
+        ? 'running'
+        : (runStatuses[event.event] ?? previousRun?.status ?? 'running'),
       timestamp: event.timestamp,
       data: { ...previousRun?.data, ...event.data },
     };
@@ -308,7 +319,10 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     const { cooldownUntil, ...rest } = current;
     const agent: AgentState = {
       ...rest,
-      status: statuses[event.event] ?? current.status,
+      status:
+        runResumed || resumed(current.status, current.cooldownUntil)
+          ? 'coding'
+          : (statuses[event.event] ?? current.status),
       room: event.room,
     };
     if (event.runId) agent.runId = event.runId;

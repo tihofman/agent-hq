@@ -198,6 +198,39 @@ describe('startTail', () => {
     }
   });
 
+  it('re-arms RATE_LIMITED after regular output once the cooldown elapsed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T12:00:00Z'));
+    try {
+      start(() => 'agy');
+      const quota = 'You have exhausted your quota on this model.';
+      await append('one', `${quota}\nworking\n${quota}\n`);
+      await append(
+        'two',
+        `${quota} Retry-After: 60\nretrying\n${quota} Retry-After: 60\n`,
+      );
+      vi.setSystemTime(new Date('2026-10-22T12:01:00Z'));
+      await append('two', `working\n${quota}\n`);
+      vi.setSystemTime(new Date('2026-10-22T12:02:00Z'));
+      await append('three', `${quota} Retry-After: 60\n`);
+      vi.setSystemTime(new Date('2026-10-22T12:03:00Z'));
+      await append('three', `${quota}\n`);
+      const limits = events.filter(
+        (e) => 'event' in e && e.event === 'RATE_LIMITED',
+      );
+      expect(limits.map((e) => 'runId' in e && e.runId)).toEqual([
+        'one',
+        'one',
+        'two',
+        'two',
+        'three',
+        'three',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resets the offset, partial line and UTF-8 decoder after truncation', async () => {
     start();
     await append(
