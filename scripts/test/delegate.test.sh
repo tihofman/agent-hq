@@ -126,6 +126,47 @@ done
 unset FAKE_LAST_LINE
 pass 'log contains last worker output before TASK_COMPLETE/TASK_FAILED and no "not a child" on stderr'
 
+export FAKE_EXIT=0
+export FAKE_LAST_LINE="Draft PR created: https://github.com/tihofman/agent-hq/pull/42"
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful worker exit code with PR'
+jq -se '
+  map(.body) as $e |
+  $e[0].data.prNumber == null and
+  $e[1].data.prNumber == null and
+  $e[2].data.prNumber == 42 and
+  ($e[2].data.prNumber | type == "number")
+' "$TEST_DIR/events" >/dev/null || fail 'single prNumber extracted as number'
+
+export FAKE_LAST_LINE="$(printf 'First: https://github.com/tihofman/agent-hq/pull/11\nSecond: https://github.com/tihofman/agent-hq/pull/99')"
+run_delegate
+[ "$CODE" = 0 ] || fail 'successful worker exit code with multiple PRs'
+jq -se '
+  map(.body) as $e |
+  $e[2].data.prNumber == 99 and
+  ($e[2].data.prNumber | type == "number")
+' "$TEST_DIR/events" >/dev/null || fail 'last prNumber extracted when multiple URLs present'
+
+export FAKE_EXIT=7
+export FAKE_LAST_LINE="Failed after opening https://github.com/tihofman/agent-hq/pull/55"
+run_delegate
+[ "$CODE" = 7 ] || fail 'failed worker exit code with PR'
+jq -se '
+  map(.body) as $e |
+  $e[2].data.exitCode == 7 and
+  $e[2].data.prNumber == 55 and
+  ($e[2].data.prNumber | type == "number")
+' "$TEST_DIR/events" >/dev/null || fail 'prNumber extracted on TASK_FAILED'
+
+unset FAKE_LAST_LINE
+export FAKE_EXIT=0
+run_delegate
+jq -se '
+  map(.body) as $e |
+  all($e[]; .data | has("prNumber") | not)
+' "$TEST_DIR/events" >/dev/null || fail 'no prNumber when log has no PR URL'
+pass 'prNumber extraction: hit, no hit, multiple URLs and TASK_FAILED'
+
 : > "$TEST_DIR/events"
 rm -f "$WORKER_PID_FILE"
 FAKE_WAIT=1 bash scripts/delegate.sh agy 'Implement #7' > "$TEST_DIR/stdout" 2>&1 &

@@ -47,7 +47,16 @@ codex_command
 [ "${CMD[${#CMD[@]}-2]}" = -- ] || fail 'codex exec prompt delimiter'
 agy_command
 [ "${CMD[2]}" = " $NEXT_PROMPT" ] || fail 'agy leading dash neutralized'
-echo 'PASS: session validation, init provenance and prompt argv'
+check_pr() {
+  printf '%s\n' "$1" > "$TEST_DIR/pr.log"
+  LOG="$TEST_DIR/pr.log"
+  [ "$(pr_from_log)" = "$2" ] || fail "pr extraction failed for: $1"
+}
+check_pr "no pr url here" ""
+check_pr "created https://github.com/tihofman/agent-hq/pull/42" "42"
+check_pr "first https://github.com/tihofman/agent-hq/pull/10 and second https://github.com/tihofman/agent-hq/pull/20" "20"
+check_pr $'https://github.com/foo/bar/pull/1\nhttps://github.com/foo/bar/pull/999' "999"
+echo 'PASS: session validation, init provenance, prompt argv and pr extraction'
 [ "${1:-}" != --unit-only ] || exit 0
 mkdir -p "$TEST_DIR/bin"
 export PATH="$TEST_DIR/bin:$PATH" AGENT_HQ_URL=http://127.0.0.1:1

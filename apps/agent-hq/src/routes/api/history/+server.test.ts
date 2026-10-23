@@ -303,6 +303,45 @@ describe('GET /api/history', () => {
     expect(run.prUrl).toBe('https://github.com/tihofman/agent-hq/pull/7');
   });
 
+  it('resolves prUrl for a run whose prNumber arrives in TASK_COMPLETE event', async () => {
+    const gitRepoDir = join(tempDir, 'agent-hq-delegated');
+    await mkdir(gitRepoDir, { recursive: true });
+    await execFileAsync('git', ['init', '-q'], { cwd: gitRepoDir });
+    await execFileAsync(
+      'git',
+      ['remote', 'add', 'origin', 'https://github.com/tihofman/agent-hq.git'],
+      { cwd: gitRepoDir },
+    );
+
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-delegated-1',
+        cwd: gitRepoDir,
+        data: { logFile: join(logDir, 'run-delegated-1.log') },
+      }),
+    );
+    await appendHistory(
+      parseEvent({
+        event: 'TASK_COMPLETE',
+        agent: 'agy',
+        runId: 'run-delegated-1',
+        data: { exitCode: 0, prNumber: 75 },
+      }),
+    );
+
+    const res = await GET(createRequest('/api/history'));
+    expect(res.status).toBe(200);
+    const runs = (await res.json()) as HistoryRunItem[];
+    expect(runs).toHaveLength(1);
+
+    const run = runs[0];
+    expect(run.runId).toBe('run-delegated-1');
+    expect(run.data.prNumber).toBe(75);
+    expect(run.prUrl).toBe('https://github.com/tihofman/agent-hq/pull/75');
+  });
+
   it('returns prUrl: null when origin remote is not GitHub or cwd is invalid', async () => {
     const nonGithubRepo = join(tempDir, 'other-repo');
     await mkdir(nonGithubRepo, { recursive: true });
