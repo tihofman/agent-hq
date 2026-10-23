@@ -15,11 +15,17 @@ LOG_DIR="${AGENT_HQ_LOG_DIR:-${TMPDIR:-/tmp}/agent-hq}"
 mkdir -p "$LOG_DIR" || exit 1
 
 hq_event() { # <event> [pid] [exitCode]
+  local pr=""
+  if [ "$1" = TASK_COMPLETE ] || [ "$1" = TASK_FAILED ]; then
+    pr="$(pr_from_log)"
+  fi
   curl --connect-timeout 0.1 --max-time 0.5 -s -X POST "$HQ/api/events" \
     -H "Content-Type: application/json" \
     -d "$(jq -nc --arg e "$1" --arg a "$AGENT" --arg r "$RUN_ID" --arg t "$TICKET_ID" \
             --arg cwd "$PWD" --arg log "$LOG" --argjson pid "${2:-null}" --argjson code "${3:-null}" \
-            '{event:$e, agent:$a, runId:$r, ticketId:$t, pid:$pid, cwd:$cwd, data:{logFile:$log, exitCode:$code}}')" \
+            --arg pr "$pr" \
+            '{event:$e, agent:$a, runId:$r, ticketId:$t, pid:$pid, cwd:$cwd,
+              data:({logFile:$log, exitCode:$code} + (if $pr != "" and ($pr | test("^[0-9]+$")) then {prNumber:($pr | tonumber)} else {} end))}')" \
     >/dev/null 2>&1 || true
 }
 
@@ -71,6 +77,13 @@ session_from_log() {
     id="$(grep '^>>> agy init session: ' "$LOG" | head -1 | cut -d ' ' -f5-)"
     [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] && printf '%s\n' "$id"
   fi
+}
+
+pr_from_log() {
+  [ -n "${LOG:-}" ] && [ -r "$LOG" ] || return 0
+  local num
+  num="$(grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/[0-9]+\b' "$LOG" 2>/dev/null | tail -n1 | sed 's#.*/##' || true)"
+  [[ "$num" =~ ^[0-9]+$ ]] && printf '%s\n' "$num"
 }
 
 case "$AGENT" in
