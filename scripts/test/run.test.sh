@@ -151,6 +151,151 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# Test 6: Docker fehlt (Daemon nicht erreichbar) -> Warnung auf stderr, Exit 0
+# -----------------------------------------------------------------------------
+MOCK_BIN="$TEST_DIR/bin_docker_down"
+mkdir -p "$MOCK_BIN"
+cat << 'EOF' > "$MOCK_BIN/docker"
+#!/bin/sh
+if [ "$1" = "info" ]; then
+  echo "Cannot connect to the Docker daemon" >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/docker"
+
+STDOUT_FILE="$TEST_DIR/out_docker_down_stdout"
+STDERR_FILE="$TEST_DIR/out_docker_down_stderr"
+set +e
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+set -e
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  fail "Docker fehlt erwartete Exit 0, bekam $EXIT_CODE (stderr: $(cat "$STDERR_FILE"))"
+elif ! grep -q "Warnung: Docker" "$STDERR_FILE"; then
+  fail "Warnung auf stderr fehlt bei fehlendem Docker (stderr: $(cat "$STDERR_FILE"))"
+elif ! grep -q "erfolgreich" "$STDOUT_FILE"; then
+  fail "Erfolgsmeldung fehlt bei fehlendem Docker (stdout: $(cat "$STDOUT_FILE"))"
+else
+  pass "Docker fehlt -> Warnung auf stderr, Server startet trotzdem (Exit 0)"
+fi
+
+# -----------------------------------------------------------------------------
+# Test 7: RUN_SH_DRY_RUN=1 startet keine Container (selbst wenn Docker läuft)
+# -----------------------------------------------------------------------------
+MOCK_BIN="$TEST_DIR/bin_docker_dry_run"
+mkdir -p "$MOCK_BIN"
+DOCKER_CALLS="$TEST_DIR/docker_calls_dry_run"
+cat << EOF > "$MOCK_BIN/docker"
+#!/bin/sh
+echo "\$@" >> "$DOCKER_CALLS"
+if [ "\$1" = "info" ]; then
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/docker"
+
+STDOUT_FILE="$TEST_DIR/out_docker_dry_run_stdout"
+STDERR_FILE="$TEST_DIR/out_docker_dry_run_stderr"
+set +e
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+set -e
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  fail "Dry-Run mit Docker erwartete Exit 0, bekam $EXIT_CODE"
+elif grep -q "compose" "$DOCKER_CALLS" 2>/dev/null; then
+  fail "RUN_SH_DRY_RUN=1 rief docker compose auf: $(cat "$DOCKER_CALLS")"
+else
+  pass "RUN_SH_DRY_RUN=1 startet keine Container trotz aktivem Docker"
+fi
+
+# -----------------------------------------------------------------------------
+# Test 8: Auto-Start startet Redis via docker compose up -d redis wenn Docker läuft
+# -----------------------------------------------------------------------------
+MOCK_BIN="$TEST_DIR/bin_docker_start"
+mkdir -p "$MOCK_BIN"
+DOCKER_CALLS="$TEST_DIR/docker_calls_start"
+cat << EOF > "$MOCK_BIN/docker"
+#!/bin/sh
+echo "\$@" >> "$DOCKER_CALLS"
+if [ "\$1" = "info" ]; then
+  exit 0
+fi
+if [ "\$1" = "compose" ] && [ "\$2" = "exec" ]; then
+  echo "PONG"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/docker"
+
+# Mock npx so actual nx/node server is not launched
+cat << 'EOF' > "$MOCK_BIN/npx"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npx"
+
+STDOUT_FILE="$TEST_DIR/out_docker_start_stdout"
+STDERR_FILE="$TEST_DIR/out_docker_start_stderr"
+set +e
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+set -e
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  fail "Docker Start erwartete Exit 0, bekam $EXIT_CODE (stderr: $(cat "$STDERR_FILE"))"
+elif ! grep -q "compose up -d redis" "$DOCKER_CALLS" 2>/dev/null; then
+  fail "docker compose up -d redis wurde nicht aufgerufen (Aufrufe: $(cat "$DOCKER_CALLS" 2>/dev/null))"
+elif ! grep -q "Redis ist bereit" "$STDOUT_FILE"; then
+  fail "Erfolgsmeldung 'Redis ist bereit' fehlt (stdout: $(cat "$STDOUT_FILE"))"
+else
+  pass "run.sh startet Redis automatisch via docker compose up -d redis wenn Docker läuft"
+fi
+
+# -----------------------------------------------------------------------------
+# Test 9: Redis antwortet nicht auf ping -> Warnung auf stderr, Server startet trotzdem
+# -----------------------------------------------------------------------------
+MOCK_BIN="$TEST_DIR/bin_docker_timeout"
+mkdir -p "$MOCK_BIN"
+cat << 'EOF' > "$MOCK_BIN/docker"
+#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$1" = "compose" ] && [ "$2" = "exec" ]; then
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$MOCK_BIN/docker"
+
+cat << 'EOF' > "$MOCK_BIN/npx"
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$MOCK_BIN/npx"
+
+STDOUT_FILE="$TEST_DIR/out_docker_timeout_stdout"
+STDERR_FILE="$TEST_DIR/out_docker_timeout_stderr"
+set +e
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_REDIS_ATTEMPTS=2 RUN_SH_REDIS_SLEEP=0.05 RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+set -e
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  fail "Redis Timeout erwartete Exit 0, bekam $EXIT_CODE"
+elif ! grep -q "Warnung: Redis hat innerhalb des Timeouts" "$STDERR_FILE"; then
+  fail "Warnung auf stderr fehlt bei Redis Timeout (stderr: $(cat "$STDERR_FILE"))"
+else
+  pass "Redis Timeout -> Warnung auf stderr, Server startet trotzdem"
+fi
+
+# -----------------------------------------------------------------------------
 # Zusammenfassung
 # -----------------------------------------------------------------------------
 echo "---"

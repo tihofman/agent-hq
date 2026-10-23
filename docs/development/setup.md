@@ -13,8 +13,9 @@ Folgende Werkzeuge müssen auf dem System installiert und im `PATH` verfügbar s
 - **GitHub CLI (`gh`)** (für PR-, Check- und Workflow-Interaktionen)
 - **git** (für Versionsverwaltung und Git Worktrees)
 
-Optional (für Worker-Subagenten):
+Optional (für Queue-Architektur V2 und Worker-Subagenten):
 
+- **Docker** inkl. **Docker Compose** (für Redis 7 und optionales Bull-Board-Dashboard; ohne Docker startet Agent-HQ automatisch im V1-Modus)
 - **agy** (Antigravity CLI / Gemini Subagent)
 - **codex** (Codex Subagent)
 
@@ -32,10 +33,29 @@ Mit `./run.sh` im Repository-Root wird Agent-HQ mit einem einzigen Befehl gestar
 
 Das Skript:
 
-1. Prüft alle erforderlichen Werkzeuge (`node`, `npm`, `jq`, `gh`).
+1. Prüft alle erforderlichen Werkzeuge (`node`, `npm`, `jq`, `gh`, `lsof`).
 2. Verifiziert, dass der konfigurierte Port frei ist. Ist der Port belegt, wird der belegende Prozess ausgegeben und das Skript bricht mit Exit-Code 1 ab.
-3. Installiert Abhängigkeiten (`npm ci`), falls das Verzeichnis `node_modules` noch nicht existiert.
-4. Baut die SvelteKit-Anwendung und startet den Server über `npx nx start agent-hq` auf `http://127.0.0.1:3333`.
+3. Prüft, ob Docker läuft (`docker info`). Wenn ja, wird Redis per `docker compose up -d redis` gestartet und auf Bereitschaft gewartet (`PONG`). Ohne Docker wird eine Warnung auf stderr ausgegeben und der Server startet trotzdem (im V1-Modus ohne Queue-Funktionen).
+4. Installiert Abhängigkeiten (`npm ci`), falls das Verzeichnis `node_modules` noch nicht existiert.
+5. Baut die SvelteKit-Anwendung und startet den Server über `npx nx start agent-hq` auf `http://127.0.0.1:3333`.
+
+### Redis & Docker Compose (Queue-Architektur V2)
+
+Für die V2-Queue-Architektur (BullMQ) wird Redis über Docker Compose (`docker-compose.yml`) bereitgestellt:
+
+- **Redis**: Läuft auf `127.0.0.1:6379`, nutzt AOF-Persistenz (`--appendonly yes`) und speichert Daten im persistenten Docker-Volume `redis_data`.
+- **Bull-Board**: Optionales Web-Dashboard zur Überwachung der Queues auf `http://127.0.0.1:3334` (hinter dem Compose-Profil `dev`).
+
+```bash
+# Redis manuell im Hintergrund starten
+docker compose up -d redis
+
+# Redis inklusive Bull-Board Web-Dashboard starten
+docker compose --profile dev up -d
+
+# Services stoppen (Daten im Volume bleiben erhalten)
+docker compose down
+```
 
 ### Entwicklungsserver (HMR / Hot Reload)
 
