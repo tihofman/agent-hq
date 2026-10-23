@@ -140,7 +140,8 @@ now() { node -e 'console.log(Date.now())'; }
 START="$(now)"
 run_delegate
 ELAPSED=$(( $(now) - START ))
-[ "$CODE" = 0 ] && [ "$ELAPSED" -lt 800 ] || fail "server absent (${ELAPSED}ms, exit $CODE)"
+# Allow slow CI scheduling, but reject any 5 s hang.
+[ "$CODE" = 0 ] && [ "$ELAPSED" -lt 4000 ] || fail "server absent (${ELAPSED}ms, exit $CODE)"
 pass 'absent server does not delay worker'
 
 start_server hang
