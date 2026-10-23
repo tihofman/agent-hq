@@ -313,4 +313,53 @@ describe('GET /api/stream', () => {
 
     await reader.cancel();
   });
+
+  it('broadcasts QUESTION_PENDING immediately and includes open questions in INIT_STATE on reload (#101)', async () => {
+    // 1. Connect first client
+    const res = await GET(
+      createEvent(new Request('http://localhost:3333/api/stream')),
+    );
+    const reader = res.body!.getReader();
+    const init1 = await readSSEMessage(reader);
+    expect(init1).toContain('event: INIT_STATE');
+
+    // 2. Dispatch QUESTION_PENDING
+    const questionEvent = {
+      event: 'QUESTION_PENDING',
+      agent: 'claude',
+      data: {
+        questionId: '101-1',
+        issueId: 101,
+        team: 'frontend',
+        question: 'Deploy now?',
+      },
+    };
+    await POST(
+      createEvent(
+        new Request('http://localhost:3333/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(questionEvent),
+        }),
+      ),
+    );
+
+    // 3. Client 1 receives live UPDATE with QUESTION_PENDING
+    const updateMsg = await readSSEMessage(reader);
+    expect(updateMsg).toContain('event: UPDATE');
+    expect(updateMsg).toContain('"questionId":"101-1"');
+    expect(updateMsg).toContain('"question":"Deploy now?"');
+    await reader.cancel();
+
+    // 4. Reconnect / reload client: INIT_STATE has the open question
+    const reloadRes = await GET(
+      createEvent(new Request('http://localhost:3333/api/stream')),
+    );
+    const reloadReader = reloadRes.body!.getReader();
+    const reloadInit = await readSSEMessage(reloadReader);
+    expect(reloadInit).toContain('event: INIT_STATE');
+    expect(reloadInit).toContain('"101-1"');
+    expect(reloadInit).toContain('"Deploy now?"');
+    await reloadReader.cancel();
+  });
 });

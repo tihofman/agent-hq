@@ -35,6 +35,8 @@ describe('parseEvent', () => {
     ['PR_CLOSED', 'lounge'],
     ['RATE_LIMITED', 'lounge'],
     ['SUBSCRIPTION_FAILOVER', 'lounge'],
+    ['QUESTION_PENDING', 'dev'],
+    ['QUESTION_RESOLVED', 'dev'],
   ] as const)('accepts %s and derives %s', (type, room) => {
     expect(event(type)).toMatchObject({ event: type, room, timestamp });
   });
@@ -338,5 +340,43 @@ describe('reduce', () => {
     expect(progressed.runs['run-1'].data.repo).toBe('agent-hq');
     expect(progressed.runs['run-1'].data.branch).toBe('feat/13-repo-branch');
     expect(progressed.runs['run-1'].data.statusText).toBe('Building');
+  });
+
+  it('manages question lifecycle in state for QUESTION_PENDING and QUESTION_RESOLVED', () => {
+    const pendingEvent = parseEvent({
+      event: 'QUESTION_PENDING',
+      data: {
+        questionId: '101-1',
+        issueId: 101,
+        team: 'frontend',
+        question: 'Use Svelte 5 snippets?',
+        options: ['Yes', 'No'],
+      },
+    });
+    expect(pendingEvent.agent).toBe('claude');
+    expect(pendingEvent.room).toBe('dev');
+
+    const stateWithQuestion = reduce(initialState, pendingEvent);
+    expect(stateWithQuestion.questions?.['101-1']).toEqual({
+      id: '101-1',
+      issueId: 101,
+      team: 'frontend',
+      question: 'Use Svelte 5 snippets?',
+      options: ['Yes', 'No'],
+      status: 'PENDING',
+    });
+
+    const resolvedEvent = parseEvent({
+      event: 'QUESTION_RESOLVED',
+      data: {
+        questionId: '101-1',
+        issueId: 101,
+        team: 'frontend',
+        answer: 'Yes',
+      },
+    });
+    const stateResolved = reduce(stateWithQuestion, resolvedEvent);
+    expect(stateResolved.questions?.['101-1']).toBeUndefined();
+    expect(Object.keys(stateResolved.questions ?? {})).toHaveLength(0);
   });
 });

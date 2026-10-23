@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
   DelayedError,
@@ -14,7 +14,9 @@ import {
 import { QueueManager, type TaskPayload, type Team } from '@agent-hq/queue';
 import { recordEvent } from './history';
 import { parseEvent, type Agent } from './state';
+import { subscribe } from './store';
 import { SubscriptionPool } from './subscription-pool';
+import { setQueueManager, resetQuestionsState } from './questions';
 
 export const TEAMS: readonly Team[] = ['frontend', 'backend', 'qa'] as const;
 export const DEFAULT_CONCURRENCY: Record<Team, number> = {
@@ -24,6 +26,8 @@ export const DEFAULT_CONCURRENCY: Record<Team, number> = {
 };
 export const DEFAULT_ATTEMPTS = 4;
 export const MAX_ERROR_LENGTH = 2000;
+export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_QUESTION_GRACE_PERIOD_MS = 60_000;
 const PING_TIMEOUT_MS = 2_000;
 const KILL_TIMEOUT_MS = 2_000;
 
@@ -61,6 +65,9 @@ export interface WorkerPoolOptions {
   afterProcessExit?: (job: WorkerJob) => Promise<void> | void;
   onError?: (err: unknown) => void;
   maxErrorLength?: number;
+  questionGracePeriodMs?: number;
+  promptTemplatePath?: string;
+  hqAskPrompt?: string;
 }
 
 export function isV2WorkersEnabled(
@@ -70,7 +77,49 @@ export function isV2WorkersEnabled(
   return raw === '1' || raw === 'true';
 }
 
-export function buildTaskPrompt(payload: TaskPayload): string {
+export function extractSessionId(output: string): string | undefined {
+  const uuidMatch = output.match(
+    /^session id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im,
+  );
+  if (uuidMatch) return uuidMatch[1];
+  const agyMatch = output.match(
+    /^>>> agy init session:\s*([A-Za-z0-9][A-Za-z0-9_-]*)$/m,
+  );
+  if (agyMatch) return agyMatch[1];
+  return undefined;
+}
+
+export function loadHqAskPrompt(
+  promptPath?: string,
+  hqAskPath?: string,
+): string {
+  const targetPromptPath =
+    promptPath ??
+    resolve(dirname(resolveDefaultDelegateScript()), 'prompts', 'hq-ask.md');
+  const targetHqAskPath =
+    hqAskPath ?? resolve(dirname(resolveDefaultDelegateScript()), 'hq-ask.sh');
+
+  if (!existsSync(targetPromptPath)) {
+    return '';
+  }
+  try {
+    const content = readFileSync(targetPromptPath, 'utf8');
+    return content.replaceAll('{{HQ_ASK}}', targetHqAskPath).trim();
+  } catch {
+    return '';
+  }
+}
+
+export interface BuildTaskPromptOptions {
+  delegateScript?: string;
+  promptTemplatePath?: string;
+  hqAskPrompt?: string;
+}
+
+export function buildTaskPrompt(
+  payload: TaskPayload,
+  options?: BuildTaskPromptOptions,
+): string {
   const sections = [`Ticket #${payload.issueId}: ${payload.title}`];
   if (payload.body?.trim()) sections.push(payload.body.trim());
   if (payload.lastError?.trim()) {
@@ -78,6 +127,28 @@ export function buildTaskPrompt(payload: TaskPayload): string {
       `Vorheriger Versuch fehlgeschlagen:\n${payload.lastError.trim()}`,
     );
   }
+  if (payload.question?.status === 'ANSWERED' && payload.question.answer) {
+    sections.push(
+      `Frage: ${payload.question.question}\nAntwort: ${payload.question.answer}`,
+    );
+  }
+
+  const delegateScript =
+    options?.delegateScript ?? resolveDefaultDelegateScript();
+  const delegateDir = dirname(resolve(delegateScript));
+  const hqAskPath = resolve(delegateDir, 'hq-ask.sh');
+  const promptPath =
+    options?.promptTemplatePath ?? resolve(delegateDir, 'prompts', 'hq-ask.md');
+
+  const hqAskContent =
+    options?.hqAskPrompt !== undefined
+      ? options.hqAskPrompt
+      : loadHqAskPrompt(promptPath, hqAskPath);
+
+  if (hqAskContent.trim()) {
+    sections.push(hqAskContent.trim());
+  }
+
   return sections.join('\n\n');
 }
 
@@ -229,6 +300,7 @@ export class WorkerPool {
       }
 
       this.registerExitHandler();
+      setQueueManager(this.queueManager);
       this.started = true;
       return true;
     } catch (err) {
@@ -240,6 +312,12 @@ export class WorkerPool {
 
   async processJob(team: Team, job: WorkerJob, token?: string): Promise<void> {
     if (!this.enabled) return;
+
+    if (job.data.question?.status === 'PENDING') {
+      const delayUntil = Date.now() + SEVEN_DAYS_MS;
+      await this.guard(() => job.moveToDelayed(delayUntil, token));
+      throw new DelayedError();
+    }
 
     const pool = this.ensureSubscriptionPool();
     const restartedProviders = new Set<Agent>();
@@ -253,13 +331,45 @@ export class WorkerPool {
       }
 
       const { provider } = picked;
-      const prompt = buildTaskPrompt(job.data);
+      const script = this.opts.delegateScript ?? resolveDefaultDelegateScript();
+      const isResumed =
+        Boolean(job.data.sessionId) && job.data.question?.status === 'ANSWERED';
+      const prompt = isResumed
+        ? job.data.question!.answer!
+        : buildTaskPrompt(job.data, {
+            delegateScript: script,
+            promptTemplatePath: this.opts.promptTemplatePath,
+            hqAskPrompt: this.opts.hqAskPrompt,
+          });
+
       const { exitCode, output } = await this.runDelegate(
         team,
         provider,
         prompt,
         job.data,
       );
+
+      if (this.queueManager && job.id) {
+        const queue = this.queueManager.getQueue(team);
+        if (typeof (queue as { getJob?: unknown }).getJob === 'function') {
+          const fresh = await queue.getJob(job.id);
+          if (fresh?.data) job.data = fresh.data;
+        }
+      }
+
+      const extractedSession = extractSessionId(output);
+      if (extractedSession) {
+        job.data = { ...job.data, sessionId: extractedSession };
+        await job.updateData(job.data).catch(this.onError);
+      }
+
+      await this.opts.afterProcessExit?.(job);
+
+      if (job.data.question?.status === 'PENDING') {
+        const delayUntil = Date.now() + SEVEN_DAYS_MS;
+        await this.guard(() => job.moveToDelayed(delayUntil, token));
+        throw new DelayedError();
+      }
 
       if (exitCode !== 0 && !this.closing) {
         let rateLimited = false;
@@ -277,7 +387,6 @@ export class WorkerPool {
         }
       }
 
-      await this.opts.afterProcessExit?.(job);
       if (exitCode === 0) return;
 
       const maxLen = this.opts.maxErrorLength ?? MAX_ERROR_LENGTH;
@@ -341,6 +450,12 @@ export class WorkerPool {
         AGENT_HQ_LOG_DIR: logDir,
         HQ_ISSUE_ID: String(payload.issueId),
         HQ_TEAM: team,
+        ...(payload.sessionId
+          ? {
+              SESSION: payload.sessionId,
+              HQ_SESSION_ID: payload.sessionId,
+            }
+          : {}),
       };
 
       let stdout = '';
@@ -357,6 +472,29 @@ export class WorkerPool {
       this.children.add(child);
       this.registerExitHandler();
 
+      const gracePeriodMs =
+        this.opts.questionGracePeriodMs ??
+        (env.AGENT_HQ_QUESTION_GRACE_PERIOD_MS
+          ? Number(env.AGENT_HQ_QUESTION_GRACE_PERIOD_MS)
+          : DEFAULT_QUESTION_GRACE_PERIOD_MS);
+
+      let graceTimer: NodeJS.Timeout | undefined;
+      const unsubscribe = subscribe((_, ev) => {
+        if (
+          'event' in ev &&
+          ev.event === 'QUESTION_PENDING' &&
+          ev.data?.issueId === payload.issueId
+        ) {
+          if (!graceTimer && !settled) {
+            graceTimer = setTimeout(() => {
+              if (!settled) {
+                this.killChild(child, 'SIGTERM');
+              }
+            }, gracePeriodMs);
+          }
+        }
+      });
+
       child.stdout?.setEncoding('utf8').on('data', (c: string) => {
         stdout += c;
       });
@@ -367,6 +505,8 @@ export class WorkerPool {
       const finish = (exitCode: number, err?: Error) => {
         if (settled) return;
         settled = true;
+        unsubscribe();
+        if (graceTimer) clearTimeout(graceTimer);
         this.children.delete(child);
         const output = [stdout, stderr, err?.message]
           .filter(Boolean)
@@ -420,6 +560,7 @@ export class WorkerPool {
     this.workers.clear();
     await this.queueManager?.close().catch(this.onError);
     this.queueManager = undefined;
+    resetQuestionsState();
     this.subscriptionPool?.close();
     this.subscriptionPool = undefined;
   }

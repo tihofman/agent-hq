@@ -1,4 +1,12 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,7 +23,8 @@ import {
   stopServerTail,
   stopServerWorkers,
 } from '../../hooks.server';
-import { readHistory } from './history';
+import { readHistory, recordEvent } from './history';
+import { parseEvent } from './state';
 import { createEventStream } from './sse';
 import { getState, resetStore } from './store';
 import { SubscriptionPool } from './subscription-pool';
@@ -24,6 +33,8 @@ import {
   DEFAULT_CONCURRENCY,
   WorkerPool,
   buildTaskPrompt,
+  extractSessionId,
+  loadHqAskPrompt,
   deriveTeamStatus,
   isV2WorkersEnabled,
   truncateError,
@@ -102,7 +113,9 @@ class MockQueueManager implements QueueManagerLike {
   getQueue(team: Team): Queue<TaskPayload> {
     const getJobs = async (t: string[] = ['active', 'delayed', 'waiting']) =>
       this.jobs.filter((j) => j.data.team === team && t.includes(j.state));
-    return { getJobs } as unknown as Queue<TaskPayload>;
+    const getJob = async (jobId: string) =>
+      this.jobs.find((j) => j.id === jobId || j.id === String(j.data.issueId));
+    return { getJobs, getJob } as unknown as Queue<TaskPayload>;
   }
 
   createWorker(
@@ -406,5 +419,237 @@ describe('WorkerPool (#98)', () => {
 
     await pool.close();
     expect(process.listeners('exit')).not.toContain(poolExitListener);
+  });
+
+  describe('Prompt-Baustein and Question handling (#101)', () => {
+    it('extracts session ID for codex, agy, and claude outputs', () => {
+      const codexOut =
+        'Starting...\nsession id: 12345678-1234-1234-1234-123456789012\nDone';
+      expect(extractSessionId(codexOut)).toBe(
+        '12345678-1234-1234-1234-123456789012',
+      );
+
+      const agyOut = '>>> agy init session: conv-xyz-456\nWorking...';
+      expect(extractSessionId(agyOut)).toBe('conv-xyz-456');
+
+      expect(extractSessionId('no session here')).toBeUndefined();
+    });
+
+    it('buildTaskPrompt includes hq-ask block with literal path when file exists, falls back cleanly when missing', async () => {
+      const promptDir = join(tempDir, 'prompts');
+      await mkdir(promptDir, { recursive: true });
+      const promptFile = join(promptDir, 'hq-ask.md');
+      await writeFile(
+        promptFile,
+        'Use {{HQ_ASK}} "<Frage>" to ask question.\nImportant: exit immediately!',
+      );
+
+      const fakeDelegate = join(tempDir, 'delegate.sh');
+      const payload = makeTask(101, 'frontend');
+
+      // With prompt fixture
+      expect(loadHqAskPrompt(promptFile, join(tempDir, 'hq-ask.sh'))).toContain(
+        join(tempDir, 'hq-ask.sh'),
+      );
+      const prompt = buildTaskPrompt(payload, {
+        delegateScript: fakeDelegate,
+        promptTemplatePath: promptFile,
+      });
+      expect(prompt).toContain(join(tempDir, 'hq-ask.sh'));
+      expect(prompt).not.toContain('{{HQ_ASK}}');
+      expect(prompt).toContain('Important: exit immediately!');
+
+      // Fallback when missing
+      const promptFallback = buildTaskPrompt(payload, {
+        delegateScript: fakeDelegate,
+        promptTemplatePath: join(tempDir, 'nonexistent.md'),
+      });
+      expect(promptFallback).toBe(`Ticket #101: Feature #101\n\nBody #101`);
+    });
+
+    it('buildTaskPrompt includes question and answer if answered without sessionId', () => {
+      const payload: TaskPayload = {
+        ...makeTask(101, 'frontend'),
+        question: {
+          id: '101-1',
+          issueId: 101,
+          team: 'frontend',
+          question: 'Tabs or spaces?',
+          status: 'ANSWERED',
+          answer: 'Spaces',
+        },
+      };
+
+      const prompt = buildTaskPrompt(payload, {
+        promptTemplatePath: join(tempDir, 'nonexistent.md'),
+      });
+      expect(prompt).toContain('Frage: Tabs or spaces?');
+      expect(prompt).toContain('Antwort: Spaces');
+    });
+
+    it('delays job and saves session ID when question is pending at process exit', async () => {
+      const sessionId = '11111111-2222-3333-4444-555555555555';
+      const delegateScript = await makeScript(
+        tempDir,
+        `echo "session id: ${sessionId}"; exit 0`,
+        'q-delegate.sh',
+      );
+
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+        afterProcessExit: (j) => {
+          j.data.question = {
+            id: '105-1',
+            issueId: 105,
+            team: 'frontend',
+            question: 'Wait for user?',
+            status: 'PENDING',
+          };
+        },
+      });
+      await pool.start();
+
+      const task = makeTask(105, 'frontend');
+
+      const job = await manager.run('frontend', task);
+      expect(job.state).toBe('delayed');
+      expect(job.data.sessionId).toBe(sessionId);
+
+      await pool.close();
+    });
+
+    it('immediately re-delays active job if question is still pending without running delegate', async () => {
+      const markerFile = join(tempDir, 'should-not-run.txt');
+      const delegateScript = await makeScript(
+        tempDir,
+        `touch "${markerFile}"; exit 0`,
+        'no-run.sh',
+      );
+
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+      });
+      await pool.start();
+
+      const task = makeTask(106, 'frontend');
+      task.question = {
+        id: '106-1',
+        issueId: 106,
+        team: 'frontend',
+        question: 'Still waiting?',
+        status: 'PENDING',
+      };
+
+      const job = await manager.run('frontend', task);
+      expect(job.state).toBe('delayed');
+      expect(existsSync(markerFile)).toBe(false);
+
+      await pool.close();
+    });
+
+    it('terminates worker process after grace period when question is asked and process does not exit', async () => {
+      const pidFile = join(tempDir, 'grace-child.pid');
+      const delegateScript = await makeScript(
+        tempDir,
+        `echo $$ > "${pidFile}"; sleep 30`,
+        'grace-delegate.sh',
+      );
+
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+        questionGracePeriodMs: 50,
+      });
+      await pool.start();
+
+      const task = makeTask(107, 'backend');
+      const runPromise = manager.run('backend', task);
+
+      await expect.poll(() => readFile(pidFile, 'utf8')).toMatch(/^\d+/);
+      const pid = Number((await readFile(pidFile, 'utf8')).trim());
+      expect(() => process.kill(pid, 0)).not.toThrow();
+
+      // Trigger QUESTION_PENDING for this issue and mark question on job
+      const job = manager.jobs.find((j) => j.data.issueId === 107)!;
+      job.data.question = {
+        id: '107-1',
+        issueId: 107,
+        team: 'backend',
+        question: 'Need input?',
+        status: 'PENDING',
+      };
+
+      const ev = parseEvent({
+        event: 'QUESTION_PENDING',
+        data: {
+          questionId: '107-1',
+          issueId: 107,
+          team: 'backend',
+          question: 'Need input?',
+        },
+      });
+      await recordEvent(ev);
+
+      // Child should be terminated by pool after 50ms grace period
+      await expect
+        .poll(() => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .toBe(false);
+
+      const finishedJob = await runPromise;
+      expect(finishedJob.state).toBe('delayed');
+
+      await pool.close();
+    });
+
+    it('resumes session with answer when sessionId is present, passes SESSION env and prompt', async () => {
+      const envCaptureFile = join(tempDir, 'captured-env.json');
+      const delegateScript = await makeScript(
+        tempDir,
+        `echo "{\\"prompt\\":\\"$2\\",\\"session\\":\\"\${SESSION:-}\\",\\"hq_session\\":\\"\${HQ_SESSION_ID:-}\\"}" > "${envCaptureFile}"; exit 0`,
+        'resume-delegate.sh',
+      );
+
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+      });
+      await pool.start();
+
+      const task: TaskPayload = {
+        ...makeTask(108, 'frontend'),
+        sessionId: 'session-prev-123',
+        question: {
+          id: '108-1',
+          issueId: 108,
+          team: 'frontend',
+          question: 'Confirm?',
+          status: 'ANSWERED',
+          answer: 'Confirmed by user',
+        },
+      };
+
+      const job = await manager.run('frontend', task);
+      expect(job.state).toBe('completed');
+
+      const captured = JSON.parse(await readFile(envCaptureFile, 'utf8'));
+      expect(captured.session).toBe('session-prev-123');
+      expect(captured.hq_session).toBe('session-prev-123');
+      expect(captured.prompt).toBe('Confirmed by user');
+
+      await pool.close();
+    });
   });
 });

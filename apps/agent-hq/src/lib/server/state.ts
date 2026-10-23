@@ -1,3 +1,5 @@
+import type { QuestionPayload } from '@agent-hq/queue';
+
 export type Agent = 'claude' | 'agy' | 'codex';
 export type Room = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
 
@@ -18,6 +20,8 @@ const eventRooms = {
   PR_CLOSED: 'lounge',
   RATE_LIMITED: 'lounge',
   SUBSCRIPTION_FAILOVER: 'lounge',
+  QUESTION_PENDING: 'dev',
+  QUESTION_RESOLVED: 'dev',
 } as const satisfies Record<string, Room>;
 export type EventType = keyof typeof eventRooms;
 export interface EventData {
@@ -35,6 +39,11 @@ export interface EventData {
   team?: 'frontend' | 'backend' | 'qa';
   from?: Agent;
   to?: Agent | null;
+  questionId?: string;
+  issueId?: number;
+  question?: string;
+  options?: string[];
+  answer?: string;
 }
 export type HQEvent = {
   [T in EventType]: {
@@ -78,7 +87,11 @@ export function parseEvent(
   const rawAgent =
     raw.agent === undefined && raw.event === 'SUBSCRIPTION_FAILOVER'
       ? data.from
-      : raw.agent;
+      : raw.agent === undefined &&
+          (raw.event === 'QUESTION_PENDING' ||
+            raw.event === 'QUESTION_RESOLVED')
+        ? 'claude'
+        : raw.agent;
   if (!['claude', 'agy', 'codex'].includes(rawAgent as string))
     throw new Error('agent must be claude, agy or codex');
   if (
@@ -175,6 +188,27 @@ export function parseEvent(
       result.data[field] = value as number;
     }
   }
+  for (const field of ['questionId', 'question', 'answer'] as const) {
+    const value = data[field];
+    if (value !== undefined) {
+      if (typeof value !== 'string' || !value.trim())
+        throw new Error(`data.${field} must be a non-empty string`);
+      result.data[field] = value;
+    }
+  }
+  if (data.issueId !== undefined) {
+    if (!Number.isSafeInteger(data.issueId) || (data.issueId as number) <= 0)
+      throw new Error('data.issueId must be a positive integer');
+    result.data.issueId = data.issueId as number;
+  }
+  if (data.options !== undefined) {
+    if (
+      !Array.isArray(data.options) ||
+      data.options.some((o) => typeof o !== 'string')
+    )
+      throw new Error('data.options must be an array of strings');
+    result.data.options = [...data.options];
+  }
   return result;
 }
 
@@ -223,6 +257,7 @@ export interface State {
         ci?: 'pass' | 'fail';
       })
     | null;
+  questions?: Record<string, QuestionPayload>;
 }
 export const initialState: State = {
   agents: {
@@ -232,6 +267,7 @@ export const initialState: State = {
   },
   runs: {},
   activePR: null,
+  questions: {},
 };
 
 // Animation, test-parser and timer callbacks supply actions instead of reducer side effects.
@@ -285,6 +321,34 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
         },
       },
     };
+  }
+  if (event.event === 'QUESTION_PENDING') {
+    const q: QuestionPayload = {
+      id: event.data.questionId ?? `${event.data.issueId ?? 0}-1`,
+      issueId: event.data.issueId ?? 0,
+      team: event.data.team ?? 'frontend',
+      question: event.data.question ?? '',
+      ...(event.data.options ? { options: event.data.options } : {}),
+      status: 'PENDING',
+    };
+    return {
+      ...state,
+      questions: {
+        ...(state.questions ?? {}),
+        [q.id]: q,
+      },
+    };
+  }
+  if (event.event === 'QUESTION_RESOLVED') {
+    const id = event.data.questionId;
+    if (id && state.questions && Object.hasOwn(state.questions, id)) {
+      const { [id]: _, ...remaining } = state.questions;
+      return {
+        ...state,
+        questions: remaining,
+      };
+    }
+    return state;
   }
   const previousRun =
     event.runId && Object.hasOwn(state.runs, event.runId)
@@ -394,5 +458,5 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     if (event.event === 'CI_CHECK_PASS' || event.event === 'CI_CHECK_FAIL')
       activePR.ci = event.event === 'CI_CHECK_PASS' ? 'pass' : 'fail';
   }
-  return { agents, runs, activePR };
+  return { agents, runs, activePR, questions: state.questions };
 }

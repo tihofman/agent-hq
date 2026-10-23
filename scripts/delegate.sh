@@ -72,12 +72,14 @@ claude_command() {
   settings="$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg tmp "$tmpdir" --arg git "$gitdir" \
     '{sandbox:{enabled:true,failIfUnavailable:true,allowUnsandboxedCommands:false,autoAllowBashIfSandboxed:true,filesystem:{allowWrite:([$cwd,$npm,$tmp]+(if $git != "" then [$git] else [] end)),denyWrite:(if $git != "" then [($git+"/hooks"),($git+"/config")] else [] end)},network:{allowedDomains:["github.com","api.github.com","codeload.github.com","raw.githubusercontent.com","objects.githubusercontent.com","registry.npmjs.org","npmjs.org"]}}}')"
   CMD=(claude -p "$prompt")
-  if [ "$ATTEMPT" -eq 0 ]; then
+  if [ -n "$SESSION" ] || [ "$ATTEMPT" -gt 0 ]; then
+    if [ -n "$CLAUDE_SESSION_ID" ]; then
+      CMD+=(--resume "$CLAUDE_SESSION_ID")
+    elif [ -n "$SESSION" ]; then
+      CMD+=(--resume "$SESSION")
+    fi
+  elif [ "$ATTEMPT" -eq 0 ]; then
     [ -z "$CLAUDE_SESSION_ID" ] || CMD+=(--session-id "$CLAUDE_SESSION_ID")
-  elif [ -n "$CLAUDE_SESSION_ID" ]; then
-    CMD+=(--resume "$CLAUDE_SESSION_ID")
-  elif [ -n "$SESSION" ]; then
-    CMD+=(--resume "$SESSION")
   fi
   CMD+=(--settings "$settings" --permission-mode acceptEdits --add-dir "$HOME/.npm")
   [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
@@ -191,10 +193,14 @@ case "$AGENT" in
   *) echo "Unknown agent: $AGENT (must be agy, codex, or claude)" >&2; exit 1 ;;
 esac
 
-SESSION=
+SESSION="${SESSION:-${HQ_SESSION_ID:-}}"
 CLAUDE_SESSION_ID=
 if [ "$AGENT" = claude ]; then
-  CLAUDE_SESSION_ID="$(new_session_id 2>/dev/null || true)"
+  if [ -n "$SESSION" ]; then
+    CLAUDE_SESSION_ID="$SESSION"
+  else
+    CLAUDE_SESSION_ID="$(new_session_id 2>/dev/null || true)"
+  fi
 fi
 NEXT_PROMPT="$PROMPT"
 CORRECTIONS=
@@ -214,6 +220,9 @@ while :; do
   else
     echo ">>> Dispatching to $AGENT ..."
     : > "$LOG"
+  fi
+  if [ "$AGENT" = claude ] && [ -n "$CLAUDE_SESSION_ID" ]; then
+    printf 'session id: %s\n' "$CLAUDE_SESSION_ID" | tee -a "$LOG"
   fi
   hq_event TASK_HANDOVER
   if [ "$ATTEMPT" -gt 0 ]; then
