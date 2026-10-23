@@ -36,11 +36,46 @@ describe('history', () => {
       expect(getHistoryPath()).toBe(join(tempDir, 'history.jsonl'));
     });
 
-    it('defaults to ~/.agent-hq when AGENT_HQ_HOME is undefined', () => {
+    it('defaults to ~/.agent-hq when AGENT_HQ_HOME is undefined outside Vitest', () => {
       delete process.env.AGENT_HQ_HOME;
-      expect(getHistoryDir()).toBe(join(homedir(), '.agent-hq'));
-      expect(getHistoryPath()).toBe(
-        join(homedir(), '.agent-hq', 'history.jsonl'),
+      const originalVitest = process.env.VITEST;
+      delete process.env.VITEST;
+      try {
+        expect(getHistoryDir()).toBe(join(homedir(), '.agent-hq'));
+        expect(getHistoryPath()).toBe(
+          join(homedir(), '.agent-hq', 'history.jsonl'),
+        );
+      } finally {
+        process.env.VITEST = originalVitest;
+      }
+    });
+
+    it('rejects ~/.agent-hq when running under VITEST without AGENT_HQ_HOME', () => {
+      delete process.env.AGENT_HQ_HOME;
+      expect(() => getHistoryDir()).toThrow(
+        /Refusing to use .* during tests \(process\.env\.VITEST is set\)/,
+      );
+      expect(() => getHistoryPath()).toThrow(
+        /Refusing to use .* during tests \(process\.env\.VITEST is set\)/,
+      );
+    });
+
+    it('rejects AGENT_HQ_HOME pointing to ~/.agent-hq or a subpath under VITEST', () => {
+      process.env.AGENT_HQ_HOME = join(homedir(), '.agent-hq');
+      expect(() => getHistoryDir()).toThrow(
+        /Refusing to use .* during tests \(process\.env\.VITEST is set\)/,
+      );
+
+      process.env.AGENT_HQ_HOME = join(homedir(), '.agent-hq', 'sub');
+      expect(() => getHistoryDir()).toThrow(
+        /Refusing to use .* during tests \(process\.env\.VITEST is set\)/,
+      );
+    });
+
+    it('rejects AGENT_HQ_HOME pointing directly to homedir under VITEST', () => {
+      process.env.AGENT_HQ_HOME = homedir();
+      expect(() => getHistoryDir()).toThrow(
+        /Refusing to use .* during tests \(process\.env\.VITEST is set\)/,
       );
     });
   });
@@ -115,6 +150,40 @@ describe('history', () => {
         expect.any(Error),
       );
       consoleSpy.mockRestore();
+    });
+
+    it('rejects writing to ~/.agent-hq under VITEST', async () => {
+      delete process.env.AGENT_HQ_HOME;
+      const event = parseEvent({
+        event: 'TASK_START',
+        agent: 'codex',
+        runId: 'run-guard-test',
+      });
+      await expect(appendHistory(event)).rejects.toThrow(
+        /Refusing to use .* during tests \(process\.env\.VITEST is set\)/,
+      );
+    });
+
+    it('writes to directory captured at invocation time even if AGENT_HQ_HOME is mutated concurrently', async () => {
+      const initialTemp = await mkdtemp(join(tmpdir(), 'hq-race-test-'));
+      process.env.AGENT_HQ_HOME = initialTemp;
+
+      const event = parseEvent({
+        event: 'TASK_START',
+        agent: 'agy',
+        runId: 'run-race-test',
+      });
+
+      const appendPromise = appendHistory(event);
+      process.env.AGENT_HQ_HOME = tempDir;
+      await appendPromise;
+
+      const initialContent = await readFile(
+        join(initialTemp, 'history.jsonl'),
+        'utf8',
+      );
+      expect(initialContent).toContain('run-race-test');
+      await rm(initialTemp, { recursive: true, force: true });
     });
   });
 
