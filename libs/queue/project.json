@@ -1,0 +1,26 @@
+{
+  "name": "queue",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/queue/src",
+  "targets": {
+    "lint": {
+      "command": "eslint .",
+      "options": {
+        "cwd": "libs/queue"
+      }
+    },
+    "test": {
+      "command": "vitest run",
+      "options": {
+        "cwd": "libs/queue"
+      }
+    },
+    "typecheck": {
+      "command": "tsc --noEmit -p ./tsconfig.json",
+      "options": {
+        "cwd": "libs/queue"
+      }
+    }
+  }
+}
