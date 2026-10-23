@@ -29,7 +29,6 @@ export default defineConfig({
     env: {
       AGENT_HQ_HOME: join(tmpdir(), 'agent-hq-test'),
     },
-    setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.{test,spec}.{js,ts}'],
     expect: { requireAssertions: true },
   },
