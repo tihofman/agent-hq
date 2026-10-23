@@ -31,13 +31,16 @@ hq_event() { # <event> [pid] [exitCode]
 
 codex_command() {
   if [ -n "$SESSION" ]; then
-    CMD=(codex exec resume "$SESSION"
-      -c 'sandbox_mode="workspace-write"'
+    CMD=(codex exec resume "$SESSION")
+    [ -z "${AGENT_MODEL:-}" ] || CMD+=(-m "$AGENT_MODEL")
+    CMD+=(-c 'sandbox_mode="workspace-write"'
       -c sandbox_workspace_write.network_access=true
       -c "sandbox_workspace_write.writable_roots=$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" '[$cwd,$npm]')"
       -- "$NEXT_PROMPT")
   else
-    CMD=(codex exec -s workspace-write -c sandbox_workspace_write.network_access=true --add-dir "$HOME/.npm" -- "$NEXT_PROMPT")
+    CMD=(codex exec)
+    [ -z "${AGENT_MODEL:-}" ] || CMD+=(-m "$AGENT_MODEL")
+    CMD+=(-s workspace-write -c sandbox_workspace_write.network_access=true --add-dir "$HOME/.npm" -- "$NEXT_PROMPT")
   fi
 }
 
@@ -45,6 +48,7 @@ agy_command() {
   local prompt="$NEXT_PROMPT"
   [[ "$prompt" != -* ]] || prompt=" $prompt"
   CMD=(agy -p "$prompt" --dangerously-skip-permissions --output-format stream-json)
+  [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
   [ -z "$SESSION" ] || CMD+=(--conversation "$SESSION")
 }
 
@@ -100,9 +104,14 @@ while :; do
   LOG="$LOG_DIR/$RUN_ID.log"
   MSG="${LOG%.log}.msg"
   if [ "$AGENT" = codex ]; then codex_command; else agy_command; fi
-  echo ">>> Dispatching to $AGENT ..."
+  if [ -n "${AGENT_MODEL:-}" ]; then
+    : > "$LOG"
+    printf '>>> Dispatching to %s [model: %s] ...\n' "$AGENT" "$AGENT_MODEL" | tee -a "$LOG"
+  else
+    echo ">>> Dispatching to $AGENT ..."
+    : > "$LOG"
+  fi
   hq_event TASK_HANDOVER
-  : > "$LOG"
   if [ "$ATTEMPT" -gt 0 ]; then
     printf '>>> User-Anweisung: %s\n' "$INSTRUCTION" | tee -a "$LOG"
   fi

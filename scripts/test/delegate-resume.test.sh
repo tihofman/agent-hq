@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+unset AGENT_MODEL
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TEST_DIR="$(mktemp -d)"
 DELEGATE_PID=
@@ -47,6 +48,57 @@ codex_command
 [ "${CMD[${#CMD[@]}-2]}" = -- ] || fail 'codex exec prompt delimiter'
 agy_command
 [ "${CMD[2]}" = " $NEXT_PROMPT" ] || fail 'agy leading dash neutralized'
+
+# Unit tests for AGENT_MODEL in codex and agy
+unset AGENT_MODEL
+SESSION="$uuid"; codex_command
+for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex resume unexpected model'; done
+SESSION=; codex_command
+for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex exec unexpected model'; done
+agy_command
+for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'agy unexpected model'; done
+
+AGENT_MODEL=""
+SESSION="$uuid"; codex_command
+for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex resume unexpected model with empty variable'; done
+SESSION=; codex_command
+for arg in "${CMD[@]}"; do [ "$arg" != "-m" ] && [ "$arg" != "--model" ] || fail 'codex exec unexpected model with empty variable'; done
+agy_command
+for arg in "${CMD[@]}"; do [ "$arg" != "--model" ] || fail 'agy unexpected model with empty variable'; done
+
+AGENT_MODEL="unit-model"
+SESSION="$uuid"; codex_command
+[ "${CMD[${#CMD[@]}-2]}" = -- ] || fail 'codex resume prompt delimiter with model'
+found=0
+for ((i=0; i<${#CMD[@]}; i++)); do
+  if [ "${CMD[i]}" = "-m" ] || [ "${CMD[i]}" = "--model" ]; then
+    [ "${CMD[i+1]}" = "unit-model" ] || fail 'codex resume wrong model'
+    found=1
+  fi
+done
+[ "$found" = 1 ] || fail 'codex resume missing model'
+
+SESSION=; codex_command
+[ "${CMD[${#CMD[@]}-2]}" = -- ] || fail 'codex exec prompt delimiter with model'
+found=0
+for ((i=0; i<${#CMD[@]}; i++)); do
+  if [ "${CMD[i]}" = "-m" ] || [ "${CMD[i]}" = "--model" ]; then
+    [ "${CMD[i+1]}" = "unit-model" ] || fail 'codex exec wrong model'
+    found=1
+  fi
+done
+[ "$found" = 1 ] || fail 'codex exec missing model'
+
+agy_command
+found=0
+for ((i=0; i<${#CMD[@]}; i++)); do
+  if [ "${CMD[i]}" = "--model" ]; then
+    [ "${CMD[i+1]}" = "unit-model" ] || fail 'agy wrong model'
+    found=1
+  fi
+done
+[ "$found" = 1 ] || fail 'agy missing model'
+unset AGENT_MODEL
 check_pr() {
   printf '%s\n' "$1" > "$TEST_DIR/pr.log"
   LOG="$TEST_DIR/pr.log"
@@ -156,6 +208,27 @@ run_case() {
   if [ "$agent" = agy ] && [ "$no_session" = 0 ]; then
     grep -q 'readable output' "$TEST_DIR/stdout" || fail 'agy readable text'
   fi
+  if [ -n "${AGENT_MODEL:-}" ]; then
+    grep -q "\[model: $AGENT_MODEL\]" "$TEST_DIR/stdout" || fail 'model in stdout'
+    grep -q "\[model: $AGENT_MODEL\]" "$AGENT_HQ_LOG_DIR"/*.log || fail 'model in log'
+    if [ "$agent" = agy ]; then
+      jq -se --arg model "$AGENT_MODEL" '
+        all(.[]; index("--model") != null and index($model) != null)
+      ' "$CALLS" >/dev/null || fail 'all agy calls received AGENT_MODEL'
+    else
+      jq -se --arg model "$AGENT_MODEL" '
+        all(.[]; (index("-m") != null or index("--model") != null) and index($model) != null)
+      ' "$CALLS" >/dev/null || fail 'all codex calls received AGENT_MODEL'
+    fi
+  else
+    grep -q '\[model:' "$TEST_DIR/stdout" && fail 'unexpected model in stdout'
+    grep -q '\[model:' "$AGENT_HQ_LOG_DIR"/*.log && fail 'unexpected model in log'
+    if [ "$agent" = agy ]; then
+      jq -se 'all(.[]; index("--model") == null)' "$CALLS" >/dev/null || fail 'unexpected --model in agy calls'
+    else
+      jq -se 'all(.[]; index("-m") == null and index("--model") == null)' "$CALLS" >/dev/null || fail 'unexpected model flag in codex calls'
+    fi
+  fi
   echo "PASS: $agent, $instructions corrections, fallback=$no_session, exit=$code"
 }
 cd "$ROOT"
@@ -165,4 +238,6 @@ run_case codex 2 1 23
 run_case agy 2 0 23
 run_case agy 1 1 23
 FINAL_EXIT=0 run_case codex 1 0 0
+AGENT_MODEL="gpt-6-luna" run_case codex 1 0 23
+AGENT_MODEL="gemini-3.8-flash-high" run_case agy 1 0 23
 # Plain cancellation is also covered by delegate.test.sh.
