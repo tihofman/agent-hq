@@ -47,13 +47,21 @@ den Tailer lesbar, ohne zusätzliche Abhängigkeit. Fortsetzung erfolgt gezielt 
 Nur die erste Init-ID wird berücksichtigt; sie muss `^[A-Za-z0-9][A-Za-z0-9_-]*$` erfüllen.
 Fehlt eine gültige Session-ID, startet der Worker mit Originalprompt und bisherigen Anweisungen neu.
 
-claude läuft nicht-interaktiv mit `claude -p "$prompt" --dangerously-skip-permissions`.
-Ist `AGENT_MODEL` gesetzt, wird es als `--model` durchgereicht. Die Ausgabe wird unverändert
-in stdout und das Run-Log geschrieben (wie bei codex). Liefert der Worker eine Session-ID
-(z. B. `session id: <uuid>` im Log), setzt `delegate.sh` die Session per
-`claude -p "$anweisung" --dangerously-skip-permissions --resume <session-id>` fort.
-Fehlt die Session-ID (wie beim Standard-Textoutput von `claude -p`), greift der
-ADR-0005-Fallback: `delegate.sh` startet claude mit Originalprompt und bisherigen Anweisungen neu.
+claude läuft nicht-interaktiv mit aktivierter Sandbox und `--permission-mode acceptEdits`.
+Bash-Befehle innerhalb der Sandbox werden ohne Rückfrage freigegeben; ein unsandboxed Retry
+ist deaktiviert und Claude Code muss beim Fehlen der Sandbox abbrechen. Schreibzugriff ist
+auf den Worktree und `~/.npm` beschränkt; andere Pfade einschließlich `/tmp` sind gesperrt.
+Netzwerkzugriff ist auf GitHub und die npm-Registry begrenzt. Die Einstellungen
+werden mit `--settings '<json>'` übergeben; `~/.npm` wird zusätzlich mit `--add-dir` freigegeben.
+Die Sandbox beschränkt Shell-Befehle und deren Kindprozesse auf Betriebssystemebene.
+
+Vor dem ersten Lauf erzeugt `delegate.sh` eine UUID (`uuidgen`, mit Plattform-Fallback) und
+übergibt sie mit `--session-id`. Ist `AGENT_MODEL` gesetzt, wird es als `--model` durchgereicht.
+Die Ausgabe wird unverändert in stdout und das Run-Log geschrieben (wie bei codex). Bei einer
+Anweisung für Fortsetzung wird dieselbe UUID mit `--resume` verwendet. Wenn ausnahmsweise
+keine UUID erzeugt werden kann, greift der ADR-0005-Fallback: `delegate.sh` startet claude mit
+Originalprompt und bisherigen Anweisungen neu; eine im Log gefundene Session-ID kann dann
+weiterhin mit `--resume` genutzt werden.
 
 Prüfen mit `bash scripts/test/delegate.test.sh` und
 `bash scripts/test/delegate-resume.test.sh` (Fake-CLIs, keine echten Worker).

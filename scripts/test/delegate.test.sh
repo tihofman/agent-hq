@@ -335,8 +335,17 @@ jq -se --arg model "claude-3-7-sonnet" '
   ($call | index("--model")) != null and
   $call[($call | index("--model")) + 1] == $model and
   ($call | index("-p")) != null and
-  ($call | index("--dangerously-skip-permissions")) != null
-' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called with model and permission option'
+  ($call | index("--dangerously-skip-permissions")) == null and
+  ($call | index("--session-id")) as $idflag |
+  ($call[$idflag+1] | test("^[0-9a-f-]{36}$")) and
+  ($call | index("--permission-mode")) as $modeflag |
+  $call[$modeflag+1] == "acceptEdits" and
+  ($call | index("--settings")) as $settingsflag |
+  ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
+    .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and
+    .sandbox.autoAllowBashIfSandboxed == true and
+    (.sandbox.filesystem.allowWrite | length) == 2)
+' "$TEST_DIR/worker.calls" >/dev/null || fail 'claude called with model and sandbox settings'
 
 # Test claude without AGENT_MODEL
 unset AGENT_MODEL

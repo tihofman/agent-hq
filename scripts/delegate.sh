@@ -61,9 +61,35 @@ agy_command() {
 claude_command() {
   local prompt="$NEXT_PROMPT"
   [[ "$prompt" != -* ]] || prompt=" $prompt"
-  CMD=(claude -p "$prompt" --dangerously-skip-permissions)
+  local settings
+  settings="$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" \
+    '{sandbox:{enabled:true,failIfUnavailable:true,allowUnsandboxedCommands:false,autoAllowBashIfSandboxed:true,filesystem:{allowWrite:[$cwd,$npm],denyWrite:["/"]},network:{allowedDomains:["github.com","api.github.com","codeload.github.com","raw.githubusercontent.com","objects.githubusercontent.com","registry.npmjs.org","npmjs.org"]}}}')"
+  CMD=(claude -p "$prompt")
+  if [ "$ATTEMPT" -eq 0 ]; then
+    [ -z "$CLAUDE_SESSION_ID" ] || CMD+=(--session-id "$CLAUDE_SESSION_ID")
+  elif [ -n "$CLAUDE_SESSION_ID" ]; then
+    CMD+=(--resume "$CLAUDE_SESSION_ID")
+  elif [ -n "$SESSION" ]; then
+    CMD+=(--resume "$SESSION")
+  fi
+  CMD+=(--settings "$settings" --permission-mode acceptEdits --add-dir "$HOME/.npm")
   [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
-  [ -z "$SESSION" ] || CMD+=(--resume "$SESSION")
+}
+
+new_session_id() {
+  local id=""
+  if command -v uuidgen >/dev/null 2>&1; then
+    id="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+  fi
+  if ! [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    if [ -r /proc/sys/kernel/random/uuid ]; then
+      id="$(cat /proc/sys/kernel/random/uuid)"
+    elif command -v python3 >/dev/null 2>&1; then
+      id="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    fi
+  fi
+  [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  printf '%s\n' "$id"
 }
 
 worker_output() {
@@ -159,6 +185,10 @@ case "$AGENT" in
 esac
 
 SESSION=
+CLAUDE_SESSION_ID=
+if [ "$AGENT" = claude ]; then
+  CLAUDE_SESSION_ID="$(new_session_id 2>/dev/null || true)"
+fi
 NEXT_PROMPT="$PROMPT"
 CORRECTIONS=
 ATTEMPT=0
@@ -210,6 +240,9 @@ while :; do
   rm -f "$MSG"
   [ -n "$INSTRUCTION" ] || break
   SESSION="$(session_from_log)"
+  if [ "$AGENT" = claude ] && [ -n "$CLAUDE_SESSION_ID" ]; then
+    SESSION="$CLAUDE_SESSION_ID"
+  fi
   CORRECTIONS="${CORRECTIONS}
 $INSTRUCTION"
   if [ -n "$SESSION" ]; then
