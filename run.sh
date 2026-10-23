@@ -34,13 +34,45 @@ if [ -n "$OCCUPYING" ]; then
   exit 1
 fi
 
+# 3. Docker / Redis (optional für V2 Queue-Architektur)
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  echo "Warnung: Docker läuft nicht oder ist nicht verfügbar. Agent-HQ startet ohne Redis/BullMQ (V2-Features deaktiviert)." >&2
+elif [ "${RUN_SH_DRY_RUN:-0}" != "1" ]; then
+  echo "Starte Redis via Docker Compose..."
+  if ! (cd "$ROOT" && docker compose up -d redis); then
+    echo "Warnung: 'docker compose up -d redis' fehlgeschlagen. Server startet ohne Redis." >&2
+  else
+    # Auf PONG warten mit Timeout (15 Sekunden Standard)
+    REDIS_READY=0
+    ATTEMPTS=0
+    MAX_ATTEMPTS="${RUN_SH_REDIS_ATTEMPTS:-30}"
+    SLEEP_INTERVAL="${RUN_SH_REDIS_SLEEP:-0.5}"
+    while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
+      PING_OUTPUT="$( (cd "$ROOT" && docker compose exec -T redis redis-cli ping 2>/dev/null) || true)"
+
+      if echo "$PING_OUTPUT" | grep -q "PONG"; then
+        REDIS_READY=1
+        break
+      fi
+      sleep "$SLEEP_INTERVAL"
+      ATTEMPTS=$((ATTEMPTS + 1))
+    done
+
+    if [ "$REDIS_READY" = "1" ]; then
+      echo "Redis ist bereit (PONG empfangen)."
+    else
+      echo "Warnung: Redis hat innerhalb des Timeouts nicht auf PING geantwortet. Server startet trotzdem." >&2
+    fi
+  fi
+fi
+
 # Dry-run Modus für automatisierte Tests (verhindert echten Serverstart)
 if [ "${RUN_SH_DRY_RUN:-0}" = "1" ]; then
   echo "Pre-flight-Prüfung für Port $PORT erfolgreich (RUN_SH_DRY_RUN=1)."
   exit 0
 fi
 
-# 3. Abhängigkeiten nur installieren, wenn node_modules fehlt
+# 4. Abhängigkeiten nur installieren, wenn node_modules fehlt
 if [ ! -d "$ROOT/node_modules" ]; then
   echo "node_modules nicht vorhanden. Installiere Abhängigkeiten via npm ci..."
   if [ -f "$ROOT/package-lock.json" ]; then
@@ -50,7 +82,7 @@ if [ ! -d "$ROOT/node_modules" ]; then
   fi
 fi
 
-# 4. Prod-Server über nx start agent-hq bauen und starten
+# 5. Prod-Server über nx start agent-hq bauen und starten
 echo "Starte Agent-HQ auf http://$HOST:$PORT ..."
 export PORT HOST
 cd "$ROOT"
