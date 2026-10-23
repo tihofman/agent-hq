@@ -44,9 +44,10 @@ export interface SpriteMetadata {
 }
 
 export interface SpeechBubble {
-  type: 'testing' | 'review' | 'alert' | 'cooldown';
+  type: 'testing' | 'review' | 'alert' | 'cooldown' | 'coding';
   text: string;
   icon?: string;
+  tooltip?: string;
 }
 
 export interface InstanceOffset {
@@ -168,6 +169,7 @@ export function getSpeechBubble(
   status: AgentStatus,
   options?: {
     ticketId?: string;
+    title?: string;
     prNumber?: number;
     statusText?: string;
     cooldownUntil?: string;
@@ -209,6 +211,35 @@ export function getSpeechBubble(
       text: formatCooldown(remainingMs),
       icon: '💤',
     };
+  }
+  if (status === 'coding' || status === 'walking' || status === 'handover') {
+    const rawTicket = options?.ticketId?.trim();
+    if (rawTicket) {
+      const ticket = rawTicket.startsWith('#') ? rawTicket : `#${rawTicket}`;
+      const cleanTitle = options?.title?.trim();
+      if (cleanTitle) {
+        const MAX_TITLE_LEN = 32;
+        const shortTitle =
+          cleanTitle.length > MAX_TITLE_LEN
+            ? `${cleanTitle.slice(0, MAX_TITLE_LEN - 1)}…`
+            : cleanTitle;
+        return {
+          type: 'coding',
+          text: `${ticket} ${shortTitle}`,
+          tooltip: `${ticket} ${cleanTitle}`,
+        };
+      }
+      return {
+        type: 'coding',
+        text: ticket,
+      };
+    }
+    if (status === 'coding') {
+      return {
+        type: 'coding',
+        text: 'Coding…',
+      };
+    }
   }
   return null;
 }

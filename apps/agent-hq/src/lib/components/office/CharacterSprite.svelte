@@ -84,6 +84,7 @@
 
   const activePR = $derived(liveStore.state?.activePR);
   const ticketId = $derived(activeRun?.ticketId);
+  const title = $derived(activeRun?.data?.title);
   const prNumber = $derived(activeRun?.data?.prNumber ?? activePR?.prNumber);
 
   const cooldownUntil = $derived(
@@ -185,6 +186,7 @@
   const bubble = $derived(
     getSpeechBubble(characterStatus, {
       ticketId,
+      title,
       prNumber,
       statusText,
       cooldownUntil,
@@ -274,6 +276,7 @@
       class="speech-bubble bubble-{bubble.type}"
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
+      title={bubble.tooltip}
     >
       {#if bubble.icon}
         <span class="bubble-icon" class:gear-icon={bubble.type === 'testing'}
@@ -343,7 +346,8 @@
     white-space: nowrap;
     border-radius: 3px;
     box-shadow: 2px 2px 0px rgba(0, 0, 0, 0.8);
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: default;
     z-index: 35;
     animation: bubble-bob 2s ease-in-out infinite;
     background-color: var(--bubble-bg);
@@ -383,6 +387,11 @@
     --bubble-bg: #082f49;
     --bubble-border: #38bdf8;
     --bubble-text: #e0f2fe;
+  }
+  .bubble-coding {
+    --bubble-bg: #022c22;
+    --bubble-border: #10b981;
+    --bubble-text: #ecfdf5;
   }
 
   .gear-icon {
