@@ -365,4 +365,45 @@ FINAL_EXIT=0 run_case claude 1 0 0
 AGENT_MODEL="gpt-6-luna" run_case codex 1 0 23
 AGENT_MODEL="gemini-3.8-flash-high" run_case agy 1 0 23
 AGENT_MODEL="claude-3-7-sonnet" run_case claude 1 0 23
+
+# Resume from Attempt 0 via HQ_SESSION_ID (and ignore generic SESSION env)
+for agent in codex agy claude; do
+  rm -rf "$AGENT_HQ_LOG_DIR"
+  mkdir -p "$AGENT_HQ_LOG_DIR"
+  : > "$CALLS"
+  : > "$EVENTS"
+  if [ "$agent" = agy ]; then
+    hq_sid="conv-attempt0-456"
+  else
+    hq_sid="$uuid"
+  fi
+  INTERRUPTS=0 FINAL_EXIT=0 HQ_SESSION_ID="$hq_sid" SESSION="ignored-generic-session" \
+    bash "$ROOT/scripts/delegate.sh" "$agent" 'answer on attempt 0' > "$TEST_DIR/stdout" 2>&1 || fail "$agent HQ_SESSION_ID exit"
+  if [ "$agent" = codex ]; then
+    jq -se --arg sid "$hq_sid" '.[0][0:3] == ["exec","resume",$sid] and .[0][-1] == "answer on attempt 0"' "$CALLS" >/dev/null || fail 'codex attempt 0 resume via HQ_SESSION_ID'
+  elif [ "$agent" = agy ]; then
+    jq -se --arg sid "$hq_sid" '.[0] | index("--conversation") != null and .[index("--conversation")+1] == $sid' "$CALLS" >/dev/null || fail 'agy attempt 0 resume via HQ_SESSION_ID'
+  else
+    jq -se --arg sid "$hq_sid" '.[0] | index("--resume") != null and .[index("--resume")+1] == $sid and index("--session-id") == null' "$CALLS" >/dev/null || fail 'claude attempt 0 resume via HQ_SESSION_ID'
+    grep -q "^session id: $hq_sid$" "$TEST_DIR/stdout" || fail 'claude session id stdout on resume'
+    grep -q "^session id: $hq_sid$" "$AGENT_HQ_LOG_DIR"/*.log || fail 'claude session id log on resume'
+  fi
+
+  # Verify generic SESSION without HQ_SESSION_ID is NOT used on Attempt 0
+  rm -rf "$AGENT_HQ_LOG_DIR"
+  mkdir -p "$AGENT_HQ_LOG_DIR"
+  : > "$CALLS"
+  INTERRUPTS=0 FINAL_EXIT=0 SESSION="$hq_sid" \
+    bash "$ROOT/scripts/delegate.sh" "$agent" 'fresh run #40' > "$TEST_DIR/stdout" 2>&1 || fail "$agent generic SESSION ignored exit"
+  if [ "$agent" = codex ]; then
+    jq -se '.[0][0] == "exec" and .[0][1] != "resume"' "$CALLS" >/dev/null || fail 'codex ignored generic SESSION'
+  elif [ "$agent" = agy ]; then
+    jq -se '.[0] | index("--conversation") == null' "$CALLS" >/dev/null || fail 'agy ignored generic SESSION'
+  else
+    jq -se --arg sid "$hq_sid" '.[0] | index("--resume") == null and index("--session-id") != null and .[index("--session-id")+1] != $sid' "$CALLS" >/dev/null || fail 'claude ignored generic SESSION'
+    grep -qE '^session id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "$TEST_DIR/stdout" || fail 'claude fresh session id stdout'
+    grep -qE '^session id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "$AGENT_HQ_LOG_DIR"/*.log || fail 'claude fresh session id log'
+  fi
+done
+echo 'PASS: attempt 0 resume via HQ_SESSION_ID, generic SESSION ignored, and claude session id output'
 # Plain cancellation is also covered by delegate.test.sh.

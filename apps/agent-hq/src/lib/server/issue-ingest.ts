@@ -10,11 +10,43 @@ import {
   type Team,
 } from '@agent-hq/queue';
 
+export type IssueStatus = 'queued' | 'in-progress' | 'blocked' | 'done';
+
 const execFile = promisify(nodeExecFile);
 const teams: Team[] = ['frontend', 'backend', 'qa'];
-const statuses = ['queued', 'in-progress', 'blocked', 'done'];
+const statuses: readonly IssueStatus[] = [
+  'queued',
+  'in-progress',
+  'blocked',
+  'done',
+];
 const log = (message: string, error?: unknown) =>
   console.warn(`[issue-ingest] ${message}`, error ?? '');
+
+let activeGhRunner: ((args: string[]) => Promise<string>) | undefined;
+const labelEdits = new Map<number, Promise<void>>();
+
+export function setGhRunner(
+  runner?: (args: string[]) => Promise<string>,
+): void {
+  activeGhRunner = runner;
+}
+
+export function serializeIssueLabel(
+  issueId: number,
+  action: () => Promise<void>,
+): Promise<void> {
+  const next = (labelEdits.get(issueId) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(action);
+  labelEdits.set(issueId, next);
+  void next
+    .finally(() => {
+      if (labelEdits.get(issueId) === next) labelEdits.delete(issueId);
+    })
+    .catch(() => undefined);
+  return next;
+}
 
 export interface IngestIssue {
   number: number;
@@ -55,39 +87,58 @@ async function gh(args: string[]): Promise<string> {
 async function updateStatus(
   run: (args: string[]) => Promise<string>,
   issueId: number,
-  status: string,
-) {
-  await run([
+  status: IssueStatus,
+  knownLabels?: readonly string[],
+): Promise<void> {
+  let currentLabels = knownLabels;
+  if (!currentLabels) {
+    const output = await run([
+      'issue',
+      'view',
+      String(issueId),
+      '--json',
+      'labels',
+    ]);
+    try {
+      const parsed = JSON.parse(output) as { labels?: { name: string }[] };
+      currentLabels = Array.isArray(parsed?.labels)
+        ? parsed.labels.map(({ name }) => name)
+        : [];
+    } catch {
+      currentLabels = [];
+    }
+  }
+  const toRemove = statuses
+    .filter((value) => value !== status)
+    .map((value) => `status:${value}`)
+    .filter((label) => currentLabels.includes(label));
+  const args = [
     'issue',
     'edit',
     String(issueId),
     '--add-label',
     `status:${status}`,
-    '--remove-label',
-    statuses
-      .filter((value) => value !== status)
-      .map((value) => `status:${value}`)
-      .join(','),
-  ]);
+  ];
+  if (toRemove.length > 0) {
+    args.push('--remove-label', toRemove.join(','));
+  }
+  await run(args);
+}
+
+export function updateIssueStatus(
+  issueId: number,
+  status: IssueStatus,
+  run?: (args: string[]) => Promise<string>,
+): Promise<void> {
+  return serializeIssueLabel(issueId, () =>
+    updateStatus(run ?? activeGhRunner ?? gh, issueId, status),
+  );
 }
 
 export function startIssueIngest(options: IngestOptions): () => void {
-  const run = options.runGh ?? gh;
+  const run = options.runGh ?? activeGhRunner ?? gh;
   let polling = false;
   let stopped = false;
-  const labelEdits = new Map<number, Promise<void>>();
-  const serialize = (issueId: number, action: () => Promise<void>) => {
-    const next = (labelEdits.get(issueId) ?? Promise.resolve())
-      .catch(() => undefined)
-      .then(action);
-    labelEdits.set(issueId, next);
-    void next
-      .finally(() => {
-        if (labelEdits.get(issueId) === next) labelEdits.delete(issueId);
-      })
-      .catch(() => undefined);
-    return next;
-  };
   const events: Pick<QueueEvents, 'on' | 'close'>[] = [];
   const stop = () => {
     if (stopped) return;
@@ -114,7 +165,7 @@ export function startIssueIngest(options: IngestOptions): () => void {
         event.on(name, ({ jobId }: { jobId: string }) => {
           const issueId = issueIdFromJobId(jobId);
           if (issueId === undefined || stopped) return;
-          void serialize(issueId, async () => {
+          void serializeIssueLabel(issueId, async () => {
             if (stopped) return;
             if (name === 'failed') {
               const job = await options.queueManager
@@ -168,9 +219,10 @@ export function startIssueIngest(options: IngestOptions): () => void {
           if (signal.aborted || stopped) return;
           if (issue.labels.some(({ name }) => name.startsWith('status:')))
             continue;
-          await serialize(issue.number, async () => {
+          await serializeIssueLabel(issue.number, async () => {
             if (signal.aborted || stopped) return;
             const queue = options.queueManager.getQueue(team);
+            const issueLabels = issue.labels.map(({ name }) => name);
             // Add before labeling so failed adds remain eligible; the stable ID makes retries idempotent while the job exists.
             await Promise.race([
               queue.add(
@@ -180,14 +232,14 @@ export function startIssueIngest(options: IngestOptions): () => void {
                   title: issue.title,
                   team,
                   body: issue.body ?? '',
-                  labels: issue.labels.map(({ name }) => name),
+                  labels: issueLabels,
                 },
                 { jobId: jobIdForIssue(issue.number) },
               ),
               expired,
             ]);
             if (signal.aborted || stopped) return;
-            await updateStatus(run, issue.number, 'queued');
+            await updateStatus(run, issue.number, 'queued', issueLabels);
           });
         }
       } catch (error) {

@@ -122,7 +122,7 @@ claude_command() {
       })
     } + (if $exclude then {permissions: {allow: [("Bash(" + $ask + " *)")]}} else {} end)')"
   CMD=(claude -p "$prompt")
-  if [ "$ATTEMPT" -eq 0 ]; then
+  if [ "$ATTEMPT" -eq 0 ] && [ -z "$SESSION" ]; then
     [ -z "$CLAUDE_SESSION_ID" ] || CMD+=(--session-id "$CLAUDE_SESSION_ID")
   elif [ -n "$CLAUDE_SESSION_ID" ]; then
     CMD+=(--resume "$CLAUDE_SESSION_ID")
@@ -241,10 +241,14 @@ case "$AGENT" in
   *) echo "Unknown agent: $AGENT (must be agy, codex, or claude)" >&2; exit 1 ;;
 esac
 
-SESSION=
+SESSION="${HQ_SESSION_ID:-}"
 CLAUDE_SESSION_ID=
 if [ "$AGENT" = claude ]; then
-  CLAUDE_SESSION_ID="$(new_session_id 2>/dev/null || true)"
+  if [ -n "$SESSION" ]; then
+    CLAUDE_SESSION_ID="$SESSION"
+  else
+    CLAUDE_SESSION_ID="$(new_session_id 2>/dev/null || true)"
+  fi
 fi
 NEXT_PROMPT="$PROMPT"
 CORRECTIONS=
@@ -264,6 +268,9 @@ while :; do
   else
     echo ">>> Dispatching to $AGENT ..."
     : > "$LOG"
+  fi
+  if [ "$AGENT" = claude ] && [ -n "$CLAUDE_SESSION_ID" ]; then
+    printf 'session id: %s\n' "$CLAUDE_SESSION_ID" | tee -a "$LOG"
   fi
   hq_event TASK_HANDOVER
   if [ "$ATTEMPT" -gt 0 ]; then

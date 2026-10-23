@@ -1,6 +1,8 @@
 export const TEAMS = ['frontend', 'backend', 'qa'] as const;
 export type Team = (typeof TEAMS)[number];
 
+export type Provider = 'claude' | 'agy' | 'codex';
+
 export type QuestionStatus = 'PENDING' | 'ANSWERED';
 
 export interface QuestionPayload {
@@ -21,6 +23,7 @@ export interface TaskPayload {
   labels: string[];
   question?: QuestionPayload;
   sessionId?: string;
+  provider?: Provider;
   lastError?: string;
 }
 

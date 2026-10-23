@@ -1,3 +1,5 @@
+import type { QuestionPayload, Team } from '@agent-hq/queue';
+
 export type Agent = 'claude' | 'agy' | 'codex';
 export type Room = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
 
@@ -18,6 +20,8 @@ const eventRooms = {
   PR_CLOSED: 'lounge',
   RATE_LIMITED: 'lounge',
   SUBSCRIPTION_FAILOVER: 'lounge',
+  QUESTION_PENDING: 'dev',
+  QUESTION_RESOLVED: 'dev',
 } as const satisfies Record<string, Room>;
 export type EventType = keyof typeof eventRooms;
 export interface EventData {
@@ -35,11 +39,16 @@ export interface EventData {
   team?: 'frontend' | 'backend' | 'qa';
   from?: Agent;
   to?: Agent | null;
+  questionId?: string;
+  issueId?: number;
+  question?: string;
+  options?: string[];
+  answer?: string;
 }
 export type HQEvent = {
   [T in EventType]: {
     event: T;
-    agent: Agent;
+    agent?: Agent;
     timestamp: string;
     room: Room;
     runId?: string;
@@ -75,11 +84,16 @@ export function parseEvent(
   if (typeof raw.event !== 'string' || !Object.hasOwn(eventRooms, raw.event))
     throw new Error('event must be a supported event type');
   const data = raw.data === undefined ? {} : object(raw.data, 'data');
+  const isQuestionEvent =
+    raw.event === 'QUESTION_PENDING' || raw.event === 'QUESTION_RESOLVED';
   const rawAgent =
     raw.agent === undefined && raw.event === 'SUBSCRIPTION_FAILOVER'
       ? data.from
       : raw.agent;
-  if (!['claude', 'agy', 'codex'].includes(rawAgent as string))
+  if (
+    !(isQuestionEvent && rawAgent === undefined) &&
+    !['claude', 'agy', 'codex'].includes(rawAgent as string)
+  )
     throw new Error('agent must be claude, agy or codex');
   if (
     raw.room !== undefined &&
@@ -89,13 +103,13 @@ export function parseEvent(
   const timestamp = raw.timestamp === undefined ? now() : raw.timestamp;
   if (!validDate(timestamp))
     throw new Error('timestamp must be an ISO timestamp');
-  const result: HQEvent = {
+  const result = {
     event: raw.event as EventType,
-    agent: rawAgent as Agent,
+    ...(rawAgent !== undefined ? { agent: rawAgent as Agent } : {}),
     timestamp,
     room: (raw.room as Room | undefined) ?? eventRooms[raw.event as EventType],
-    data: {},
-  };
+    data: {} as EventData,
+  } as HQEvent;
   for (const field of ['runId', 'ticketId', 'cwd'] as const) {
     const value = raw[field];
     if (value !== undefined) {
@@ -175,6 +189,27 @@ export function parseEvent(
       result.data[field] = value as number;
     }
   }
+  for (const field of ['questionId', 'question', 'answer'] as const) {
+    const value = data[field];
+    if (value !== undefined) {
+      if (typeof value !== 'string' || !value.trim())
+        throw new Error(`data.${field} must be a non-empty string`);
+      result.data[field] = value;
+    }
+  }
+  if (data.issueId !== undefined) {
+    if (!Number.isSafeInteger(data.issueId) || (data.issueId as number) <= 0)
+      throw new Error('data.issueId must be a positive integer');
+    result.data.issueId = data.issueId as number;
+  }
+  if (data.options !== undefined) {
+    if (
+      !Array.isArray(data.options) ||
+      data.options.some((o) => typeof o !== 'string')
+    )
+      throw new Error('data.options must be an array of strings');
+    result.data.options = [...data.options];
+  }
   return result;
 }
 
@@ -215,7 +250,6 @@ export interface Run {
   data: EventData;
 }
 export type { Team } from '@agent-hq/queue';
-import type { Team } from '@agent-hq/queue';
 export type TeamStatus = 'idle' | 'working' | 'waiting_input';
 export interface TeamState {
   status: TeamStatus;
@@ -229,6 +263,7 @@ export interface State {
         ci?: 'pass' | 'fail';
       })
     | null;
+  questions?: Record<string, QuestionPayload>;
   teams?: Record<Team, TeamState>;
 }
 export const initialState: State = {
@@ -239,6 +274,7 @@ export const initialState: State = {
   },
   runs: {},
   activePR: null,
+  questions: {},
 };
 
 // Animation, test-parser and timer callbacks supply actions instead of reducer side effects.
@@ -312,6 +348,64 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
       },
     };
   }
+  if (event.event === 'QUESTION_PENDING') {
+    const q: QuestionPayload = {
+      id: event.data.questionId ?? `${event.data.issueId ?? 0}-1`,
+      issueId: event.data.issueId ?? 0,
+      team: event.data.team ?? 'frontend',
+      question: event.data.question ?? '',
+      ...(event.data.options ? { options: event.data.options } : {}),
+      status: 'PENDING',
+    };
+    return {
+      ...state,
+      questions: {
+        ...(state.questions ?? {}),
+        [q.id]: q,
+      },
+      ...(state.teams
+        ? {
+            teams: {
+              ...state.teams,
+              [q.team]: { status: 'waiting_input' },
+            },
+          }
+        : {}),
+    };
+  }
+  if (event.event === 'QUESTION_RESOLVED') {
+    const id = event.data.questionId;
+    if (id && state.questions && Object.hasOwn(state.questions, id)) {
+      const { [id]: removed, ...remaining } = state.questions;
+      const team = event.data.team ?? removed.team;
+      let teams = state.teams;
+      if (teams && team) {
+        const otherPending = Object.values(remaining).some(
+          (q) => q.team === team && q.status === 'PENDING',
+        );
+        if (!otherPending && teams[team]?.status === 'waiting_input') {
+          const hasActiveRun = Object.values(state.runs).some(
+            (r) =>
+              r.data.team === team &&
+              (r.status === 'running' ||
+                r.status === 'handover' ||
+                r.status === 'cooldown'),
+          );
+          teams = {
+            ...teams,
+            [team]: { status: hasActiveRun ? 'working' : 'idle' },
+          };
+        }
+      }
+      return {
+        ...state,
+        questions: remaining,
+        ...(teams ? { teams } : {}),
+      };
+    }
+    return state;
+  }
+  if (!event.agent) return state;
   const previousRun =
     event.runId && Object.hasOwn(state.runs, event.runId)
       ? state.runs[event.runId]
@@ -423,7 +517,15 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
   let teams = state.teams;
   const team = event.data.team ?? previousRun?.data.team;
   if (team && teams) {
-    if (event.event === 'TASK_START' || event.event === 'TASK_HANDOVER') {
+    const hasPendingQuestion = Object.values(state.questions ?? {}).some(
+      (q) => q.team === team && q.status === 'PENDING',
+    );
+    if (hasPendingQuestion) {
+      teams = { ...teams, [team]: { status: 'waiting_input' } };
+    } else if (
+      event.event === 'TASK_START' ||
+      event.event === 'TASK_HANDOVER'
+    ) {
       teams = { ...teams, [team]: { status: 'working' } };
     } else if (
       event.event === 'TASK_COMPLETE' ||
@@ -444,5 +546,11 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
       }
     }
   }
-  return { agents, runs, activePR, ...(teams ? { teams } : {}) };
+  return {
+    agents,
+    runs,
+    activePR,
+    questions: state.questions,
+    ...(teams ? { teams } : {}),
+  };
 }

@@ -35,6 +35,8 @@ describe('parseEvent', () => {
     ['PR_CLOSED', 'lounge'],
     ['RATE_LIMITED', 'lounge'],
     ['SUBSCRIPTION_FAILOVER', 'lounge'],
+    ['QUESTION_PENDING', 'dev'],
+    ['QUESTION_RESOLVED', 'dev'],
   ] as const)('accepts %s and derives %s', (type, room) => {
     expect(event(type)).toMatchObject({ event: type, room, timestamp });
   });
@@ -340,6 +342,45 @@ describe('reduce', () => {
     expect(progressed.runs['run-1'].data.statusText).toBe('Building');
   });
 
+  it('manages question lifecycle in state for QUESTION_PENDING and QUESTION_RESOLVED without agent', () => {
+    const pendingEvent = parseEvent({
+      event: 'QUESTION_PENDING',
+      data: {
+        questionId: '101-1',
+        issueId: 101,
+        team: 'frontend',
+        question: 'Use Svelte 5 snippets?',
+        options: ['Yes', 'No'],
+      },
+    });
+    expect(pendingEvent.agent).toBeUndefined();
+    expect(pendingEvent.room).toBe('dev');
+
+    const stateWithQuestion = reduce(initialState, pendingEvent);
+    expect(stateWithQuestion.questions?.['101-1']).toEqual({
+      id: '101-1',
+      issueId: 101,
+      team: 'frontend',
+      question: 'Use Svelte 5 snippets?',
+      options: ['Yes', 'No'],
+      status: 'PENDING',
+    });
+
+    const resolvedEvent = parseEvent({
+      event: 'QUESTION_RESOLVED',
+      data: {
+        questionId: '101-1',
+        issueId: 101,
+        team: 'frontend',
+        answer: 'Yes',
+      },
+    });
+    expect(resolvedEvent.agent).toBeUndefined();
+    const stateResolved = reduce(stateWithQuestion, resolvedEvent);
+    expect(stateResolved.questions?.['101-1']).toBeUndefined();
+    expect(Object.keys(stateResolved.questions ?? {})).toHaveLength(0);
+  });
+
   describe('team states (#102)', () => {
     it('leaves teams undefined in initialState until V2 worker pool starts', () => {
       expect(initialState.teams).toBeUndefined();
@@ -405,6 +446,50 @@ describe('reduce', () => {
         backend: { status: 'waiting_input' },
         qa: { status: 'idle' },
       });
+    });
+
+    it('sets team status to waiting_input on QUESTION_PENDING, keeps it on TASK_COMPLETE while question is open, and restores status on QUESTION_RESOLVED', () => {
+      const stateWithTeams = reduce(initialState, {
+        type: 'SET_TEAM_STATUSES',
+        teams: { frontend: 'idle', backend: 'idle', qa: 'idle' },
+      });
+      const running = apply(stateWithTeams, 'TASK_START', {
+        data: { team: 'frontend' },
+      });
+      expect(running.teams?.frontend.status).toBe('working');
+
+      const waiting = reduce(
+        running,
+        parseEvent({
+          event: 'QUESTION_PENDING',
+          data: {
+            questionId: '101-1',
+            issueId: 101,
+            team: 'frontend',
+            question: 'Wait?',
+          },
+        }),
+      );
+      expect(waiting.teams?.frontend.status).toBe('waiting_input');
+
+      const afterExit = apply(waiting, 'TASK_COMPLETE', {
+        data: { team: 'frontend' },
+      });
+      expect(afterExit.teams?.frontend.status).toBe('waiting_input');
+
+      const resolved = reduce(
+        afterExit,
+        parseEvent({
+          event: 'QUESTION_RESOLVED',
+          data: {
+            questionId: '101-1',
+            issueId: 101,
+            team: 'frontend',
+            answer: 'Continue',
+          },
+        }),
+      );
+      expect(resolved.teams?.frontend.status).toBe('idle');
     });
   });
 });

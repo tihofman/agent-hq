@@ -150,7 +150,7 @@ export function getStatusBadgeClass(status: string): string {
   }
 }
 
-export function getAgentBadgeClass(agent: string): string {
+export function getAgentBadgeClass(agent?: string): string {
   switch (agent?.toLowerCase()) {
     case 'claude':
       return 'bg-blue-950/80 text-blue-300 border-blue-700/60';
