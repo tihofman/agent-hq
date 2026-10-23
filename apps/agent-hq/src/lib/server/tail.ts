@@ -111,7 +111,8 @@ export function startTail(options: {
         const now = new Date();
         const limit = detectRateLimit(plain, now);
         const until = run.rateLimited?.cooldownUntil;
-        if (!limit && (!until || now >= new Date(until)))
+        // Mirrors state.ts: an elapsed cooldown always re-arms; an open-ended one only after regular output.
+        if (until ? now >= new Date(until) : !limit)
           run.rateLimited = undefined;
         if (
           limit &&

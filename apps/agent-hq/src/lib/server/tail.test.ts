@@ -211,6 +211,10 @@ describe('startTail', () => {
       );
       vi.setSystemTime(new Date('2026-10-22T12:01:00Z'));
       await append('two', `working\n${quota}\n`);
+      vi.setSystemTime(new Date('2026-10-22T12:02:00Z'));
+      await append('three', `${quota} Retry-After: 60\n`);
+      vi.setSystemTime(new Date('2026-10-22T12:03:00Z'));
+      await append('three', `${quota}\n`);
       const limits = events.filter(
         (e) => 'event' in e && e.event === 'RATE_LIMITED',
       );
@@ -219,6 +223,8 @@ describe('startTail', () => {
         'one',
         'two',
         'two',
+        'three',
+        'three',
       ]);
     } finally {
       vi.useRealTimers();
