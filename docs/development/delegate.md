@@ -1,6 +1,6 @@
 # delegate.sh installieren
 
-Voraussetzungen: Bash, curl und jq; außerdem `agy` bzw. `codex` im PATH.
+Voraussetzungen: Bash, curl und jq; außerdem `agy`, `codex` bzw. `claude` im PATH.
 Die Bash-Tests benötigen zusätzlich Node.js (bereits im Projekt verwendet).
 
 Vom Repository-Verzeichnis aus das Skript in den Claude-Skill kopieren:
@@ -16,7 +16,7 @@ Alternativ als Symlink einbinden (vorhandenes Skript vorher sichern/entfernen):
 ln -s "$PWD/scripts/delegate.sh" ~/.claude/skills/subagent-orchestrator/delegate.sh
 ```
 
-Aufruf: `scripts/delegate.sh agy "Implementiere #7"` (oder `codex`).
+Aufruf: `scripts/delegate.sh agy "Implementiere #7"` (oder `codex` bzw. `claude`).
 `AGENT_HQ_URL` überschreibt `http://127.0.0.1:3333`; `TICKET_ID` überschreibt
 die Ticket-Erkennung aus dem Prompt. Logs liegen unter `${TMPDIR:-/tmp}/agent-hq/<runId>.log`.
 
@@ -47,14 +47,22 @@ den Tailer lesbar, ohne zusätzliche Abhängigkeit. Fortsetzung erfolgt gezielt 
 Nur die erste Init-ID wird berücksichtigt; sie muss `^[A-Za-z0-9][A-Za-z0-9_-]*$` erfüllen.
 Fehlt eine gültige Session-ID, startet der Worker mit Originalprompt und bisherigen Anweisungen neu.
 
+claude läuft nicht-interaktiv mit `claude -p "$prompt" --dangerously-skip-permissions`.
+Ist `AGENT_MODEL` gesetzt, wird es als `--model` durchgereicht. Die Ausgabe wird unverändert
+in stdout und das Run-Log geschrieben (wie bei codex). Liefert der Worker eine Session-ID
+(z. B. `session id: <uuid>` im Log), setzt `delegate.sh` die Session per
+`claude -p "$anweisung" --dangerously-skip-permissions --resume <session-id>` fort.
+Fehlt die Session-ID (wie beim Standard-Textoutput von `claude -p`), greift der
+ADR-0005-Fallback: `delegate.sh` startet claude mit Originalprompt und bisherigen Anweisungen neu.
+
 Prüfen mit `bash scripts/test/delegate.test.sh` und
 `bash scripts/test/delegate-resume.test.sh` (Fake-CLIs, keine echten Worker).
 
-Die lokalen Hilfen von `codex exec`, `codex exec resume` und `agy` wurden geprüft.
+Die lokalen Hilfen von `codex exec`, `codex exec resume`, `agy` und `claude` wurden geprüft.
 Codex akzeptiert `--` als Optionsende (zusätzlich mit Parser-Proben geprüft);
-das Skript setzt es vor den Prompt bei Erstlauf und Resume. Für agy lässt sich
-diese Unterstützung nicht verlässlich bestätigen. Prompts und Anweisungen für agy
-dürfen deshalb nicht mit `-` beginnen; das Skript neutralisiert eine dennoch
+das Skript setzt es vor den Prompt bei Erstlauf und Resume. Für agy und claude lässt sich
+diese Unterstützung nicht verlässlich über alle Versionen bestätigen. Prompts und Anweisungen
+für agy und claude dürfen deshalb nicht mit `-` beginnen; das Skript neutralisiert eine dennoch
 führende `-` durch ein vorangestelltes Leerzeichen.
 
 Endet der Worker von selbst kurz vor dem Kill, kann eine verspätet geschriebene

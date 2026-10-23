@@ -5,7 +5,7 @@ AGENT="${1:-}"
 [ "$#" -eq 0 ] || shift
 PROMPT="$*"
 if [ -z "$AGENT" ] || [ -z "$PROMPT" ]; then
-  echo "Usage: $0 <agy|codex> \"<prompt>\""
+  echo "Usage: $0 <agy|codex|claude> \"<prompt>\""
   exit 1
 fi
 
@@ -58,8 +58,16 @@ agy_command() {
   [ -z "$SESSION" ] || CMD+=(--conversation "$SESSION")
 }
 
+claude_command() {
+  local prompt="$NEXT_PROMPT"
+  [[ "$prompt" != -* ]] || prompt=" $prompt"
+  CMD=(claude -p "$prompt" --dangerously-skip-permissions)
+  [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
+  [ -z "$SESSION" ] || CMD+=(--resume "$SESSION")
+}
+
 worker_output() {
-  if [ "$AGENT" = codex ]; then
+  if [ "$AGENT" = codex ] || [ "$AGENT" = claude ]; then
     cat
   else
     # Keep diagnostics/unknown events verbatim; render assistant text for the tailer.
@@ -79,7 +87,7 @@ worker_output() {
 }
 
 session_from_log() {
-  if [ "$AGENT" = codex ]; then
+  if [ "$AGENT" = codex ] || [ "$AGENT" = claude ]; then
     grep -m1 -oE '^session id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "$LOG" | cut -d ' ' -f3
   else
     # Select the first init marker before validation; never accept a later replacement.
@@ -146,8 +154,8 @@ ticket_title() {
 TICKET_TITLE="$(ticket_title "$TICKET_ID")"
 
 case "$AGENT" in
-  agy|antigravity|codex) ;;
-  *) echo "Unknown agent: $AGENT (must be agy or codex)" >&2; exit 1 ;;
+  agy|antigravity|codex|claude) ;;
+  *) echo "Unknown agent: $AGENT (must be agy, codex, or claude)" >&2; exit 1 ;;
 esac
 
 SESSION=
@@ -158,7 +166,11 @@ while :; do
   RUN_ID="$(date +%s)-$$-$ATTEMPT"
   LOG="$LOG_DIR/$RUN_ID.log"
   MSG="${LOG%.log}.msg"
-  if [ "$AGENT" = codex ]; then codex_command; else agy_command; fi
+  case "$AGENT" in
+    codex) codex_command ;;
+    claude) claude_command ;;
+    *) agy_command ;;
+  esac
   if [ -n "${AGENT_MODEL:-}" ]; then
     : > "$LOG"
     printf '>>> Dispatching to %s [model: %s] ...\n' "$AGENT" "$AGENT_MODEL" | tee -a "$LOG"
