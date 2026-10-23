@@ -17,6 +17,7 @@ const eventRooms = {
   MERGED: 'ceo',
   PR_CLOSED: 'lounge',
   RATE_LIMITED: 'lounge',
+  SUBSCRIPTION_FAILOVER: 'lounge',
 } as const satisfies Record<string, Room>;
 export type EventType = keyof typeof eventRooms;
 export interface EventData {
@@ -31,6 +32,9 @@ export interface EventData {
   logChunk?: string;
   repo?: string;
   branch?: string;
+  team?: 'frontend' | 'backend' | 'qa';
+  from?: Agent;
+  to?: Agent | null;
 }
 export type HQEvent = {
   [T in EventType]: {
@@ -70,7 +74,12 @@ export function parseEvent(
   const raw = object(input, 'event input');
   if (typeof raw.event !== 'string' || !Object.hasOwn(eventRooms, raw.event))
     throw new Error('event must be a supported event type');
-  if (!['claude', 'agy', 'codex'].includes(raw.agent as string))
+  const data = raw.data === undefined ? {} : object(raw.data, 'data');
+  const rawAgent =
+    raw.agent === undefined && raw.event === 'SUBSCRIPTION_FAILOVER'
+      ? data.from
+      : raw.agent;
+  if (!['claude', 'agy', 'codex'].includes(rawAgent as string))
     throw new Error('agent must be claude, agy or codex');
   if (
     raw.room !== undefined &&
@@ -82,7 +91,7 @@ export function parseEvent(
     throw new Error('timestamp must be an ISO timestamp');
   const result: HQEvent = {
     event: raw.event as EventType,
-    agent: raw.agent as Agent,
+    agent: rawAgent as Agent,
     timestamp,
     room: (raw.room as Room | undefined) ?? eventRooms[raw.event as EventType],
     data: {},
@@ -105,7 +114,6 @@ export function parseEvent(
       throw new Error('pid must be a positive integer or null');
     result.pid = raw.pid as number | null;
   }
-  const data = raw.data === undefined ? {} : object(raw.data, 'data');
   for (const field of [
     'title',
     'statusText',
@@ -126,6 +134,24 @@ export function parseEvent(
         );
       result.data[field] = value;
     }
+  }
+  if (data.team !== undefined) {
+    if (!['frontend', 'backend', 'qa'].includes(data.team as string))
+      throw new Error('data.team must be frontend, backend or qa');
+    result.data.team = data.team as 'frontend' | 'backend' | 'qa';
+  }
+  if (data.from !== undefined) {
+    if (!['claude', 'agy', 'codex'].includes(data.from as string))
+      throw new Error('data.from must be claude, agy or codex');
+    result.data.from = data.from as Agent;
+  }
+  if (data.to !== undefined) {
+    if (
+      data.to !== null &&
+      !['claude', 'agy', 'codex'].includes(data.to as string)
+    )
+      throw new Error('data.to must be claude, agy, codex or null');
+    result.data.to = data.to as Agent | null;
   }
   for (const field of [
     'exitCode',
@@ -279,6 +305,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     MERGED: 'idle',
     PR_CLOSED: 'idle',
     RATE_LIMITED: 'cooldown',
+    SUBSCRIPTION_FAILOVER: 'cooldown',
   };
   const runStatuses: Partial<Record<EventType, RunStatus>> = {
     TASK_HANDOVER: 'handover',

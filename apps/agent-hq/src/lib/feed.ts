@@ -245,6 +245,15 @@ export function getFeedMessageText(item: HQEvent | InternalAction): string {
         ? `Rate-Limit: Cooldown bis ${item.data.cooldownUntil}`
         : 'Rate-Limit erreicht';
     }
+    if (item.event === 'SUBSCRIPTION_FAILOVER') {
+      const target = item.data?.to ?? 'Cooldown';
+      return (
+        item.data?.statusText ||
+        (item.data?.team && item.data?.from
+          ? `Failover (${item.data.team}): ${item.data.from} → ${target}`
+          : 'Subscription-Failover')
+      );
+    }
     return (
       (item as HQEvent).data?.statusText ||
       (item as HQEvent).data?.title ||

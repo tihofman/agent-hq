@@ -53,6 +53,13 @@ export class QueueManager {
       queue = new Queue<TaskPayload>(queueName, {
         connection: this.connection,
         ...this.queueOptions,
+        defaultJobOptions: {
+          attempts: 4,
+          ...this.queueOptions.defaultJobOptions,
+        },
+      });
+      queue.on('error', () => {
+        // Prevent unhandled EventEmitter error crashes when Redis is unavailable
       });
       this.queues.set(team, queue);
     }
@@ -77,6 +84,9 @@ export class QueueManager {
       connection: this.connection,
       ...this.workerOptions,
       ...options,
+    });
+    worker.on('error', () => {
+      // Prevent unhandled EventEmitter error crashes when Redis is unavailable
     });
     this.workers.add(worker);
     worker.on('closed', () => {
