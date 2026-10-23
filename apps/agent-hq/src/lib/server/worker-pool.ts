@@ -11,12 +11,17 @@ import {
   type Worker,
   type WorkerOptions,
 } from 'bullmq';
-import { QueueManager, type TaskPayload, type Team } from '@agent-hq/queue';
+import {
+  QueueManager,
+  TEAMS,
+  type TaskPayload,
+  type Team,
+} from '@agent-hq/queue';
 import { recordEvent } from './history';
 import { parseEvent, type Agent } from './state';
 import { SubscriptionPool } from './subscription-pool';
 
-export const TEAMS: readonly Team[] = ['frontend', 'backend', 'qa'] as const;
+export { TEAMS, type Team };
 export const DEFAULT_CONCURRENCY: Record<Team, number> = {
   frontend: 2,
   backend: 1,
@@ -109,6 +114,21 @@ export async function deriveTeamStatus(
     : 'idle';
 }
 
+export async function deriveAllTeamStatuses(
+  queueManager: Pick<QueueManagerLike, 'getQueue'>,
+): Promise<Record<Team, TeamStatus>> {
+  const statuses: Record<Team, TeamStatus> = {
+    frontend: 'idle',
+    backend: 'idle',
+    qa: 'idle',
+  };
+  for (const team of TEAMS) {
+    const queue = queueManager.getQueue(team);
+    statuses[team] = queue ? await deriveTeamStatus(queue) : 'idle';
+  }
+  return statuses;
+}
+
 function resolveDefaultDelegateScript(): string {
   if (process.env.AGENT_HQ_DELEGATE_SCRIPT) {
     return process.env.AGENT_HQ_DELEGATE_SCRIPT;
@@ -126,12 +146,12 @@ export class WorkerPool {
 
   private readonly opts: WorkerPoolOptions;
   private readonly onError: (err: unknown) => void;
-  private queueManager?: QueueManagerLike;
+  queueManager?: QueueManagerLike;
   private subscriptionPool?: SubscriptionPoolLike;
   private unwireFailover?: () => void;
   private readonly workers = new Map<Team, Worker<TaskPayload>>();
   private readonly children = new Set<ChildProcess>();
-  started = false;
+  private started = false;
   private closing = false;
   private exitHandlerRegistered = false;
 
@@ -236,28 +256,6 @@ export class WorkerPool {
       await this.close();
       return false;
     }
-  }
-
-  getQueue(team: Team): Queue<TaskPayload> | undefined {
-    return this.queueManager?.getQueue(team);
-  }
-
-  async deriveTeamStatus(team: Team): Promise<TeamStatus> {
-    const queue = this.getQueue(team);
-    if (!queue) return 'idle';
-    return deriveTeamStatus(queue);
-  }
-
-  async deriveAllTeamStatuses(): Promise<Record<Team, TeamStatus>> {
-    const statuses: Record<Team, TeamStatus> = {
-      frontend: 'idle',
-      backend: 'idle',
-      qa: 'idle',
-    };
-    for (const team of TEAMS) {
-      statuses[team] = await this.deriveTeamStatus(team);
-    }
-    return statuses;
   }
 
   async processJob(team: Team, job: WorkerJob, token?: string): Promise<void> {

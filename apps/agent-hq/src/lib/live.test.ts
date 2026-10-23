@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { liveStore, connect, resetLiveStore } from './live.svelte';
-import type { State, HQEvent } from './server/state';
+import type { State, HQEvent, InternalAction } from './server/state';
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -171,6 +171,29 @@ describe('liveStore & connect', () => {
     expect(liveStore.state).toEqual(nextState);
     expect(liveStore.feed).toHaveLength(1);
     expect(liveStore.feed[0]).toEqual(testEvent);
+  });
+
+  it('does not append SET_TEAM_STATUSES actions to feed', () => {
+    connect();
+    const es = MockEventSource.instances[0];
+
+    const teamAction: InternalAction = {
+      type: 'SET_TEAM_STATUSES',
+      teams: { frontend: 'working', backend: 'idle', qa: 'idle' },
+    };
+    const nextState: State = {
+      ...liveStore.state,
+      teams: {
+        frontend: { status: 'working' },
+        backend: { status: 'idle' },
+        qa: { status: 'idle' },
+      },
+    };
+
+    es.emit('UPDATE', { event: teamAction, state: nextState });
+
+    expect(liveStore.state).toEqual(nextState);
+    expect(liveStore.feed).toHaveLength(0);
   });
 
   it('caps feed at 1000 items and drops oldest items', () => {

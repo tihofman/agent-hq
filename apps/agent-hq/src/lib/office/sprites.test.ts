@@ -833,7 +833,41 @@ describe('office/sprites', () => {
       }
     });
 
-    it('derives exactly 3 visible TeamLead characters when state has teams even without running jobs', () => {
+    it('produces identical output to main when state has no teams', () => {
+      expect(deriveCharacters(null)).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+      expect(deriveCharacters({})).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+      const stateWithoutTeams = {
+        runs: {
+          'r-active': {
+            runId: 'r-active',
+            agent: 'claude' as const,
+            status: 'running' as const,
+            timestamp: '2026-10-23T10:00:00Z',
+            data: {},
+          },
+        },
+      };
+      expect(deriveCharacters(stateWithoutTeams)).toEqual([
+        {
+          id: 'r-active',
+          agent: 'claude',
+          runId: 'r-active',
+          instanceIndex: 0,
+        },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+      ]);
+    });
+
+    it('derives TeamLead characters in addition to existing V1 characters when state has teams', () => {
       const state = {
         teams: {
           frontend: { status: 'idle' as const },
@@ -843,9 +877,10 @@ describe('office/sprites', () => {
         runs: {},
       };
       const chars = deriveCharacters(state);
-      expect(chars).toHaveLength(3);
-
       expect(chars).toEqual([
+        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0 },
         {
           id: 'team-lead-frontend',
           agent: 'agy',
@@ -868,68 +903,6 @@ describe('office/sprites', () => {
           instanceIndex: 0,
         },
       ]);
-    });
-
-    it('places sub-runs of a team alongside their TeamLead at the team area', () => {
-      const state = {
-        teams: {
-          frontend: { status: 'working' as const },
-          backend: { status: 'idle' as const },
-          qa: { status: 'idle' as const },
-        },
-        runs: {
-          'job-frontend-1': {
-            runId: 'job-frontend-1',
-            agent: 'agy' as const,
-            status: 'running' as const,
-            timestamp: '2026-10-23T10:00:00Z',
-            data: { team: 'frontend' as const, title: 'Build UI' },
-          },
-          'job-frontend-2': {
-            runId: 'job-frontend-2',
-            agent: 'claude' as const, // Fallback provider for frontend
-            status: 'running' as const,
-            timestamp: '2026-10-23T10:05:00Z',
-            data: { team: 'frontend' as const, title: 'Fix Layout' },
-          },
-        },
-      };
-      const chars = deriveCharacters(state);
-
-      // 3 TeamLeads + 2 Frontend Workers
-      expect(chars).toHaveLength(5);
-
-      const frontendChars = chars.filter((c) => c.team === 'frontend');
-      expect(frontendChars).toHaveLength(3);
-
-      // TeamLead
-      expect(frontendChars[0]).toEqual({
-        id: 'team-lead-frontend',
-        agent: 'agy',
-        team: 'frontend',
-        isTeamLead: true,
-        instanceIndex: 0,
-      });
-
-      // Worker 1
-      expect(frontendChars[1]).toEqual({
-        id: 'job-frontend-1',
-        agent: 'agy',
-        runId: 'job-frontend-1',
-        team: 'frontend',
-        isTeamLead: false,
-        instanceIndex: 1,
-      });
-
-      // Worker 2 (fallback provider claude mapped to frontend team desk)
-      expect(frontendChars[2]).toEqual({
-        id: 'job-frontend-2',
-        agent: 'claude',
-        runId: 'job-frontend-2',
-        team: 'frontend',
-        isTeamLead: false,
-        instanceIndex: 2,
-      });
     });
 
     it('generates a question speech bubble with ? for waiting_input', () => {

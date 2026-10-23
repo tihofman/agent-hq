@@ -341,16 +341,16 @@ describe('reduce', () => {
   });
 
   describe('team states (#102)', () => {
-    it('initializes all teams with status idle in initialState', () => {
-      expect(initialState.teams).toEqual({
-        frontend: { status: 'idle' },
-        backend: { status: 'idle' },
-        qa: { status: 'idle' },
-      });
+    it('leaves teams undefined in initialState until V2 worker pool starts', () => {
+      expect(initialState.teams).toBeUndefined();
     });
 
-    it('sets team status to working on TASK_START and back to idle on TASK_COMPLETE', () => {
-      const running = apply(initialState, 'TASK_START', {
+    it('sets team status to working on TASK_START and back to idle on TASK_COMPLETE once teams are initialized', () => {
+      const stateWithTeams = reduce(initialState, {
+        type: 'SET_TEAM_STATUSES',
+        teams: { frontend: 'idle', backend: 'idle', qa: 'idle' },
+      });
+      const running = apply(stateWithTeams, 'TASK_START', {
         data: { team: 'frontend' },
       });
       expect(running.teams?.frontend.status).toBe('working');
@@ -364,7 +364,11 @@ describe('reduce', () => {
     });
 
     it('keeps team status working if another run for the team is still running', () => {
-      const run1 = apply(initialState, 'TASK_START', {
+      const stateWithTeams = reduce(initialState, {
+        type: 'SET_TEAM_STATUSES',
+        teams: { frontend: 'idle', backend: 'idle', qa: 'idle' },
+      });
+      const run1 = apply(stateWithTeams, 'TASK_START', {
         runId: 'run-fe-1',
         data: { team: 'frontend' },
       });
@@ -387,14 +391,7 @@ describe('reduce', () => {
       expect(done2.teams?.frontend.status).toBe('idle');
     });
 
-    it('updates team status via TEAM_STATUS and SET_TEAM_STATUSES internal actions', () => {
-      const waiting = reduce(initialState, {
-        type: 'TEAM_STATUS',
-        team: 'qa',
-        status: 'waiting_input',
-      });
-      expect(waiting.teams?.qa.status).toBe('waiting_input');
-
+    it('updates team statuses via SET_TEAM_STATUSES internal action', () => {
       const bulk = reduce(initialState, {
         type: 'SET_TEAM_STATUSES',
         teams: {

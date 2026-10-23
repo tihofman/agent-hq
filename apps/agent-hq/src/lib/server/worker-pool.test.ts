@@ -25,6 +25,7 @@ import {
   WorkerPool,
   buildTaskPrompt,
   deriveTeamStatus,
+  deriveAllTeamStatuses,
   isV2WorkersEnabled,
   truncateError,
   type QueueManagerLike,
@@ -362,11 +363,10 @@ describe('WorkerPool (#98)', () => {
     };
     expect(await deriveTeamStatus(qaQueue)).toBe('waiting_input');
 
-    // Test WorkerPool status methods (#102)
+    // Test deriveAllTeamStatuses (#102)
     const activePool = createPool();
     await activePool.start();
-    expect(await activePool.deriveTeamStatus('qa')).toBe('waiting_input');
-    expect(await activePool.deriveAllTeamStatuses()).toEqual({
+    expect(await deriveAllTeamStatuses(activePool.queueManager!)).toEqual({
       frontend: 'idle',
       backend: 'working',
       qa: 'waiting_input',

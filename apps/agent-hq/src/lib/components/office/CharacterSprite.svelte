@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Agent, HQEvent } from '../../server/state';
+  import type { Agent, HQEvent, Run } from '../../server/state';
   import {
     getSpriteMetadata,
     getFrameIndex,
@@ -12,7 +12,12 @@
     type CharacterStatus,
   } from '../../office/sprites';
   import { formatCharacterAriaLabel } from '../../office/log-filter';
-  import { TEAM_DESKS, type RoomId, type Team } from '../../office/layout';
+  import {
+    TEAM_DESKS,
+    TEAM_LABELS,
+    type RoomId,
+    type Team,
+  } from '../../office/layout';
 
   interface Props {
     agent: Agent;
@@ -49,9 +54,7 @@
     liveStore.state?.agents?.[agent] ?? { status: 'idle', room: 'lounge' },
   );
 
-  const teamState = $derived(
-    team ? liveStore.state?.teams?.[team] : undefined,
-  );
+  const teamState = $derived(team ? liveStore.state?.teams?.[team] : undefined);
 
   const activeRun = $derived(
     runId
@@ -100,42 +103,38 @@
     return agentState.status;
   });
 
-  const characterRoom = $derived.by<RoomId>(() => {
+  function resolveRoom(run?: Run): RoomId {
     if (isTeamLead && team) {
       return TEAM_DESKS[team].roomId;
     }
-    if (runId) {
-      if (activeRun?.data?.team && TEAM_DESKS[activeRun.data.team]) {
-        if (activeRun.status === 'handover') return 'hall';
-        if (activeRun.status === 'cooldown') return 'lounge';
-        return TEAM_DESKS[activeRun.data.team].roomId;
+    if (run) {
+      if (run.data?.team && TEAM_DESKS[run.data.team]) {
+        if (run.status === 'handover') return 'hall';
+        if (run.status === 'cooldown') return 'lounge';
+        return TEAM_DESKS[run.data.team].roomId;
       }
       return (
-        (activeRun?.room as RoomId) ??
-        (runId === agentState.runId
+        (run.room as RoomId) ??
+        (run.runId === agentState.runId
           ? (agentState.room as RoomId)
           : undefined) ??
-        (activeRun?.status === 'handover'
+        (run.status === 'handover'
           ? 'hall'
-          : activeRun?.status === 'cooldown'
+          : run.status === 'cooldown'
             ? 'lounge'
             : 'dev')
       );
     }
     return (agentState.room as RoomId) ?? 'lounge';
-  });
+  }
+
+  const characterRoom = $derived(resolveRoom(activeRun));
 
   const activePR = $derived(liveStore.state?.activePR);
   const ticketId = $derived(activeRun?.ticketId);
   const title = $derived(activeRun?.data?.title);
   const teamLabel = $derived(
-    isTeamLead && team
-      ? team === 'qa'
-        ? 'QA Lead'
-        : team === 'frontend'
-          ? 'Frontend Lead'
-          : 'Backend Lead'
-      : undefined,
+    isTeamLead && team ? TEAM_LABELS[team] : undefined,
   );
   const ariaLabel = $derived(
     teamLabel
@@ -151,24 +150,9 @@
   const statusText = $derived(activeRun?.data?.statusText);
 
   // Synchronous initial position
-  const initialRoom: RoomId = (() => {
-    if (isTeamLead && team) {
-      return TEAM_DESKS[team].roomId;
-    }
-    if (runId) {
-      const run = liveStore.state?.runs?.[runId];
-      if (run?.data?.team && TEAM_DESKS[run.data.team]) {
-        if (run.status === 'handover') return 'hall';
-        if (run.status === 'cooldown') return 'lounge';
-        return TEAM_DESKS[run.data.team].roomId;
-      }
-      if (run?.room) return run.room as RoomId;
-      if (run?.status === 'handover') return 'hall';
-      if (run?.status === 'cooldown') return 'lounge';
-      if (run?.status === 'running') return 'dev';
-    }
-    return (agentState.room as RoomId) ?? 'lounge';
-  })();
+  const initialRoom: RoomId = resolveRoom(
+    runId ? liveStore.state?.runs?.[runId] : undefined,
+  );
 
   const controller = new AgentController(
     agent,
@@ -233,7 +217,9 @@
       if (
         lastHandoverEvent &&
         lastHandoverEvent.agent === agent &&
-        (!runId || !lastHandoverEvent.runId || lastHandoverEvent.runId === runId) &&
+        (!runId ||
+          !lastHandoverEvent.runId ||
+          lastHandoverEvent.runId === runId) &&
         handoverKey !== lastHandledHandoverKey
       ) {
         lastHandledHandoverKey = handoverKey;
@@ -260,35 +246,18 @@
   });
 
   const bubble = $derived(
-    isTeamLead && characterStatus === 'waiting_input'
-      ? {
-          type: 'alert' as const,
-          text: '?',
-          icon: '❓',
-          tooltip: 'Rückfrage wartet auf Antwort',
-        }
-      : isTeamLead &&
-          (characterStatus === 'coding' || characterStatus === 'reviewing')
-        ? getSpeechBubble(characterStatus, {
-            ticketId: activeTeamRun?.ticketId,
-            title: activeTeamRun?.data?.title ?? 'Working…',
-          })
-        : getSpeechBubble(characterStatus, {
-            ticketId,
-            title,
-            prNumber,
-            statusText,
-            cooldownUntil,
-            now,
-          }),
+    getSpeechBubble(characterStatus, {
+      ticketId: isTeamLead ? activeTeamRun?.ticketId : ticketId,
+      title: isTeamLead ? (activeTeamRun?.data?.title ?? 'Working…') : title,
+      prNumber,
+      statusText: isTeamLead ? activeTeamRun?.data?.statusText : statusText,
+      cooldownUntil,
+      now,
+    }),
   );
 
   function tick(dt: number) {
-    const res = controller.tick(
-      dt,
-      characterStatus,
-      characterRoom,
-    );
+    const res = controller.tick(dt, characterStatus, characterRoom);
     currentX = res.x;
     currentY = res.y;
 
@@ -362,7 +331,9 @@
   data-run-id={runId}
   data-instance-index={instanceIndex}
   aria-label={ariaLabel}
-  title="{teamLabel ? `${teamLabel} • ` : ''}{metadata.displayName} ({metadata.role}) • {characterStatus}"
+  title="{teamLabel
+    ? `${teamLabel} • `
+    : ''}{metadata.displayName} ({metadata.role}) • {characterStatus}"
   {onclick}
 >
   <!-- Retro Status Speech Bubble -->
@@ -391,8 +362,8 @@
 
   <!-- Agent Retro Nametag Badge -->
   <span class="agent-badge">
-    {#if isTeamLead && team}
-      {team === 'qa' ? 'QA Lead' : team === 'frontend' ? 'Frontend Lead' : 'Backend Lead'}
+    {#if teamLabel}
+      {teamLabel}
     {:else}
       {metadata.displayName}
     {/if}

@@ -214,7 +214,8 @@ export interface Run {
   timestamp: string;
   data: EventData;
 }
-export type Team = 'frontend' | 'backend' | 'qa';
+export type { Team } from '@agent-hq/queue';
+import type { Team } from '@agent-hq/queue';
 export type TeamStatus = 'idle' | 'working' | 'waiting_input';
 export interface TeamState {
   status: TeamStatus;
@@ -238,11 +239,6 @@ export const initialState: State = {
   },
   runs: {},
   activePR: null,
-  teams: {
-    frontend: { status: 'idle' },
-    backend: { status: 'idle' },
-    qa: { status: 'idle' },
-  },
 };
 
 // Animation, test-parser and timer callbacks supply actions instead of reducer side effects.
@@ -252,25 +248,10 @@ export type InternalAction =
       agent: Agent;
     }
   | { type: 'TICK'; timestamp: string }
-  | { type: 'TEAM_STATUS'; team: Team; status: TeamStatus }
   | { type: 'SET_TEAM_STATUSES'; teams: Partial<Record<Team, TeamStatus>> };
 
 export function reduce(state: State, event: HQEvent | InternalAction): State {
   if ('type' in event) {
-    if (event.type === 'TEAM_STATUS') {
-      const currentTeams = state.teams ?? {
-        frontend: { status: 'idle' },
-        backend: { status: 'idle' },
-        qa: { status: 'idle' },
-      };
-      return {
-        ...state,
-        teams: {
-          ...currentTeams,
-          [event.team]: { status: event.status },
-        },
-      };
-    }
     if (event.type === 'SET_TEAM_STATUSES') {
       return {
         ...state,
@@ -463,5 +444,5 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
       }
     }
   }
-  return { agents, runs, activePR, teams };
+  return { agents, runs, activePR, ...(teams ? { teams } : {}) };
 }

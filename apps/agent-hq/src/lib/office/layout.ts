@@ -1,9 +1,8 @@
 import officeTilesData from '../assets/tilesets/office_tiles.json';
 
 export type RoomId = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
-export type Team = 'frontend' | 'backend' | 'qa';
-
-export const TEAMS: readonly Team[] = ['frontend', 'backend', 'qa'] as const;
+import { TEAMS, type Team } from '@agent-hq/queue';
+export { TEAMS, type Team };
 
 export const ROOM_IDS: readonly RoomId[] = [
   'ceo',
@@ -91,7 +90,6 @@ export interface TeamDesk {
   roomId: RoomId;
   name: string;
   waypointId: string;
-  bounds: RoomBounds;
 }
 
 export const TEAM_DESKS: Record<Team, TeamDesk> = {
@@ -100,31 +98,26 @@ export const TEAM_DESKS: Record<Team, TeamDesk> = {
     roomId: 'dev',
     name: 'Frontend Team',
     waypointId: 'dev_desk',
-    bounds: { x: 3, y: 13, width: 4, height: 2 },
   },
   backend: {
     team: 'backend',
     roomId: 'dev',
     name: 'Backend Team',
     waypointId: 'dev_meeting',
-    bounds: { x: 8, y: 13, width: 3, height: 2 },
   },
   qa: {
     team: 'qa',
     roomId: 'qa',
     name: 'QA Team',
     waypointId: 'qa_desk',
-    bounds: { x: 19, y: 4, width: 3, height: 2 },
   },
 };
 
-export function getTeamDesk(team: Team): TeamDesk {
-  const desk = TEAM_DESKS[team];
-  if (!desk) {
-    throw new Error(`Unknown team: "${team}"`);
-  }
-  return desk;
-}
+export const TEAM_LABELS: Record<Team, string> = {
+  frontend: 'Frontend Lead',
+  backend: 'Backend Lead',
+  qa: 'QA Lead',
+};
 
 export const WAYPOINTS: Record<string, Waypoint> = {
   // CEO Suite

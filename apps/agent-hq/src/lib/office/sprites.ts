@@ -427,47 +427,38 @@ export function getAgentSpot(
   };
 }
 
+const TEAM_WORKER_OFFSETS: Record<Team, readonly InstanceOffset[]> = {
+  frontend: [
+    { dx: -36, dy: 0 },
+    { dx: -72, dy: 0 },
+    { dx: 0, dy: 36 },
+  ],
+  backend: [
+    { dx: 36, dy: 0 },
+    { dx: -36, dy: 0 },
+    { dx: 0, dy: 36 },
+  ],
+  qa: [
+    { dx: -36, dy: 0 },
+    { dx: 36, dy: 0 },
+    { dx: 0, dy: 36 },
+  ],
+};
+
 export function getTeamSpot(
   team: Team,
   instanceIndex = 0,
 ): { x: number; y: number; wpId: string } {
   const desk = TEAM_DESKS[team];
   const wp = WAYPOINTS[desk.waypointId] ?? WAYPOINTS['hall_center'];
-
-  let extraDx = 0;
-  let extraDy = 0;
-
-  if (instanceIndex > 0) {
-    const offsets: Record<Team, readonly InstanceOffset[]> = {
-      frontend: [
-        { dx: -36, dy: 0 },
-        { dx: -72, dy: 0 },
-        { dx: 0, dy: 36 },
-      ],
-      backend: [
-        { dx: 36, dy: 0 },
-        { dx: -36, dy: 0 },
-        { dx: 0, dy: 36 },
-      ],
-      qa: [
-        { dx: -36, dy: 0 },
-        { dx: 36, dy: 0 },
-        { dx: 0, dy: 36 },
-      ],
-    };
-    const list = offsets[team];
-    const off = list?.[instanceIndex - 1];
-    if (off) {
-      extraDx = off.dx;
-      extraDy = off.dy;
-    } else {
-      extraDy = instanceIndex * 36;
-    }
-  }
+  const off =
+    instanceIndex > 0
+      ? TEAM_WORKER_OFFSETS[team]?.[instanceIndex - 1]
+      : undefined;
 
   return {
-    x: wp.x * TILE_SIZE + extraDx,
-    y: wp.y * TILE_SIZE + extraDy,
+    x: wp.x * TILE_SIZE + (off?.dx ?? 0),
+    y: wp.y * TILE_SIZE + (off?.dy ?? 0),
     wpId: desk.waypointId,
   };
 }
@@ -504,57 +495,6 @@ export function deriveCharacters(
     teams?: Record<Team, TeamState>;
   } | null,
 ): Character[] {
-  if (state?.teams) {
-    const teams: Team[] = ['frontend', 'backend', 'qa'];
-    const activeSet = new Set<string>(ACTIVE_RUN_STATUSES);
-    const runs = Object.values(state.runs ?? {});
-
-    const teamLeads: Character[] = teams.map((team) => ({
-      id: `team-lead-${team}`,
-      agent: TEAM_LEADS[team],
-      team,
-      isTeamLead: true,
-      instanceIndex: 0,
-    }));
-
-    const activeRuns = runs
-      .filter((r) => activeSet.has(r.status))
-      .sort(
-        (a, b) =>
-          (a.timestamp ?? '').localeCompare(b.timestamp ?? '') ||
-          a.runId.localeCompare(b.runId),
-      );
-
-    const teamWorkerCounts: Record<Team, number> = {
-      frontend: 0,
-      backend: 0,
-      qa: 0,
-    };
-    const agentCounts: Record<Agent, number> = {
-      claude: 0,
-      agy: 0,
-      codex: 0,
-    };
-
-    const workerChars: Character[] = activeRuns.map((run) => {
-      const team = run.data?.team;
-      const instanceIndex =
-        team && team in teamWorkerCounts
-          ? ++teamWorkerCounts[team]
-          : agentCounts[run.agent]++;
-      return {
-        id: run.runId,
-        agent: run.agent,
-        runId: run.runId,
-        team,
-        isTeamLead: false,
-        instanceIndex,
-      };
-    });
-
-    return [...teamLeads, ...workerChars];
-  }
-
   const agents: Agent[] = ['claude', 'agy', 'codex'];
   if (!state) {
     return agents.map((agent) => ({ id: agent, agent, instanceIndex: 0 }));
@@ -563,7 +503,7 @@ export function deriveCharacters(
   const runs = Object.values(state.runs ?? {});
   const activeSet = new Set<string>(ACTIVE_RUN_STATUSES);
 
-  return agents.flatMap((agent): Character[] => {
+  const baseCharacters = agents.flatMap((agent): Character[] => {
     const agentRuns = runs
       .filter((r) => r.agent === agent && activeSet.has(r.status))
       .sort(
@@ -583,6 +523,22 @@ export function deriveCharacters(
       instanceIndex: index,
     }));
   });
+
+  if (!state.teams) {
+    return baseCharacters;
+  }
+
+  const teamLeads: Character[] = (['frontend', 'backend', 'qa'] as const).map(
+    (team) => ({
+      id: `team-lead-${team}`,
+      agent: TEAM_LEADS[team],
+      team,
+      isTeamLead: true,
+      instanceIndex: 0,
+    }),
+  );
+
+  return [...baseCharacters, ...teamLeads];
 }
 
 export function getClosestWaypointId(pixelX: number, pixelY: number): string {

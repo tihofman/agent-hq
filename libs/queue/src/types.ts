@@ -1,4 +1,5 @@
-export type Team = 'frontend' | 'backend' | 'qa';
+export const TEAMS = ['frontend', 'backend', 'qa'] as const;
+export type Team = (typeof TEAMS)[number];
 
 export type QuestionStatus = 'PENDING' | 'ANSWERED';
 
