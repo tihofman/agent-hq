@@ -1,3 +1,4 @@
+import { watch } from 'node:fs';
 import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,42 @@ function createRequestEvent(request: Request): RequestEvent {
     url: new URL(request.url),
   } as unknown as RequestEvent;
 }
+
+// Probe whether fs.watch works on a temp directory (fails e.g. with EMFILE in restricted sandboxes).
+const canWatchFs = await (async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-hq-watch-probe-'));
+  try {
+    return await new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+      let watcher: ReturnType<typeof watch> | undefined;
+      let settled = false;
+      const finish = (result: boolean) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          try {
+            watcher?.close();
+          } catch {
+            // ignore
+          }
+          resolve(result);
+        }
+      };
+      try {
+        watcher = watch(dir);
+        watcher.on('error', () => finish(false));
+      } catch {
+        return finish(false);
+      }
+      timer = setTimeout(() => finish(true), 50);
+      timer.unref?.();
+    });
+  } catch {
+    return false;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+})();
 
 // fs.watch polls wait up to 5 s; the test timeout must exceed that under load.
 describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
@@ -100,21 +137,26 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
     }
   });
 
-  it('continues tailing cooldown runs so later resets can extend the countdown', async () => {
-    dispatch(
-      parseEvent({ event: 'TASK_START', agent: 'agy', runId: 'limited' }),
-    );
-    init();
-    const file = join(tempDir, 'limited.log');
-    await appendFile(file, 'You have exhausted your quota on this model.\n');
-    await expect.poll(() => getState().agents.agy.status).toBe('cooldown');
-    await appendFile(
-      file,
-      'You have exhausted your quota on this model. Retry-After: 60\n',
-    );
-    await expect.poll(() => getState().agents.agy.cooldownUntil).toBeDefined();
-    expect(getState().runs.limited.status).toBe('cooldown');
-  });
+  it.skipIf(!canWatchFs)(
+    'continues tailing cooldown runs so later resets can extend the countdown',
+    async () => {
+      dispatch(
+        parseEvent({ event: 'TASK_START', agent: 'agy', runId: 'limited' }),
+      );
+      init();
+      const file = join(tempDir, 'limited.log');
+      await appendFile(file, 'You have exhausted your quota on this model.\n');
+      await expect.poll(() => getState().agents.agy.status).toBe('cooldown');
+      await appendFile(
+        file,
+        'You have exhausted your quota on this model. Retry-After: 60\n',
+      );
+      await expect
+        .poll(() => getState().agents.agy.cooldownUntil)
+        .toBeDefined();
+      expect(getState().runs.limited.status).toBe('cooldown');
+    },
+  );
 
   it('uses AGENT_HQ_LOG_DIR env or defaults to os.tmpdir()/agent-hq', () => {
     expect(getLogDir()).toBe(tempDir);
@@ -122,137 +164,146 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
     expect(getLogDir()).toBe(join(tmpdir(), 'agent-hq'));
   });
 
-  it('starts tailer via init() and feeds TASK_PROGRESS into store for active run via POST handler', async () => {
-    init();
+  it.skipIf(!canWatchFs)(
+    'starts tailer via init() and feeds TASK_PROGRESS into store for active run via POST handler',
+    async () => {
+      init();
 
-    const request = new Request('http://localhost:3333/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'TASK_START',
-        agent: 'agy',
-        runId: 'run-post-1',
-      }),
-    });
-    const res = await POST(createRequestEvent(request));
-    expect(res.status).toBe(202);
-    expect(getState().runs['run-post-1']?.status).toBe('running');
+      const request = new Request('http://localhost:3333/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'TASK_START',
+          agent: 'agy',
+          runId: 'run-post-1',
+        }),
+      });
+      const res = await POST(createRequestEvent(request));
+      expect(res.status).toBe(202);
+      expect(getState().runs['run-post-1']?.status).toBe('running');
 
-    const logFile = join(tempDir, 'run-post-1.log');
-    await appendFile(logFile, 'build successful\n');
+      const logFile = join(tempDir, 'run-post-1.log');
+      await appendFile(logFile, 'build successful\n');
 
-    await expect
-      .poll(() => getState().runs['run-post-1']?.data?.logChunk, {
-        timeout: 5000,
-      })
-      .toBe('build successful\n');
-    expect(getState().runs['run-post-1']?.agent).toBe('agy');
-  });
+      await expect
+        .poll(() => getState().runs['run-post-1']?.data?.logChunk, {
+          timeout: 5000,
+        })
+        .toBe('build successful\n');
+      expect(getState().runs['run-post-1']?.agent).toBe('agy');
+    },
+  );
 
-  it('considers runs active with status handover or running, but stops watching completed runs', async () => {
-    startServerTail({ dir: tempDir });
+  it.skipIf(!canWatchFs)(
+    'considers runs active with status handover or running, but stops watching completed runs',
+    async () => {
+      startServerTail({ dir: tempDir });
 
-    // 1. Handover run should be active and tailed
-    dispatch(
-      parseEvent({
-        event: 'TASK_HANDOVER',
-        agent: 'claude',
-        runId: 'run-handover-1',
-      }),
-    );
-    expect(getState().runs['run-handover-1']?.status).toBe('handover');
+      // 1. Handover run should be active and tailed
+      dispatch(
+        parseEvent({
+          event: 'TASK_HANDOVER',
+          agent: 'claude',
+          runId: 'run-handover-1',
+        }),
+      );
+      expect(getState().runs['run-handover-1']?.status).toBe('handover');
 
-    const handoverLog = join(tempDir, 'run-handover-1.log');
-    await appendFile(handoverLog, 'planning task\n');
+      const handoverLog = join(tempDir, 'run-handover-1.log');
+      await appendFile(handoverLog, 'planning task\n');
 
-    await expect
-      .poll(() => getState().runs['run-handover-1']?.data?.logChunk, {
-        timeout: 5000,
-      })
-      .toBe('planning task\n');
+      await expect
+        .poll(() => getState().runs['run-handover-1']?.data?.logChunk, {
+          timeout: 5000,
+        })
+        .toBe('planning task\n');
 
-    // 2. Transition handover run to complete
-    dispatch(
-      parseEvent({
-        event: 'TASK_COMPLETE',
-        agent: 'claude',
-        runId: 'run-handover-1',
-      }),
-    );
-    expect(getState().runs['run-handover-1']?.status).toBe('complete');
+      // 2. Transition handover run to complete
+      dispatch(
+        parseEvent({
+          event: 'TASK_COMPLETE',
+          agent: 'claude',
+          runId: 'run-handover-1',
+        }),
+      );
+      expect(getState().runs['run-handover-1']?.status).toBe('complete');
 
-    // Subsequent writes to completed run must be ignored
-    await appendFile(handoverLog, 'extra output after finish\n');
+      // Subsequent writes to completed run must be ignored
+      await appendFile(handoverLog, 'extra output after finish\n');
 
-    // Trigger watcher scan by touching an active run
-    dispatch(
-      parseEvent({
-        event: 'TASK_START',
-        agent: 'agy',
-        runId: 'run-active-2',
-      }),
-    );
-    const activeLog = join(tempDir, 'run-active-2.log');
-    await appendFile(activeLog, 'active line\n');
-
-    await expect
-      .poll(() => getState().runs['run-active-2']?.data?.logChunk, {
-        timeout: 5000,
-      })
-      .toBe('active line\n');
-
-    // Completed run's logChunk should still be the one before completion
-    expect(getState().runs['run-handover-1']?.data?.logChunk).toBe(
-      'planning task\n',
-    );
-  });
-
-  it('replaces old tailer on re-init / HMR and dispatches line exactly once', async () => {
-    init();
-    const oldStop = (globalThis as Record<string, unknown>)[
-      GLOBAL_TAILER_KEY
-    ] as () => void;
-    const stopSpy = vi.fn(oldStop);
-    (globalThis as Record<string, unknown>)[GLOBAL_TAILER_KEY] = stopSpy;
-
-    init();
-    expect(stopSpy).toHaveBeenCalledTimes(1);
-    const newStop = (globalThis as Record<string, unknown>)[
-      GLOBAL_TAILER_KEY
-    ] as () => void;
-    expect(newStop).toBeTypeOf('function');
-    expect(newStop).not.toBe(oldStop);
-
-    const progressEvents: unknown[] = [];
-    const unsubscribe = subscribe((_state, event) => {
-      if ('event' in event && event.event === 'TASK_PROGRESS') {
-        progressEvents.push(event);
-      }
-    });
-
-    try {
+      // Trigger watcher scan by touching an active run
       dispatch(
         parseEvent({
           event: 'TASK_START',
           agent: 'agy',
-          runId: 'run-replace',
+          runId: 'run-active-2',
         }),
       );
-
-      const logFile = join(tempDir, 'run-replace.log');
-      await appendFile(logFile, 'line once\n');
+      const activeLog = join(tempDir, 'run-active-2.log');
+      await appendFile(activeLog, 'active line\n');
 
       await expect
-        .poll(() => getState().runs['run-replace']?.data?.logChunk, {
+        .poll(() => getState().runs['run-active-2']?.data?.logChunk, {
           timeout: 5000,
         })
-        .toBe('line once\n');
+        .toBe('active line\n');
 
-      expect(progressEvents).toHaveLength(1);
-    } finally {
-      unsubscribe();
-    }
-  });
+      // Completed run's logChunk should still be the one before completion
+      expect(getState().runs['run-handover-1']?.data?.logChunk).toBe(
+        'planning task\n',
+      );
+    },
+  );
+
+  it.skipIf(!canWatchFs)(
+    'replaces old tailer on re-init / HMR and dispatches line exactly once',
+    async () => {
+      init();
+      const oldStop = (globalThis as Record<string, unknown>)[
+        GLOBAL_TAILER_KEY
+      ] as () => void;
+      const stopSpy = vi.fn(oldStop);
+      (globalThis as Record<string, unknown>)[GLOBAL_TAILER_KEY] = stopSpy;
+
+      init();
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      const newStop = (globalThis as Record<string, unknown>)[
+        GLOBAL_TAILER_KEY
+      ] as () => void;
+      expect(newStop).toBeTypeOf('function');
+      expect(newStop).not.toBe(oldStop);
+
+      const progressEvents: unknown[] = [];
+      const unsubscribe = subscribe((_state, event) => {
+        if ('event' in event && event.event === 'TASK_PROGRESS') {
+          progressEvents.push(event);
+        }
+      });
+
+      try {
+        dispatch(
+          parseEvent({
+            event: 'TASK_START',
+            agent: 'agy',
+            runId: 'run-replace',
+          }),
+        );
+
+        const logFile = join(tempDir, 'run-replace.log');
+        await appendFile(logFile, 'line once\n');
+
+        await expect
+          .poll(() => getState().runs['run-replace']?.data?.logChunk, {
+            timeout: 5000,
+          })
+          .toBe('line once\n');
+
+        expect(progressEvents).toHaveLength(1);
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
 
   it('sweeps stale runs (dead PID, no PID > 15m) while keeping living PIDs active, broadcasting and appending RUN_STALE', async () => {
     const now = Date.parse('2026-10-23T12:00:00.000Z');

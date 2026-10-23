@@ -65,9 +65,12 @@ claude_command() {
   if git rev-parse --git-common-dir >/dev/null 2>&1; then
     gitdir="$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
   fi
+  local tmpdir=""
+  tmpdir="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd || echo /tmp)"
+  [ -n "$tmpdir" ] || tmpdir="/tmp"
   local settings
-  settings="$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg git "$gitdir" \
-    '{sandbox:{enabled:true,failIfUnavailable:true,allowUnsandboxedCommands:false,autoAllowBashIfSandboxed:true,filesystem:{allowWrite:([$cwd,$npm]+(if $git != "" then [$git] else [] end)),denyWrite:(if $git != "" then [($git+"/hooks"),($git+"/config")] else [] end)},network:{allowedDomains:["github.com","api.github.com","codeload.github.com","raw.githubusercontent.com","objects.githubusercontent.com","registry.npmjs.org","npmjs.org"]}}}')"
+  settings="$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg tmp "$tmpdir" --arg git "$gitdir" \
+    '{sandbox:{enabled:true,failIfUnavailable:true,allowUnsandboxedCommands:false,autoAllowBashIfSandboxed:true,filesystem:{allowWrite:([$cwd,$npm,$tmp]+(if $git != "" then [$git] else [] end)),denyWrite:(if $git != "" then [($git+"/hooks"),($git+"/config")] else [] end)},network:{allowedDomains:["github.com","api.github.com","codeload.github.com","raw.githubusercontent.com","objects.githubusercontent.com","registry.npmjs.org","npmjs.org"]}}}')"
   CMD=(claude -p "$prompt")
   if [ "$ATTEMPT" -eq 0 ]; then
     [ -z "$CLAUDE_SESSION_ID" ] || CMD+=(--session-id "$CLAUDE_SESSION_ID")
