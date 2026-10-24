@@ -32,7 +32,6 @@ describe('apps/agent-hq integration with @agent-hq/queue', () => {
       body: 'Implement libs/queue',
       labels: ['agent:agy', 'team:frontend'],
       question,
-      sessionId: 'session-xyz',
     };
 
     const event: EventPayload = {

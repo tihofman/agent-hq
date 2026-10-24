@@ -7,6 +7,7 @@ import { DelayedError, type Job, type Queue, type Worker } from 'bullmq';
 import {
   QueueManager,
   TEAMS,
+  jobIdForIssue,
   type QueueManagerLike,
   type TaskPayload,
   type Team,
@@ -367,7 +368,7 @@ export class WorkerPool {
     if (job.data.question?.status === 'PENDING') {
       const delayUntil = Date.now() + SEVEN_DAYS_MS;
       await this.guard(() => job.moveToDelayed(delayUntil, token));
-      await this.requeueIfAnswered(team, job, token);
+      await this.requeueIfAnswered(team, job);
       throw new DelayedError();
     }
 
@@ -380,10 +381,11 @@ export class WorkerPool {
 
     while (true) {
       const hasAnsweredQuestion = job.data.question?.status === 'ANSWERED';
-      const savedSessionId = hasAnsweredQuestion
-        ? job.data.sessionId
+      const savedSession = hasAnsweredQuestion
+        ? await this.readSession(job)
         : undefined;
-      const savedProvider = hasAnsweredQuestion ? job.data.provider : undefined;
+      const savedSessionId = savedSession?.sessionId;
+      const savedProvider = savedSession?.provider;
 
       const picked = await this.guard(() => pool.pick(team));
       if (picked.provider === null) {
@@ -430,7 +432,7 @@ export class WorkerPool {
         script,
       );
 
-      job.data = (await this.readFreshJob(team, job))?.data ?? job.data;
+      job.data = await this.readFreshJob(team, job);
 
       await this.opts.afterProcessExit?.(job);
 
@@ -442,19 +444,16 @@ export class WorkerPool {
       if (hasUnprocessedQuestion) {
         const extractedSession =
           extractSessionId(output) ?? (isResumed ? savedSessionId : undefined);
-        job.data = await this.updateJobData(
-          team,
-          job,
-          ({ sessionId: _s, provider: _p, ...restData }) =>
-            extractedSession
-              ? { ...restData, sessionId: extractedSession, provider }
-              : restData,
-        );
+        if (extractedSession) {
+          await this.saveSession(job, extractedSession, provider);
+        } else {
+          await this.clearSession(job);
+        }
         const isPending = job.data.question?.status === 'PENDING';
         const delayUntil = isPending ? Date.now() + SEVEN_DAYS_MS : Date.now();
         await this.guard(() => job.moveToDelayed(delayUntil, token));
         if (isPending) {
-          await this.requeueIfAnswered(team, job, token);
+          await this.requeueIfAnswered(team, job);
         }
         throw new DelayedError();
       }
@@ -475,18 +474,9 @@ export class WorkerPool {
         }
       }
 
-      const stripSession = ({
-        sessionId: _s,
-        provider: _p,
-        ...cleanedData
-      }: WorkerTaskPayload): WorkerTaskPayload => cleanedData;
+      await this.clearSession(job);
 
       if (exitCode === 0) {
-        if (isResumed) {
-          job.data = await this.updateJobData(team, job, stripSession);
-        } else {
-          job.data = stripSession(job.data);
-        }
         const result = await this.guard(() =>
           this.finalizeWorktreeFn(
             this.getWorktreeContext(),
@@ -494,8 +484,8 @@ export class WorkerPool {
             worktree,
           ),
         );
-        job.data = await this.updateJobData(team, job, (data) => ({
-          ...stripSession(data),
+        await this.updateJobData(team, job, (data) => ({
+          ...data,
           prUrl: result.prUrl,
         }));
         return result;
@@ -503,67 +493,79 @@ export class WorkerPool {
 
       const maxLen = this.opts.maxErrorLength ?? MAX_ERROR_LENGTH;
       const lastError = truncateError(output, exitCode, maxLen);
-      job.data = await this.updateJobData(team, job, (data) => ({
-        ...stripSession(data),
+      await this.updateJobData(team, job, (data) => ({
+        ...data,
         lastError,
       }));
       throw new Error(lastError);
     }
   }
 
+  private sessionKey(job: WorkerJob): string {
+    return `agent-hq:session:${job.id ?? jobIdForIssue(job.data.issueId)}`;
+  }
+
+  private async readSession(
+    job: WorkerJob,
+  ): Promise<{ sessionId: string; provider: Agent } | undefined> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.hgetall) return undefined;
+    const raw = await conn.hgetall(this.sessionKey(job)).catch((err) => {
+      this.onError(err);
+      return undefined;
+    });
+    if (raw?.sessionId && raw?.provider) {
+      return { sessionId: raw.sessionId, provider: raw.provider as Agent };
+    }
+    return undefined;
+  }
+
+  private async saveSession(
+    job: WorkerJob,
+    sessionId: string,
+    provider: Agent,
+  ): Promise<void> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.hset) return;
+    await conn
+      .hset(this.sessionKey(job), 'sessionId', sessionId, 'provider', provider)
+      .catch(this.onError);
+  }
+
+  private async clearSession(job: WorkerJob): Promise<void> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.del) return;
+    await conn.del(this.sessionKey(job)).catch(this.onError);
+  }
+
   private async readFreshJob(
     team: Team,
     job: WorkerJob,
-  ): Promise<Job<TaskPayload> | undefined> {
-    if (!this.queueManager || !job.id) return undefined;
-    const queue = this.queueManager.getQueue(team);
-    if (typeof (queue as { getJob?: unknown }).getJob !== 'function') {
-      return undefined;
-    }
-    const fresh = await queue.getJob(job.id);
+  ): Promise<WorkerTaskPayload> {
+    if (!this.queueManager || !job.id) return job.data;
+    const fresh = await this.queueManager.getQueue(team).getJob(job.id);
     if (fresh?.data) job.data = fresh.data;
-    return fresh;
+    return job.data;
   }
 
   private async updateJobData(
     team: Team,
     job: WorkerJob,
     mutate: (freshData: WorkerTaskPayload) => WorkerTaskPayload,
-  ): Promise<WorkerTaskPayload> {
-    await this.readFreshJob(team, job);
-    job.data = mutate(job.data);
+  ): Promise<void> {
+    job.data = mutate(await this.readFreshJob(team, job));
     await job.updateData(job.data).catch(this.onError);
-    return job.data;
   }
 
-  private async requeueIfAnswered(
-    team: Team,
-    job: WorkerJob,
-    token?: string,
-  ): Promise<void> {
-    const fresh = await this.readFreshJob(team, job);
-    if (job.data.question?.status !== 'ANSWERED') return;
-    const jobLike = job as {
-      getState?: () => Promise<string>;
-      promote?: () => Promise<void>;
-      state?: string;
-    };
-    const state =
-      typeof fresh?.getState === 'function'
-        ? await fresh.getState()
-        : typeof jobLike.getState === 'function'
-          ? await jobLike.getState()
-          : ((fresh as { state?: string } | undefined)?.state ?? jobLike.state);
-    const promote =
-      typeof fresh?.promote === 'function'
-        ? () => fresh.promote()
-        : typeof jobLike.promote === 'function'
-          ? () => jobLike.promote!()
-          : undefined;
-    if (state === 'delayed' && promote) {
-      await this.guard(promote);
-    } else {
-      await this.guard(() => job.moveToDelayed(Date.now(), token));
+  private async requeueIfAnswered(team: Team, job: WorkerJob): Promise<void> {
+    if (!this.queueManager || !job.id) return;
+    const fresh = await this.queueManager.getQueue(team).getJob(job.id);
+    if (!fresh?.data) return;
+    job.data = fresh.data;
+    if (fresh.data.question?.status !== 'ANSWERED') return;
+    const state = await fresh.getState();
+    if (state === 'delayed') {
+      await this.guard(() => fresh.promote());
     }
   }
 

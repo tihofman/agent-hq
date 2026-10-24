@@ -14,7 +14,12 @@ import { getQueueName } from './queues.js';
 import type { TaskPayload, Team } from './types.js';
 
 export interface QueueManagerLike {
-  connection?: { ping?: () => Promise<string> };
+  connection?: {
+    ping?: () => Promise<string>;
+    hgetall?: (key: string) => Promise<Record<string, string>>;
+    hset?: (key: string, ...args: string[]) => Promise<number>;
+    del?: (...keys: string[]) => Promise<number>;
+  };
   getQueue(team: Team): Queue<TaskPayload>;
   createWorker(
     team: Team,
