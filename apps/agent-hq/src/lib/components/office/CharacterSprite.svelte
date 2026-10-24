@@ -445,7 +445,7 @@
   /* 16-Bit Retro Speech Bubble */
   .speech-bubble {
     position: absolute;
-    bottom: 35px;
+    bottom: calc(100% + 3px);
     left: 50%;
     transform: translateX(-50%);
     display: flex;

@@ -147,7 +147,7 @@ export function getFrameBackgroundPosition(
   columnsOrMeta:
     | number
     | { columns?: number; frameWidth?: number; frameHeight?: number } = 8,
-  frameSize = 32,
+  frameSize = TILE_SIZE,
 ): { x: number; y: number; css: string } {
   let columns: number;
   let width = frameSize;
@@ -155,7 +155,7 @@ export function getFrameBackgroundPosition(
 
   if (typeof columnsOrMeta === 'object' && columnsOrMeta !== null) {
     columns = columnsOrMeta.columns ?? 8;
-    width = columnsOrMeta.frameWidth ?? 32;
+    width = columnsOrMeta.frameWidth ?? TILE_SIZE;
     height = columnsOrMeta.frameHeight ?? width;
   } else {
     columns = columnsOrMeta;
@@ -466,7 +466,7 @@ export function getTeamSpot(
 export function doSpotsOverlap(
   posA: { x: number; y: number },
   posB: { x: number; y: number },
-  size = 32,
+  size = TILE_SIZE / 4,
 ): boolean {
   return Math.abs(posA.x - posB.x) < size && Math.abs(posA.y - posB.y) < size;
 }
@@ -606,7 +606,7 @@ export class AgentController {
   private meetingElapsedMs = 0;
   private currentRoom: RoomId;
   private deferredRoom: RoomId | null = null;
-  readonly walkSpeed = 96;
+  readonly walkSpeed = 3 * TILE_SIZE;
 
   constructor(
     agent: Agent,

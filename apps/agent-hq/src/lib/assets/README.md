@@ -47,7 +47,7 @@ Alle Assets basieren strikt auf der einheitlichen **Endesga 32 (EDG32)** Palette
 
 ## 2. Charakter-Spritesheets (`sprites/`)
 
-Jedes Spritesheet hat eine einheitliche Frame-Größe von **32×32 Pixeln** (angeordnet in 8 Spalten × 4 Reihen = 256×128 Pixel).
+Jedes Spritesheet hat eine einheitliche Frame-Größe von **128×128 Pixeln** (angeordnet in 8 Spalten × 4 Reihen = 1024×512 Pixel).
 
 ### Verfügbare Charaktere:
 
@@ -75,7 +75,7 @@ Jedes Spritesheet hat eine einheitliche Frame-Größe von **32×32 Pixeln** (ang
 
 ## 3. Office-Tileset (`tilesets/`)
 
-Das Tileset **`office_tiles.png`** liegt im Format **256×256 Pixel** vor (8 Spalten × 8 Reihen = 64 Tiles à **32×32 Pixel**).
+Das Tileset **`office_tiles.png`** liegt im Format **1024×1024 Pixel** vor (8 Spalten × 8 Reihen = 64 Tiles à **128×128 Pixel**).
 
 ### Übersicht der Tile-Kategorien:
 
@@ -110,5 +110,4 @@ npm run generate:assets
 ## 5. Lizenz & Urheberrecht
 
 - **Grafiken**: Selbst erstellt (prozedural generiert via `tools/pixel-art/generate.js`). Lizenziert unter **MIT** wie das Repository.
-- **Audio & Sound-FX**: Alle 16-Bit Chiptune-Sounds (`lib/audio.ts`) werden dynamisch über die Standard Web Audio API synthetisiert (Oszillatoren mit Square-, Triangle- und Sawtooth-Wellen). Es werden keinerlei Audio-Dateien oder externe urheberrechtlich geschützte Samples verwendet.
 - **Farbpalette**: [Endesga 32 (EDG32)](https://lospec.com/palette-list/endesga-32) von Ed Blankenship (ENDESGA), CC0 / Public Domain.

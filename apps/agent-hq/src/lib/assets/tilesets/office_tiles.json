@@ -1,7 +1,7 @@
 {
   "name": "office_tiles",
-  "tileWidth": 32,
-  "tileHeight": 32,
+  "tileWidth": 128,
+  "tileHeight": 128,
   "columns": 8,
   "rows": 8,
   "totalTiles": 64,

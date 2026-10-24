@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+// @ts-expect-error pngjs lacks bundled TypeScript type declarations
+import { PNG } from 'pngjs';
+import officeTilesData from '../assets/tilesets/office_tiles.json';
 import {
   formatCooldown,
   getDirection,
@@ -36,8 +41,8 @@ describe('office/sprites', () => {
       (agent) => {
         const meta = getSpriteMetadata(agent);
         expect(meta.name).toBe(agent);
-        expect(meta.frameWidth).toBe(32);
-        expect(meta.frameHeight).toBe(32);
+        expect(meta.frameWidth).toBe(128);
+        expect(meta.frameHeight).toBe(128);
         expect(meta.columns).toBe(8);
         expect(meta.rows).toBe(4);
         expect(meta.totalFrames).toBe(32);
@@ -61,6 +66,82 @@ describe('office/sprites', () => {
         }
       },
     );
+
+    it.each(['claude', 'agy', 'codex'] as const)(
+      'verifies spritesheet PNG dimensions (1024x512) for %s',
+      (agent) => {
+        const pngPath = path.resolve(
+          __dirname,
+          `../assets/sprites/${agent}.png`,
+        );
+        const buffer = fs.readFileSync(pngPath);
+        const png = PNG.sync.read(buffer);
+        expect(png.width).toBe(1024);
+        expect(png.height).toBe(512);
+      },
+    );
+
+    it('verifies that character sprite frames are not composed of uniform 4x4 pixel blocks (not a naive 4x upscale)', () => {
+      // In a naive 4x upscale of a 32x32 image to 128x128, 100% of the 4x4 blocks are uniform
+      // (every 4x4 block has 16 identical pixels). In detailed 128x128 pixel art, frames contain
+      // substantial intra-block pixel variation (lines, eyes, hair highlights, folds, shading).
+      for (const agent of ['claude', 'agy', 'codex'] as const) {
+        const pngPath = path.resolve(
+          __dirname,
+          `../assets/sprites/${agent}.png`,
+        );
+        const png = PNG.sync.read(fs.readFileSync(pngPath));
+
+        let nonUniform4x4Blocks = 0;
+        // Check Frame 0 (x: 0..127, y: 0..127)
+        for (let by = 0; by < 32; by++) {
+          for (let bx = 0; bx < 32; bx++) {
+            const x0 = bx * 4;
+            const y0 = by * 4;
+            const baseIdx = (y0 * png.width + x0) * 4;
+            let isUniform = true;
+
+            for (let dy = 0; dy < 4; dy++) {
+              for (let dx = 0; dx < 4; dx++) {
+                const idx = ((y0 + dy) * png.width + (x0 + dx)) * 4;
+                if (
+                  png.data[idx] !== png.data[baseIdx] ||
+                  png.data[idx + 1] !== png.data[baseIdx + 1] ||
+                  png.data[idx + 2] !== png.data[baseIdx + 2] ||
+                  png.data[idx + 3] !== png.data[baseIdx + 3]
+                ) {
+                  isUniform = false;
+                  break;
+                }
+              }
+              if (!isUniform) break;
+            }
+
+            if (!isUniform) {
+              nonUniform4x4Blocks++;
+            }
+          }
+        }
+
+        // Frame must have numerous non-uniform 4x4 blocks proving sub-block detail
+        expect(nonUniform4x4Blocks).toBeGreaterThan(50);
+      }
+    });
+
+    it('verifies office tileset PNG is 1024x1024 and office_tiles.json reports 128x128 tile size', () => {
+      const tilesetPath = path.resolve(
+        __dirname,
+        '../assets/tilesets/office_tiles.png',
+      );
+      const png = PNG.sync.read(fs.readFileSync(tilesetPath));
+      expect(png.width).toBe(1024);
+      expect(png.height).toBe(1024);
+      expect(officeTilesData.tileWidth).toBe(128);
+      expect(officeTilesData.tileHeight).toBe(128);
+      expect(officeTilesData.columns).toBe(8);
+      expect(officeTilesData.rows).toBe(8);
+      expect(officeTilesData.totalTiles).toBe(64);
+    });
   });
 
   describe('Direction and Animation mappings', () => {
@@ -131,38 +212,38 @@ describe('office/sprites', () => {
         css: 'background-position: -0px -0px;',
       });
       expect(getFrameBackgroundPosition(7)).toEqual({
-        x: 224,
+        x: 896,
         y: 0,
-        css: 'background-position: -224px -0px;',
+        css: 'background-position: -896px -0px;',
       });
       expect(getFrameBackgroundPosition(8)).toEqual({
         x: 0,
-        y: 32,
-        css: 'background-position: -0px -32px;',
+        y: 128,
+        css: 'background-position: -0px -128px;',
       });
       expect(getFrameBackgroundPosition(23)).toEqual({
-        x: 224,
-        y: 64,
-        css: 'background-position: -224px -64px;',
+        x: 896,
+        y: 256,
+        css: 'background-position: -896px -256px;',
       });
       expect(getFrameBackgroundPosition(24)).toEqual({
         x: 0,
-        y: 96,
-        css: 'background-position: -0px -96px;',
+        y: 384,
+        css: 'background-position: -0px -384px;',
       });
       expect(getFrameBackgroundPosition(31)).toEqual({
-        x: 224,
-        y: 96,
-        css: 'background-position: -224px -96px;',
+        x: 896,
+        y: 384,
+        css: 'background-position: -896px -384px;',
       });
     });
 
     it('supports sheet geometry from metadata', () => {
-      const meta = { columns: 8, frameWidth: 32, frameHeight: 32 };
+      const meta = { columns: 8, frameWidth: 128, frameHeight: 128 };
       expect(getFrameBackgroundPosition(9, meta)).toEqual({
-        x: 32,
-        y: 32,
-        css: 'background-position: -32px -32px;',
+        x: 128,
+        y: 128,
+        css: 'background-position: -128px -128px;',
       });
     });
   });
