@@ -1,0 +1,10 @@
+{
+  "name": "agent-hq",
+  "version": "0.1.0",
+  "description": "Aufträge an Agent-HQ-Worker einreihen, Rückfragen beantworten, Agent-HQ starten und prüfen.",
+  "author": {
+    "name": "tihofman"
+  },
+  "repository": "https://github.com/tihofman/agent-hq",
+  "skills": "./skills/"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "agent-hq",
+  "owner": {
+    "name": "tihofman"
+  },
+  "metadata": {
+    "description": "Agent-HQ: Claude-Code-Skill für die V2-Queue von Agent-HQ."
+  },
+  "plugins": [
+    {
+      "name": "agent-hq",
+      "source": "./",
+      "description": "Aufträge an Agent-HQ-Worker einreihen, Rückfragen beantworten, Agent-HQ starten und prüfen."
+    }
+  ]
+}
