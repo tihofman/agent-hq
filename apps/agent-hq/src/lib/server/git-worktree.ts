@@ -27,10 +27,24 @@ export interface FinishWorktreeResult {
 const COMMIT_PREFIX =
   /^\s*(feat|fix|refactor|test|docs|chore|enhancement|bug)(\([^)]*\))?!?:\s*/i;
 
+const TYPE_ALIASES: Record<string, string> = {
+  enhancement: 'feat',
+  bug: 'fix',
+};
+
+export function parseTitle(title: string): { type: string; subject: string } {
+  const match = title.match(COMMIT_PREFIX);
+  if (!match) return { type: 'feat', subject: title.trim() };
+  const prefix = match[1].toLowerCase();
+  return {
+    type: TYPE_ALIASES[prefix] ?? prefix,
+    subject: title.slice(match[0].length).trim(),
+  };
+}
+
 export function slugify(title: string, maxLength = 40): string {
-  const normalized = title
-    .replace(COMMIT_PREFIX, '')
-    .replace(/ß/g, 'ss')
+  const normalized = parseTitle(title)
+    .subject.replace(/ß/g, 'ss')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -169,6 +183,8 @@ export async function finalizeWorktree(
   const baseRef = `${remote}/${baseBranch}`;
   const ghBinary = ctx.ghBinary ?? process.env.GH_BIN ?? 'gh';
   const cleanTitle = payload.title.replace(/[\r\n]+/g, ' ').trim();
+  const { type, subject } = parseTitle(cleanTitle);
+  const prTitle = `${type}(#${payload.issueId}): ${subject || cleanTitle}`;
 
   // 1. Commit uncommitted changes left by worker
   const statusOut = await git(
@@ -186,7 +202,7 @@ export async function finalizeWorktree(
         'user.email=agent-hq@localhost',
         'commit',
         '-m',
-        `feat(#${payload.issueId}): ${cleanTitle}`,
+        prTitle,
       ],
       wt.worktreePath,
       ctx.env,
@@ -232,7 +248,7 @@ export async function finalizeWorktree(
           'create',
           '--draft',
           '--title',
-          `feat(#${payload.issueId}): ${cleanTitle}`,
+          prTitle,
           '--body',
           `Closes #${payload.issueId}`,
         ],
