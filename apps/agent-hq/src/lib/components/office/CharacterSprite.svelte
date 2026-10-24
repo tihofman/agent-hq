@@ -75,15 +75,6 @@
       : undefined,
   );
 
-  const hasPendingQuestion = $derived(
-    Boolean(
-      team &&
-        Object.values(liveStore.state?.questions ?? {}).some(
-          (q) => q.team === team && q.status === 'PENDING',
-        ),
-    ),
-  );
-
   const pendingQuestion = $derived(
     team
       ? getOldestPendingQuestionForTeam(
@@ -96,7 +87,7 @@
 
   const characterStatus = $derived.by<CharacterStatus>(() => {
     if (isTeamLead && team) {
-      if (teamState?.status === 'waiting_input' || hasPendingQuestion)
+      if (teamState?.status === 'waiting_input' || Boolean(pendingQuestion))
         return 'waiting_input';
       if (teamState?.status === 'working' || activeTeamRun) {
         return team === 'qa' ? 'reviewing' : 'coding';

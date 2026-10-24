@@ -8,6 +8,7 @@
     getLogFileFallback,
   } from '../../office/log-filter';
   import FeedMessage from '../feed/FeedMessage.svelte';
+  import { focusTrap } from '../focus-trap';
 
   interface Props {
     agent: Agent;
@@ -78,13 +79,6 @@
     }
   }
 
-  function handleWindowKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeModal();
-    }
-  }
-
   const agentBadgeClass = $derived.by(() => {
     switch (agent) {
       case 'claude':
@@ -96,8 +90,6 @@
     }
   });
 </script>
-
-<svelte:window onkeydown={handleWindowKeyDown} />
 
 <!-- Modal Backdrop -->
 <div
@@ -111,6 +103,7 @@
 >
   <!-- Modal Window -->
   <div
+    use:focusTrap={closeModal}
     class="relative flex flex-col w-full max-w-2xl h-[560px] max-h-[85vh] rounded-lg border border-slate-700 bg-slate-950 shadow-2xl overflow-hidden font-mono text-xs"
     role="document"
   >

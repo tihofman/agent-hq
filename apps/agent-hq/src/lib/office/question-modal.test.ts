@@ -117,22 +117,28 @@ describe('office/question-modal', () => {
   });
 
   describe('getGitHubIssueUrl', () => {
-    it('generates standard GitHub issue URL with default repo tihofman/agent-hq', () => {
+    it('generates standard GitHub issue URL for positive integer issueId', () => {
       expect(getGitHubIssueUrl(103)).toBe(
         'https://github.com/tihofman/agent-hq/issues/103',
       );
     });
 
-    it('uses custom repository when provided with owner/name', () => {
+    it('always uses fixed tihofman/agent-hq repo and ignores custom repository', () => {
       expect(getGitHubIssueUrl(42, 'acme/my-repo')).toBe(
-        'https://github.com/acme/my-repo/issues/42',
+        'https://github.com/tihofman/agent-hq/issues/42',
       );
-    });
-
-    it('falls back to default repo if repo string lacks an owner slash', () => {
       expect(getGitHubIssueUrl(103, 'agent-hq')).toBe(
         'https://github.com/tihofman/agent-hq/issues/103',
       );
+    });
+
+    it('returns undefined if issueId is not a positive integer', () => {
+      expect(getGitHubIssueUrl(0)).toBeUndefined();
+      expect(getGitHubIssueUrl(-1)).toBeUndefined();
+      expect(getGitHubIssueUrl(-100)).toBeUndefined();
+      expect(getGitHubIssueUrl(1.5)).toBeUndefined();
+      expect(getGitHubIssueUrl(NaN)).toBeUndefined();
+      expect(getGitHubIssueUrl(Infinity)).toBeUndefined();
     });
   });
 

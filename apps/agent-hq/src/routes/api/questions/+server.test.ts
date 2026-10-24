@@ -221,6 +221,29 @@ describe('Questions API: POST & GET /api/questions', () => {
     expect(body.question.id).toBe('101-2');
   });
 
+  it('deduplicates options after trimming whitespace', async () => {
+    manager.addJob('frontend', 105, 'active');
+
+    const request = new Request('http://localhost:3333/api/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        issueId: 105,
+        team: 'frontend',
+        question: 'Which option?',
+        options: ['  Retry  ', 'Abort', 'Retry', '  Abort  ', 'Ignore'],
+      }),
+    });
+
+    const response = await POST(createEvent(request));
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      ok: boolean;
+      question: QuestionPayload;
+    };
+    expect(body.question.options).toEqual(['Retry', 'Abort', 'Ignore']);
+  });
+
   it('returns 409 when no active job is found for issue', async () => {
     // Job exists but is waiting, not active
     manager.addJob('frontend', 102, 'waiting');

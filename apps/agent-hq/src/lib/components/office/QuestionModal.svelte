@@ -8,6 +8,7 @@
     getGitHubIssueUrl,
     sendQuestionAnswer,
   } from '../../office/question-modal';
+  import { focusTrap } from '../focus-trap';
 
   interface Props {
     question: QuestionPayload;
@@ -46,15 +47,12 @@
         : '') ??
       '',
   );
-  const issueUrl = $derived(
-    getGitHubIssueUrl(question.issueId, matchingRun?.data?.repo),
-  );
+  const issueUrl = $derived(getGitHubIssueUrl(question.issueId));
 
   let freeText = $state('');
   let isSubmitting = $state(false);
   let errorMessage = $state<string | null>(null);
 
-  let modalElement: HTMLDivElement | undefined = $state();
   let closeButton: HTMLButtonElement | undefined = $state();
   let optionButtons: HTMLButtonElement[] = $state([]);
   let textInput: HTMLInputElement | undefined = $state();
@@ -87,37 +85,6 @@
   function handleBackdropClick(event: MouseEvent) {
     if (event.target === event.currentTarget) {
       closeModal();
-    }
-  }
-
-  function handleWindowKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeModal();
-      return;
-    }
-
-    if (event.key === 'Tab') {
-      if (!modalElement) return;
-      const focusable = modalElement.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (event.shiftKey) {
-        if (document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
     }
   }
 
@@ -162,8 +129,6 @@
   });
 </script>
 
-<svelte:window onkeydown={handleWindowKeyDown} />
-
 <!-- Modal Backdrop -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <div
@@ -177,9 +142,8 @@
 >
   <!-- Modal Window -->
   <div
-    bind:this={modalElement}
+    use:focusTrap={closeModal}
     class="relative flex flex-col w-full max-w-lg rounded-lg border border-slate-700 bg-slate-950 shadow-2xl overflow-hidden font-mono text-xs"
-    role="document"
   >
     <!-- Modal Header -->
     <div
@@ -222,20 +186,32 @@
       >
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-slate-400 font-semibold shrink-0">Issue:</span>
-          <a
-            href={issueUrl}
-            target="_blank"
-            rel="external noopener noreferrer"
-            class="text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 font-semibold truncate"
-            data-testid="question-issue-link"
-            title="GitHub-Issue in neuem Tab öffnen"
-          >
-            <span>#{question.issueId}</span>
-            {#if issueTitle}
-              <span class="text-slate-300 font-normal truncate">• {issueTitle}</span>
-            {/if}
-            <span class="text-slate-500 text-[10px]">↗</span>
-          </a>
+          {#if issueUrl}
+            <a
+              href={issueUrl}
+              target="_blank"
+              rel="external noopener noreferrer"
+              class="text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 font-semibold truncate"
+              data-testid="question-issue-link"
+              title="GitHub-Issue in neuem Tab öffnen"
+            >
+              <span>#{question.issueId}</span>
+              {#if issueTitle}
+                <span class="text-slate-300 font-normal truncate">• {issueTitle}</span>
+              {/if}
+              <span class="text-slate-500 text-[10px]">↗</span>
+            </a>
+          {:else}
+            <span
+              class="text-slate-300 font-semibold flex items-center gap-1 truncate"
+              data-testid="question-issue-text"
+            >
+              <span>#{question.issueId}</span>
+              {#if issueTitle}
+                <span class="text-slate-400 font-normal truncate">• {issueTitle}</span>
+              {/if}
+            </span>
+          {/if}
         </div>
         <span class="text-[11px] text-slate-400 shrink-0 ml-2">
           {metadata.displayName} ({metadata.role})
@@ -265,7 +241,7 @@
             Optionen (Klick zum Antworten):
           </span>
           <div class="flex flex-wrap gap-2" data-testid="question-options">
-            {#each question.options as option, idx (option)}
+            {#each question.options as option, idx (idx)}
               <button
                 type="button"
                 bind:this={optionButtons[idx]}

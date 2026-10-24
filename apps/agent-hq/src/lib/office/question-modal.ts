@@ -56,13 +56,25 @@ export function getOldestPendingQuestionForTeam(
   })[0];
 }
 
+export const GITHUB_REPO = 'tihofman/agent-hq';
+
 /**
- * Derives GitHub issue URL from issueId and optional repository.
+ * Derives GitHub issue URL for the fixed repository tihofman/agent-hq.
+ * Ignores any custom repo and returns undefined if issueId is not a positive integer.
  */
-export function getGitHubIssueUrl(issueId: number, repo?: string): string {
-  const cleanRepo =
-    repo && repo.includes('/') ? repo.trim() : 'tihofman/agent-hq';
-  return `https://github.com/${cleanRepo}/issues/${issueId}`;
+export function getGitHubIssueUrl(
+  issueId: number,
+  _repo?: string,
+): string | undefined {
+  void _repo;
+  if (
+    typeof issueId !== 'number' ||
+    !Number.isSafeInteger(issueId) ||
+    issueId <= 0
+  ) {
+    return undefined;
+  }
+  return `https://github.com/${GITHUB_REPO}/issues/${issueId}`;
 }
 
 /**
