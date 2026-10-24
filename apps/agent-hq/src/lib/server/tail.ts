@@ -51,6 +51,8 @@ export function startTail(options: {
         finished.add(runId);
         continue;
       }
+      const agent = options.resolveAgent(runId);
+      if (!agent) continue;
       let run = runs.get(runId);
       if (!run) {
         run = {
@@ -62,7 +64,6 @@ export function startTail(options: {
         };
         runs.set(runId, run);
       }
-      const agent = options.resolveAgent(runId);
       let fd: number;
       try {
         fd = openSync(join(options.dir, name), 'r');
@@ -88,11 +89,6 @@ export function startTail(options: {
         }
       } finally {
         closeSync(fd);
-      }
-      if (!agent) {
-        run.pending = '';
-        run.decoder = new StringDecoder('utf8');
-        continue;
       }
       const lines = (run.pending + text).split('\n');
       run.pending = lines.pop()!;
