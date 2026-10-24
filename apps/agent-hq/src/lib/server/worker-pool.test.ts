@@ -34,6 +34,7 @@ import { SubscriptionPool } from './subscription-pool';
 import {
   DEFAULT_ATTEMPTS,
   DEFAULT_CONCURRENCY,
+  SESSION_TTL_SECONDS,
   WorkerPool,
   buildTaskPrompt,
   deriveTeamStatus,
@@ -55,6 +56,7 @@ const redisStore = vi.hoisted(() => {
     hset: vi.fn(
       async (_k: string, p: string, v: string) => ((values[p] = v), 1),
     ),
+    expire: vi.fn(async () => 1),
     disconnect: vi.fn(),
   };
 });
@@ -98,6 +100,7 @@ class MockQueueManager implements QueueManagerLike {
       }
       return deleted;
     }),
+    expire: vi.fn(async () => 1),
   };
   private readonly procs: Partial<Record<Team, Processor<TaskPayload>>> = {};
 
@@ -626,6 +629,10 @@ describe('WorkerPool (#98)', () => {
         sessionId,
         provider: 'agy',
       });
+      expect(manager.connection.expire).toHaveBeenCalledWith(
+        'agent-hq:session:issue-105',
+        691200,
+      );
       expect(pausedJob.data).not.toHaveProperty('sessionId');
       expect(pausedJob.data).not.toHaveProperty('provider');
       expect(finalizeSpy).not.toHaveBeenCalled();
@@ -1106,6 +1113,117 @@ describe('WorkerPool (#98)', () => {
       });
 
       await pool.close();
+    });
+
+    it('sets TTL of 8 days on session hash upon saveSession and extends it when delaying again without answer (#123)', async () => {
+      const sessionId = '12345678-1234-1234-1234-123456789012';
+      const delegateScript = await makeScript(
+        tempDir,
+        `echo "session id: ${sessionId}"; exit 0`,
+        'ttl-delegate.sh',
+      );
+
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+        afterProcessExit: (j) => {
+          if (j.data.issueId === 123) {
+            j.data.question = {
+              id: '123-1',
+              issueId: 123,
+              team: 'frontend',
+              question: 'Extend TTL?',
+              status: 'PENDING',
+            };
+          }
+        },
+      });
+      await pool.start();
+
+      manager.connection.expire.mockClear();
+
+      // 1. Initial run: asks a question -> saveSession sets hash + sets TTL to 691200 (8 days)
+      const pausedJob = await manager.run(
+        'frontend',
+        makeTask(123, 'frontend'),
+      );
+      expect(pausedJob.state).toBe('delayed');
+      expect(manager.connection.expire).toHaveBeenCalledTimes(1);
+      expect(manager.connection.expire).toHaveBeenCalledWith(
+        'agent-hq:session:issue-123',
+        SESSION_TTL_SECONDS,
+      );
+      expect(SESSION_TTL_SECONDS).toBe(691200);
+
+      // 2. Delayed job runs again while question is still PENDING -> extends TTL (calls expire again)
+      manager.connection.expire.mockClear();
+      await expect(pool.processJob('frontend', pausedJob)).rejects.toThrow(
+        DelayedError,
+      );
+
+      expect(manager.connection.expire).toHaveBeenCalledTimes(1);
+      expect(manager.connection.expire).toHaveBeenCalledWith(
+        'agent-hq:session:issue-123',
+        691200,
+      );
+
+      await pool.close();
+    });
+
+    it('handles missing expire capability and routes expire errors to onError (#123)', async () => {
+      const warnings: unknown[] = [];
+      const onError = (e: unknown) => warnings.push(e);
+
+      // 1. Capability guard: connection has no expire method
+      const mockManagerNoExpire = new MockQueueManager();
+      delete (
+        mockManagerNoExpire.connection as Partial<
+          typeof mockManagerNoExpire.connection
+        >
+      ).expire;
+      const poolNoExpire = createPool({
+        queueManager: mockManagerNoExpire,
+        onError,
+      });
+
+      const pendingJob: WorkerJob = {
+        id: 'issue-guard',
+        data: {
+          issueId: 999,
+          team: 'frontend',
+          question: {
+            id: '999-1',
+            issueId: 999,
+            team: 'frontend',
+            question: 'Still pending?',
+            status: 'PENDING',
+          },
+        } as WorkerTaskPayload,
+        moveToDelayed: vi.fn(async () => {}),
+        updateData: vi.fn(async () => {}),
+      };
+
+      await expect(
+        poolNoExpire.processJob('frontend', pendingJob),
+      ).rejects.toThrow(DelayedError);
+      expect(warnings).toHaveLength(0);
+
+      // 2. Error handling: connection.expire rejects -> caught and forwarded to onError
+      const expireErr = new Error('Redis expire error');
+      const mockManagerFailingExpire = new MockQueueManager();
+      mockManagerFailingExpire.connection.expire = vi
+        .fn()
+        .mockRejectedValue(expireErr);
+      const poolFailingExpire = createPool({
+        queueManager: mockManagerFailingExpire,
+        onError,
+      });
+
+      await expect(
+        poolFailingExpire.processJob('frontend', pendingJob),
+      ).rejects.toThrow(DelayedError);
+      expect(warnings).toContain(expireErr);
     });
   });
 
