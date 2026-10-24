@@ -359,12 +359,17 @@ describe('startTail', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     try {
       let agent: Agent | undefined = undefined;
-      start(() => agent);
+      let active = false;
+      start(
+        () => agent,
+        () => active,
+      );
       const quota = 'You have exhausted your quota on this model.\n';
       await append('one', quota);
       vi.advanceTimersByTime(2_000);
       expect(events).toEqual([]);
       agent = 'agy'; // TASK_START makes the run resolvable.
+      active = true;
       vi.advanceTimersByTime(1_000);
       signals.notify();
       vi.advanceTimersByTime(2_000);
@@ -372,6 +377,22 @@ describe('startTail', () => {
       expect(
         events.filter((e) => 'event' in e && e.event === 'RATE_LIMITED'),
       ).toMatchObject([{ agent: 'agy', runId: 'one' }]);
+      await append('one', 'working\n');
+      expect(progress().map((e) => e.data.logChunk)).toEqual([
+        quota,
+        'working\n',
+      ]);
+      active = false; // TASK_COMPLETE retains the run and its agent in the store.
+      await append('one', 'after completion\n');
+      signals.notify();
+      vi.advanceTimersByTime(3_000);
+      expect(progress().map((e) => e.data.logChunk)).toEqual([
+        quota,
+        'working\n',
+      ]);
+      expect(
+        events.filter((e) => 'event' in e && e.event === 'RATE_LIMITED'),
+      ).toHaveLength(1);
     } finally {
       stop?.();
       vi.useRealTimers();

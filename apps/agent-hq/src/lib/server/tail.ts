@@ -46,13 +46,13 @@ export function startTail(options: {
       if (!entry.isFile() || !name.endsWith('.log')) continue;
       const runId = name.slice(0, -4);
       if (!runId.trim() || finished.has(runId)) continue;
+      const agent = options.resolveAgent(runId);
+      if (!agent) continue;
       if (options.isRunActive?.(runId) === false) {
         runs.delete(runId);
         finished.add(runId);
         continue;
       }
-      const agent = options.resolveAgent(runId);
-      if (!agent) continue;
       let run = runs.get(runId);
       if (!run) {
         run = {
