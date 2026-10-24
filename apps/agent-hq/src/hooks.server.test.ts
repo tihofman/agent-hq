@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestEvent } from '@sveltejs/kit';
 import {
   GLOBAL_TAILER_KEY,
+  GLOBAL_WORKER_POOL_KEY,
   getLogDir,
   init,
   startServerTail,
   stopServerTail,
+  stopServerWorkers,
   hasTeamStatusesChanged,
   createTeamStatusPoller,
 } from './hooks.server';
@@ -61,16 +63,22 @@ const canWatchFs = await (async () => {
   }
 })();
 
-// fs.watch polls wait up to 5 s; the test timeout must exceed that under load.
-describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
+// Under parallel load, macOS FSEvents event delivery and disk flushing can take several seconds.
+// A generous 20s poll timeout ensures stability without delaying passing assertions (expect.poll resolves immediately on match).
+const POLL_OPTIONS = { timeout: 20_000, interval: 50 };
+
+describe('hooks.server log-tailer wiring', { timeout: 60_000 }, () => {
   let tempDir: string;
   let originalEnv: string | undefined;
   let originalHqHome: string | undefined;
 
   beforeEach(async () => {
-    resetStore();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     stopServerTail();
-    tempDir = await mkdtemp(join(tmpdir(), 'agent-hq-test-'));
+    await stopServerWorkers();
+    resetStore();
+    tempDir = await mkdtemp(join(tmpdir(), 'agent-hq-hooks-test-'));
     originalEnv = process.env.AGENT_HQ_LOG_DIR;
     process.env.AGENT_HQ_LOG_DIR = tempDir;
     originalHqHome = process.env.AGENT_HQ_HOME;
@@ -78,19 +86,27 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
   });
 
   afterEach(async () => {
-    stopServerTail();
-    resetStore();
-    if (originalEnv === undefined) {
-      delete process.env.AGENT_HQ_LOG_DIR;
-    } else {
-      process.env.AGENT_HQ_LOG_DIR = originalEnv;
+    try {
+      stopServerTail();
+      await stopServerWorkers();
+      delete (globalThis as Record<string, unknown>)[GLOBAL_TAILER_KEY];
+      delete (globalThis as Record<string, unknown>)[GLOBAL_WORKER_POOL_KEY];
+      resetStore();
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      if (originalEnv === undefined) {
+        delete process.env.AGENT_HQ_LOG_DIR;
+      } else {
+        process.env.AGENT_HQ_LOG_DIR = originalEnv;
+      }
+      if (originalHqHome === undefined) {
+        delete process.env.AGENT_HQ_HOME;
+      } else {
+        process.env.AGENT_HQ_HOME = originalHqHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
     }
-    if (originalHqHome === undefined) {
-      delete process.env.AGENT_HQ_HOME;
-    } else {
-      process.env.AGENT_HQ_HOME = originalHqHome;
-    }
-    await rm(tempDir, { recursive: true, force: true });
   });
 
   it('ticks every 5 seconds only during cooldown and cleans up on HMR and stop', () => {
@@ -149,14 +165,14 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       const file = join(tempDir, 'limited.log');
       await appendFile(file, 'You have exhausted your quota on this model.\n');
       await expect
-        .poll(() => getState().agents.agy.status, { timeout: 5000 })
+        .poll(() => getState().agents.agy.status, POLL_OPTIONS)
         .toBe('cooldown');
       await appendFile(
         file,
         'You have exhausted your quota on this model. Retry-After: 60\n',
       );
       await expect
-        .poll(() => getState().agents.agy.cooldownUntil)
+        .poll(() => getState().agents.agy.cooldownUntil, POLL_OPTIONS)
         .toBeDefined();
       expect(getState().runs.limited.status).toBe('cooldown');
     },
@@ -190,9 +206,7 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       await appendFile(logFile, 'build successful\n');
 
       await expect
-        .poll(() => getState().runs['run-post-1']?.data?.logChunk, {
-          timeout: 5000,
-        })
+        .poll(() => getState().runs['run-post-1']?.data?.logChunk, POLL_OPTIONS)
         .toBe('build successful\n');
       expect(getState().runs['run-post-1']?.agent).toBe('agy');
     },
@@ -217,9 +231,10 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       await appendFile(handoverLog, 'planning task\n');
 
       await expect
-        .poll(() => getState().runs['run-handover-1']?.data?.logChunk, {
-          timeout: 5000,
-        })
+        .poll(
+          () => getState().runs['run-handover-1']?.data?.logChunk,
+          POLL_OPTIONS,
+        )
         .toBe('planning task\n');
 
       // 2. Transition handover run to complete
@@ -247,9 +262,10 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
       await appendFile(activeLog, 'active line\n');
 
       await expect
-        .poll(() => getState().runs['run-active-2']?.data?.logChunk, {
-          timeout: 5000,
-        })
+        .poll(
+          () => getState().runs['run-active-2']?.data?.logChunk,
+          POLL_OPTIONS,
+        )
         .toBe('active line\n');
 
       // Completed run's logChunk should still be the one before completion
@@ -297,9 +313,10 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
         await appendFile(logFile, 'line once\n');
 
         await expect
-          .poll(() => getState().runs['run-replace']?.data?.logChunk, {
-            timeout: 5000,
-          })
+          .poll(
+            () => getState().runs['run-replace']?.data?.logChunk,
+            POLL_OPTIONS,
+          )
           .toBe('line once\n');
 
         expect(progressEvents).toHaveLength(1);
@@ -387,8 +404,9 @@ describe('hooks.server log-tailer wiring', { timeout: 15_000 }, () => {
 
       vi.useRealTimers();
       await expect
-        .poll(async () =>
-          (await readHistory()).map((e) => `${e.event}:${e.runId}`),
+        .poll(
+          async () => (await readHistory()).map((e) => `${e.event}:${e.runId}`),
+          POLL_OPTIONS,
         )
         .toEqual([
           'TASK_START:run-dead-pid',
