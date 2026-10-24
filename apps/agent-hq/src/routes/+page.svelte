@@ -48,7 +48,7 @@
           >
           <span class="text-slate-500">|</span>
           <span class="text-[11px] text-slate-400"
-            >5 Zonen • 16-Bit Endesga 32</span
+            >5 Zonen • 128px Endesga 32</span
           >
         </div>
 

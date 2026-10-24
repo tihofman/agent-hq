@@ -14,7 +14,8 @@ import {
   interpolatePosition,
   statusToAnimation,
   walkAnimationForDirection,
-  SPOTS,
+  MAX_TITLE_LEN,
+  slotIndexFor,
   getAgentSpot,
   getClosestWaypointId,
   AgentController,
@@ -28,8 +29,14 @@ import {
   WAYPOINTS,
   TILE_SIZE,
   ROOM_IDS,
+  ROOM_SLOTS,
   findWaypointPath,
   TEAMS,
+  getRoom,
+  TEAM_DESKS,
+  CANVAS_BASE_SCALE,
+  TOTAL_WIDTH_PX,
+  TOTAL_HEIGHT_PX,
   type RoomId,
 } from './layout';
 import type { Agent, AgentStatus } from '../server/state';
@@ -332,9 +339,11 @@ describe('office/sprites', () => {
       });
     });
 
-    it('generates task bubble with title, truncating at max 32 chars with ellipsis and full text in tooltip', () => {
-      // Short title (<= 32 chars) stays unshortened
-      const shortTitle = 'Fix speech bubble bug';
+    it('generates task bubble with title, truncating at MAX_TITLE_LEN chars with ellipsis and full text in tooltip', () => {
+      expect(MAX_TITLE_LEN).toBeGreaterThanOrEqual(20);
+
+      // Short title (<= MAX_TITLE_LEN chars) stays unshortened
+      const shortTitle = 'Fix bubble bug';
       expect(
         getSpeechBubble('coding', { ticketId: '75', title: shortTitle }),
       ).toEqual({
@@ -343,33 +352,33 @@ describe('office/sprites', () => {
         tooltip: `#75 ${shortTitle}`,
       });
 
-      // Exactly 32 chars: stays unshortened
-      const title32 = '12345678901234567890123456789012';
-      expect(title32.length).toBe(32);
+      // Exactly MAX_TITLE_LEN chars: stays unshortened
+      const titleExact = '1234567890'.repeat(4).slice(0, MAX_TITLE_LEN);
+      expect(titleExact.length).toBe(MAX_TITLE_LEN);
       expect(
-        getSpeechBubble('coding', { ticketId: '75', title: title32 }),
+        getSpeechBubble('coding', { ticketId: '75', title: titleExact }),
       ).toEqual({
         type: 'coding',
-        text: `#75 ${title32}`,
-        tooltip: `#75 ${title32}`,
+        text: `#75 ${titleExact}`,
+        tooltip: `#75 ${titleExact}`,
       });
 
-      // 33 chars: truncated to 31 chars + … (length 32)
-      const title33 = '123456789012345678901234567890123';
-      const truncated32 = '1234567890123456789012345678901…';
-      expect(truncated32.length).toBe(32);
+      // MAX_TITLE_LEN + 1 chars: truncated to (MAX_TITLE_LEN - 1) chars + …
+      const titleOver = `${titleExact}X`;
+      const truncated = `${titleExact.slice(0, MAX_TITLE_LEN - 1)}…`;
+      expect(truncated.length).toBe(MAX_TITLE_LEN);
       expect(
-        getSpeechBubble('coding', { ticketId: '75', title: title33 }),
+        getSpeechBubble('coding', { ticketId: '75', title: titleOver }),
       ).toEqual({
         type: 'coding',
-        text: `#75 ${truncated32}`,
-        tooltip: `#75 ${title33}`,
+        text: `#75 ${truncated}`,
+        tooltip: `#75 ${titleOver}`,
       });
 
       // Long realistic title
       const longTitle = 'Sprechblase mit aktuellem Task über dem Character';
-      const expectedShort = `${longTitle.slice(0, 31)}…`;
-      expect(expectedShort.length).toBe(32);
+      const expectedShort = `${longTitle.slice(0, MAX_TITLE_LEN - 1)}…`;
+      expect(expectedShort.length).toBe(MAX_TITLE_LEN);
       expect(
         getSpeechBubble('coding', { ticketId: '78', title: longTitle }),
       ).toEqual({
@@ -474,198 +483,258 @@ describe('office/sprites', () => {
     });
   });
 
-  describe('Waypoints, SPOTS table and pairwise distance', () => {
-    it('defines spots for every agent in every room', () => {
-      const agents: Agent[] = ['claude', 'agy', 'codex'];
-      for (const room of ROOM_IDS) {
-        for (const agent of agents) {
-          const spot = SPOTS[agent]?.[room];
-          expect(spot).toBeDefined();
-          expect(WAYPOINTS[spot.wp]).toBeDefined();
+  describe('ROOM_SLOTS, slotIndexFor, and speech bubble geometry', () => {
+    const overlayScale = 1 / CANVAS_BASE_SCALE; // 2
+    const charWidthCss = 6; // 10px monospace ≈ 6px/char
+    const ticketPrefixChars = 6; // e.g. "#9999 "
+    const iconAndGapCss = 13; // 10px icon + 3px gap
+    const paddingAndBorderCss = 14; // 2*6px horizontal padding + 2*1px border
+    const bubbleWidthCss =
+      (ticketPrefixChars + MAX_TITLE_LEN) * charWidthCss +
+      iconAndGapCss +
+      paddingAndBorderCss;
+    const bubbleHeightCss = 22; // 10px * 1.1 line-height + 4px padding + 2px border + 4px tail
+    const bubbleW = bubbleWidthCss * overlayScale;
+    const bubbleH = bubbleHeightCss * overlayScale;
+
+    function getBubbleRect(x: number, y: number) {
+      const cx = x + TILE_SIZE / 2;
+      const bottom = y - 3 * overlayScale;
+      const top = bottom - bubbleH;
+      return {
+        left: cx - bubbleW / 2,
+        right: cx + bubbleW / 2,
+        top,
+        bottom,
+      };
+    }
+
+    function doRectsOverlap(
+      a: { left: number; right: number; top: number; bottom: number },
+      b: { left: number; right: number; top: number; bottom: number },
+    ): boolean {
+      return (
+        a.left < b.right &&
+        a.right > b.left &&
+        a.top < b.bottom &&
+        a.bottom > b.top
+      );
+    }
+
+    it('provides at least 9 slots in ROOM_SLOTS for every room', () => {
+      for (const roomId of ROOM_IDS) {
+        expect(ROOM_SLOTS[roomId].length).toBeGreaterThanOrEqual(9);
+      }
+    });
+
+    it('places every slot on a walkable floor tile without objectTile inside room bounds and keeps its bubble within the canvas', () => {
+      for (const roomId of ROOM_IDS) {
+        const room = getRoom(roomId);
+        for (const slot of ROOM_SLOTS[roomId]) {
+          expect(slot.x).toBeGreaterThanOrEqual(room.bounds.x);
+          expect(slot.x + 1).toBeLessThanOrEqual(
+            room.bounds.x + room.bounds.width,
+          );
+          expect(slot.y).toBeGreaterThanOrEqual(room.bounds.y);
+          expect(slot.y + 1).toBeLessThanOrEqual(
+            room.bounds.y + room.bounds.height,
+          );
+
+          const localX = slot.x - room.bounds.x;
+          const localY = slot.y - room.bounds.y;
+          const cell = room.tiles.find(
+            (c) => c.localX === localX && c.localY === localY,
+          );
+          expect(cell).toBeDefined();
+          expect(cell?.objectTile).toBeUndefined();
+
+          const rect = getBubbleRect(slot.x * TILE_SIZE, slot.y * TILE_SIZE);
+          expect(rect.left).toBeGreaterThanOrEqual(0);
+          expect(rect.right).toBeLessThanOrEqual(TOTAL_WIDTH_PX);
+          expect(rect.top).toBeGreaterThanOrEqual(0);
+          expect(rect.bottom).toBeLessThanOrEqual(TOTAL_HEIGHT_PX);
         }
       }
     });
 
-    it('scales all SPOTS dx/dy and instanceOffsets by TILE_SIZE / 32 relative to main', () => {
-      const px = TILE_SIZE / 32;
-      expect(px).toBe(4);
-
-      const mainSpots: Record<
-        Agent,
-        Record<
-          RoomId,
-          {
-            wp: string;
-            dx: number;
-            dy: number;
-            instanceOffsets: { dx: number; dy: number }[];
+    it('verifies speech bubble rectangles never overlap for any pair of slots in any room', () => {
+      for (const roomId of ROOM_IDS) {
+        const slots = ROOM_SLOTS[roomId];
+        const rects = slots.map((s, idx) => ({
+          idx,
+          x: s.x * TILE_SIZE,
+          y: s.y * TILE_SIZE,
+          rect: getBubbleRect(s.x * TILE_SIZE, s.y * TILE_SIZE),
+        }));
+        for (let i = 0; i < rects.length; i++) {
+          for (let j = i + 1; j < rects.length; j++) {
+            const overlaps = doRectsOverlap(rects[i].rect, rects[j].rect);
+            expect(
+              overlaps,
+              `Speech bubbles overlap in room "${roomId}" between slot ${rects[i].idx} (${slots[i].x}, ${slots[i].y}) and slot ${rects[j].idx} (${slots[j].x}, ${slots[j].y})`,
+            ).toBe(false);
           }
-        >
-      > = {
-        claude: {
-          ceo: {
-            wp: 'ceo_desk',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: 36 }],
-          },
-          dev: {
-            wp: 'dev_meeting',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: -36 }],
-          },
-          qa: {
-            wp: 'qa_servers',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: 36 }],
-          },
-          lounge: {
-            wp: 'lounge_couch',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: -36 }],
-          },
-          hall: {
-            wp: 'hall_center',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: 36 }],
-          },
+        }
+      }
+    });
+
+    it('assigns pairwise distinct indices in slotIndexFor for all team leads and all agents × instances 0..1', () => {
+      expect(
+        slotIndexFor({
+          id: 'team-lead-frontend',
+          agent: 'agy',
+          team: 'frontend',
+          isTeamLead: true,
+        }),
+      ).toBe(0);
+      expect(
+        slotIndexFor({
+          id: 'team-lead-backend',
+          agent: 'claude',
+          team: 'backend',
+          isTeamLead: true,
+        }),
+      ).toBe(1);
+      expect(
+        slotIndexFor({
+          id: 'team-lead-qa',
+          agent: 'codex',
+          team: 'qa',
+          isTeamLead: true,
+        }),
+      ).toBe(2);
+
+      const allIndices: number[] = [
+        slotIndexFor({
+          id: 'team-lead-frontend',
+          agent: 'agy',
+          team: 'frontend',
+          isTeamLead: true,
+        }),
+        slotIndexFor({
+          id: 'team-lead-backend',
+          agent: 'claude',
+          team: 'backend',
+          isTeamLead: true,
+        }),
+        slotIndexFor({
+          id: 'team-lead-qa',
+          agent: 'codex',
+          team: 'qa',
+          isTeamLead: true,
+        }),
+      ];
+
+      for (const instanceIndex of [0, 1]) {
+        for (const agent of ['claude', 'agy', 'codex'] as const) {
+          allIndices.push(slotIndexFor({ agent, instanceIndex }));
+        }
+      }
+
+      expect(allIndices).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(new Set(allIndices).size).toBe(9);
+
+      // Modulo wrap when slotIndex >= room capacity
+      const wrapSpot = getAgentSpot('claude', 'dev', 0, ROOM_SLOTS.dev.length);
+      expect(wrapSpot.x).toBe(ROOM_SLOTS.dev[0].x * TILE_SIZE);
+      expect(wrapSpot.y).toBe(ROOM_SLOTS.dev[0].y * TILE_SIZE);
+    });
+
+    it('end-to-end: deriveCharacters with 3 team leads plus 2 active runs per agent produces non-overlapping bubbles in every room', () => {
+      const state = {
+        teams: {
+          frontend: { status: 'working' as const },
+          backend: { status: 'working' as const },
+          qa: { status: 'working' as const },
         },
-        agy: {
-          ceo: {
-            wp: 'ceo_board',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: -36, dy: 0 },
-            ],
+        runs: {
+          'claude-0': {
+            runId: 'claude-0',
+            agent: 'claude' as const,
+            status: 'running' as const,
+            room: 'dev' as const,
+            timestamp: '2026-10-24T10:00:00Z',
+            data: {},
           },
-          dev: {
-            wp: 'dev_desk',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: -36, dy: 0 },
-            ],
+          'claude-1': {
+            runId: 'claude-1',
+            agent: 'claude' as const,
+            status: 'running' as const,
+            room: 'dev' as const,
+            timestamp: '2026-10-24T10:01:00Z',
+            data: {},
           },
-          qa: {
-            wp: 'qa_desk',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: -36, dy: 0 },
-            ],
+          'agy-0': {
+            runId: 'agy-0',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            room: 'dev' as const,
+            timestamp: '2026-10-24T10:02:00Z',
+            data: {},
           },
-          lounge: {
-            wp: 'lounge_coffee',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: -36, dy: 0 },
-            ],
+          'agy-1': {
+            runId: 'agy-1',
+            agent: 'agy' as const,
+            status: 'running' as const,
+            room: 'dev' as const,
+            timestamp: '2026-10-24T10:03:00Z',
+            data: {},
           },
-          hall: {
-            wp: 'hall_center',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
+          'codex-0': {
+            runId: 'codex-0',
+            agent: 'codex' as const,
+            status: 'running' as const,
+            room: 'dev' as const,
+            timestamp: '2026-10-24T10:04:00Z',
+            data: {},
           },
-        },
-        codex: {
-          ceo: {
-            wp: 'ceo_board',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          dev: {
-            wp: 'dev_meeting',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          qa: {
-            wp: 'qa_desk',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          lounge: {
-            wp: 'lounge_couch',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          hall: {
-            wp: 'hall_east',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
+          'codex-1': {
+            runId: 'codex-1',
+            agent: 'codex' as const,
+            status: 'running' as const,
+            room: 'dev' as const,
+            timestamp: '2026-10-24T10:05:00Z',
+            data: {},
           },
         },
       };
 
-      for (const agent of ['claude', 'agy', 'codex'] as const) {
-        for (const room of ROOM_IDS) {
-          const actual = SPOTS[agent][room];
-          const expected = mainSpots[agent][room];
-          expect(actual.wp).toBe(expected.wp);
-          expect(actual.dx).toBe(expected.dx * px);
-          expect(actual.dy).toBe(expected.dy * px);
-          expect(actual.instanceOffsets).toEqual(
-            expected.instanceOffsets.map((o) => ({
-              dx: o.dx * px,
-              dy: o.dy * px,
-            })),
-          );
-        }
+      const characters = deriveCharacters(state);
+      expect(characters).toHaveLength(9);
+      expect(new Set(characters.map((c) => c.slotIndex)).size).toBe(9);
+
+      // Verify characters in their assigned rooms (e.g. dev has frontend lead, backend lead, and 6 active runs = 8 figures)
+      const byRoom = new Map<RoomId, { id: string; x: number; y: number }[]>();
+      for (const c of characters) {
+        const room: RoomId =
+          c.isTeamLead && c.team ? TEAM_DESKS[c.team].roomId : 'dev';
+        const controller = new AgentController(
+          c.agent,
+          room,
+          c.instanceIndex,
+          c.team,
+          c.isTeamLead,
+          c.slotIndex,
+        );
+        const list = byRoom.get(room) ?? [];
+        list.push({ id: c.id, x: controller.x, y: controller.y });
+        byRoom.set(room, list);
       }
 
-      // doSpotsOverlap default size is one full tile (TILE_SIZE)
-      expect(doSpotsOverlap({ x: 0, y: 0 }, { x: TILE_SIZE - 1, y: 0 })).toBe(
-        true,
-      );
-      expect(doSpotsOverlap({ x: 0, y: 0 }, { x: TILE_SIZE, y: 0 })).toBe(
-        false,
-      );
-    });
-
-    it('guarantees pairwise distance >= 40 px between all agents in every room', () => {
-      const agents: Agent[] = ['claude', 'agy', 'codex'];
-      for (const room of ROOM_IDS) {
-        const positions = agents.map((agent) => getAgentSpot(agent, room));
-        for (let i = 0; i < positions.length; i++) {
-          for (let j = i + 1; j < positions.length; j++) {
-            const dist = Math.hypot(
-              positions[i].x - positions[j].x,
-              positions[i].y - positions[j].y,
-            );
-            expect(dist).toBeGreaterThanOrEqual(40);
+      for (const [roomId, list] of byRoom.entries()) {
+        for (let i = 0; i < list.length; i++) {
+          for (let j = i + 1; j < list.length; j++) {
+            expect(
+              doSpotsOverlap(list[i], list[j]),
+              `Spots overlap in "${roomId}" between ${list[i].id} and ${list[j].id}`,
+            ).toBe(false);
+            expect(
+              doRectsOverlap(
+                getBubbleRect(list[i].x, list[i].y),
+                getBubbleRect(list[j].x, list[j].y),
+              ),
+              `Bubbles overlap in "${roomId}" between ${list[i].id} and ${list[j].id}`,
+            ).toBe(false);
           }
         }
       }
@@ -747,10 +816,6 @@ describe('office/sprites', () => {
       agy.setTargetRoom(stateRoomAgy);
       claude.setTargetRoom(stateRoomClaude);
 
-      const hallCenterWp = WAYPOINTS['hall_center'];
-      const hallCenterBaseX = hallCenterWp.x * TILE_SIZE; // 416
-      const hallCenterBaseY = hallCenterWp.y * TILE_SIZE; // 288
-
       let claudePassedHallCenter = false;
       let agyPassedHallCenter = false;
       let claudeHandoverAnimAtHall = false;
@@ -762,11 +827,14 @@ describe('office/sprites', () => {
         const claudeRes = claude.tick(dt, stateStatusClaude, stateRoomClaude);
         const agyRes = agy.tick(dt, stateStatusAgy, stateRoomAgy);
 
-        // Check if Claude passes hall_center
+        const claudeHallSpot = getAgentSpot('claude', 'hall');
+        const agyHallSpot = getAgentSpot('agy', 'hall');
+
+        // Check if Claude passes hall
         if (
           Math.hypot(
-            claudeRes.x - (hallCenterBaseX - 24 * (TILE_SIZE / 32)),
-            claudeRes.y - hallCenterBaseY,
+            claudeRes.x - claudeHallSpot.x,
+            claudeRes.y - claudeHallSpot.y,
           ) < 5
         ) {
           claudePassedHallCenter = true;
@@ -775,12 +843,9 @@ describe('office/sprites', () => {
           }
         }
 
-        // Check if Agy passes hall_center
+        // Check if Agy passes hall
         if (
-          Math.hypot(
-            agyRes.x - (hallCenterBaseX + 24 * (TILE_SIZE / 32)),
-            agyRes.y - hallCenterBaseY,
-          ) < 5
+          Math.hypot(agyRes.x - agyHallSpot.x, agyRes.y - agyHallSpot.y) < 5
         ) {
           agyPassedHallCenter = true;
           if (agyRes.animation === 'handover') {
@@ -808,14 +873,14 @@ describe('office/sprites', () => {
   describe('deriveCharacters (Runs -> Characters)', () => {
     it('returns default 3 characters for claude, agy, codex when state is empty or undefined', () => {
       expect(deriveCharacters(null)).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
-        { id: 'agy', agent: 'agy', instanceIndex: 0 },
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0, slotIndex: 4 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
       ]);
       expect(deriveCharacters({})).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
-        { id: 'agy', agent: 'agy', instanceIndex: 0 },
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0, slotIndex: 4 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
       ]);
     });
 
@@ -833,10 +898,10 @@ describe('office/sprites', () => {
       };
       const chars = deriveCharacters(state);
       expect(chars.filter((c) => c.agent === 'claude')).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
       ]);
       expect(chars.filter((c) => c.agent === 'codex')).toEqual([
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
       ]);
     });
 
@@ -867,12 +932,14 @@ describe('office/sprites', () => {
         agent: 'agy',
         runId: 'run-1',
         instanceIndex: 0,
+        slotIndex: 4,
       });
       expect(agyChars[1]).toEqual({
         id: 'run-2',
         agent: 'agy',
         runId: 'run-2',
         instanceIndex: 1,
+        slotIndex: 7,
       });
     });
 
@@ -904,6 +971,7 @@ describe('office/sprites', () => {
         agent: 'agy',
         runId: 'run-2',
         instanceIndex: 0,
+        slotIndex: 4,
       });
 
       // 2. Both runs ended
@@ -932,6 +1000,7 @@ describe('office/sprites', () => {
         id: 'agy',
         agent: 'agy',
         instanceIndex: 0,
+        slotIndex: 4,
       });
     });
 
@@ -1005,7 +1074,7 @@ describe('office/sprites', () => {
       const chars = deriveCharacters(state);
       const claudeChars = chars.filter((c) => c.agent === 'claude');
       expect(claudeChars).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
       ]);
     });
   });
@@ -1019,16 +1088,16 @@ describe('office/sprites', () => {
           const spot1 = getAgentSpot(agent, room, 1);
           expect(doSpotsOverlap(spot0, spot1)).toBe(false);
           const dist = Math.hypot(spot0.x - spot1.x, spot0.y - spot1.y);
-          expect(dist).toBeGreaterThanOrEqual(36);
+          expect(dist).toBeGreaterThanOrEqual(TILE_SIZE);
         }
       }
     });
 
     it('guarantees all characters in the same room (including parallel runs) never overlap', () => {
-      // In any room, even if we have claude + agy#0 + agy#1 + codex#0 + codex#1
       for (const room of ROOM_IDS) {
         const positions = [
           getAgentSpot('claude', room, 0),
+          getAgentSpot('claude', room, 1),
           getAgentSpot('agy', room, 0),
           getAgentSpot('agy', room, 1),
           getAgentSpot('codex', room, 0),
@@ -1040,8 +1109,6 @@ describe('office/sprites', () => {
             const posA = positions[i];
             const posB = positions[j];
             expect(doSpotsOverlap(posA, posB)).toBe(false);
-            const dist = Math.hypot(posA.x - posB.x, posA.y - posB.y);
-            expect(dist).toBeGreaterThanOrEqual(36);
           }
         }
       }
@@ -1069,30 +1136,27 @@ describe('office/sprites', () => {
       });
     });
 
-    it('derives team spots at team desks with non-overlapping worker offsets', () => {
+    it('derives team spots from ROOM_SLOTS without overlapping any agent slots', () => {
       for (const team of TEAMS) {
-        const leadSpot = getTeamSpot(team, 0);
-        const worker1Spot = getTeamSpot(team, 1);
-        const worker2Spot = getTeamSpot(team, 2);
-
+        const leadSpot = getTeamSpot(team);
         expect(leadSpot.x).toBeGreaterThan(0);
         expect(leadSpot.y).toBeGreaterThan(0);
-        expect(doSpotsOverlap(leadSpot, worker1Spot)).toBe(false);
-        expect(doSpotsOverlap(leadSpot, worker2Spot)).toBe(false);
-        expect(doSpotsOverlap(worker1Spot, worker2Spot)).toBe(false);
       }
+      expect(
+        doSpotsOverlap(getTeamSpot('frontend'), getTeamSpot('backend')),
+      ).toBe(false);
     });
 
     it('produces identical output to main when state has no teams', () => {
       expect(deriveCharacters(null)).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
-        { id: 'agy', agent: 'agy', instanceIndex: 0 },
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0, slotIndex: 4 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
       ]);
       expect(deriveCharacters({})).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
-        { id: 'agy', agent: 'agy', instanceIndex: 0 },
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0, slotIndex: 4 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
       ]);
       const stateWithoutTeams = {
         runs: {
@@ -1111,9 +1175,10 @@ describe('office/sprites', () => {
           agent: 'claude',
           runId: 'r-active',
           instanceIndex: 0,
+          slotIndex: 3,
         },
-        { id: 'agy', agent: 'agy', instanceIndex: 0 },
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0, slotIndex: 4 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
       ]);
     });
 
@@ -1128,15 +1193,16 @@ describe('office/sprites', () => {
       };
       const chars = deriveCharacters(state);
       expect(chars).toEqual([
-        { id: 'claude', agent: 'claude', instanceIndex: 0 },
-        { id: 'agy', agent: 'agy', instanceIndex: 0 },
-        { id: 'codex', agent: 'codex', instanceIndex: 0 },
+        { id: 'claude', agent: 'claude', instanceIndex: 0, slotIndex: 3 },
+        { id: 'agy', agent: 'agy', instanceIndex: 0, slotIndex: 4 },
+        { id: 'codex', agent: 'codex', instanceIndex: 0, slotIndex: 5 },
         {
           id: 'team-lead-frontend',
           agent: 'agy',
           team: 'frontend',
           isTeamLead: true,
           instanceIndex: 0,
+          slotIndex: 0,
         },
         {
           id: 'team-lead-backend',
@@ -1144,6 +1210,7 @@ describe('office/sprites', () => {
           team: 'backend',
           isTeamLead: true,
           instanceIndex: 0,
+          slotIndex: 1,
         },
         {
           id: 'team-lead-qa',
@@ -1151,6 +1218,7 @@ describe('office/sprites', () => {
           team: 'qa',
           isTeamLead: true,
           instanceIndex: 0,
+          slotIndex: 2,
         },
       ]);
     });

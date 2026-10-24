@@ -173,6 +173,7 @@
         agent={char.agent}
         runId={char.runId}
         instanceIndex={char.instanceIndex}
+        slotIndex={char.slotIndex}
         team={char.team}
         isTeamLead={char.isTeamLead}
         onclick={(event) => handleCharacterClick(char, event)}

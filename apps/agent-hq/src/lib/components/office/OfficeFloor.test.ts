@@ -14,10 +14,10 @@ describe('OfficeFloor.svelte scaling and layout', () => {
     resetLiveStore();
   });
 
-  it('renders Zoom 1x with exact screen dimensions matching 32px per tile', () => {
-    // 28 columns * 32px = 896px; 19 rows * 32px = 608px
-    const expectedWidth = 28 * 32;
-    const expectedHeight = 19 * 32;
+  it('renders Zoom 1x with exact screen dimensions matching 64px per tile', () => {
+    // 28 columns * 64px = 1792px; 19 rows * 64px = 1216px
+    const expectedWidth = 28 * 64;
+    const expectedHeight = 19 * 64;
 
     const { html } = render(OfficeFloor, { props: { scale: 1 } });
     expect(html).toContain(`width: ${expectedWidth}px`);
@@ -27,10 +27,10 @@ describe('OfficeFloor.svelte scaling and layout', () => {
     expect(html).toContain(`--tileset-size: ${8 * TILE_SIZE}px`);
   });
 
-  it('renders Zoom 2x with exact screen dimensions matching 64px per tile', () => {
-    // 28 columns * 64px = 1792px; 19 rows * 64px = 1216px
-    const expectedWidth = 28 * 64;
-    const expectedHeight = 19 * 64;
+  it('renders Zoom 2x with exact screen dimensions matching 128px per tile', () => {
+    // 28 columns * 128px = 3584px; 19 rows * 128px = 2432px
+    const expectedWidth = 28 * 128;
+    const expectedHeight = 19 * 128;
 
     const { html } = render(OfficeFloor, { props: { scale: 2 } });
     expect(html).toContain(`width: ${expectedWidth}px`);
@@ -40,14 +40,14 @@ describe('OfficeFloor.svelte scaling and layout', () => {
 
   it('verifies TILE_SIZE is 128 and canvas size is 3584x2432', () => {
     expect(TILE_SIZE).toBe(128);
-    expect(CANVAS_BASE_SCALE).toBe(0.25);
+    expect(CANVAS_BASE_SCALE).toBe(0.5);
     expect(TOTAL_WIDTH_PX).toBe(28 * 128);
     expect(TOTAL_HEIGHT_PX).toBe(19 * 128);
   });
 
   it('counter-scales UI overlays (speech bubbles, agent badges, room labels, waypoints) by 1 / CANVAS_BASE_SCALE', () => {
-    const overlayScale = 1 / CANVAS_BASE_SCALE; // 4
-    expect(overlayScale).toBe(4);
+    const overlayScale = 1 / CANVAS_BASE_SCALE; // 2
+    expect(overlayScale).toBe(2);
 
     // Put agy into coding state so a speech bubble is rendered
     liveStore.state.agents.agy = {
@@ -78,10 +78,10 @@ describe('OfficeFloor.svelte scaling and layout', () => {
 
     // 2. Room labels counter-scaled (top right for rooms, top left for hall)
     expect(html).toContain(
-      `style="transform: scale(${overlayScale}); transform-origin: top right;"`,
+      `right: ${6 / CANVAS_BASE_SCALE}px; top: ${6 / CANVAS_BASE_SCALE}px; transform: scale(${overlayScale}); transform-origin: top right;`,
     );
     expect(html).toContain(
-      `style="transform: scale(${overlayScale}); transform-origin: top left;"`,
+      `left: ${12 / CANVAS_BASE_SCALE}px; top: ${4 / CANVAS_BASE_SCALE}px; transform: scale(${overlayScale}); transform-origin: top left;`,
     );
 
     // 3. Waypoint markers counter-scaled with center origin

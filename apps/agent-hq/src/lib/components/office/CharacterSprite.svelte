@@ -7,6 +7,7 @@
     getFrameIndex,
     getFrameBackgroundPosition,
     getSpeechBubble,
+    slotIndexFor,
     AgentController,
     type AnimationName,
     type CharacterStatus,
@@ -27,6 +28,7 @@
     agent: Agent;
     runId?: string;
     instanceIndex?: number;
+    slotIndex?: number;
     team?: Team;
     isTeamLead?: boolean;
     onclick?: (event: MouseEvent) => void;
@@ -36,6 +38,7 @@
     agent,
     runId,
     instanceIndex = 0,
+    slotIndex,
     team,
     isTeamLead = false,
     onclick,
@@ -175,6 +178,7 @@
     instanceIndex,
     team,
     isTeamLead,
+    slotIndex,
   );
 
   let currentX = $state(controller.x);
@@ -192,6 +196,11 @@
   $effect(() => {
     if (controller.instanceIndex !== instanceIndex) {
       controller.instanceIndex = instanceIndex;
+    }
+    const nextSlotIndex =
+      slotIndex ?? slotIndexFor({ agent, instanceIndex, team, isTeamLead });
+    if (controller.slotIndex !== nextSlotIndex) {
+      controller.slotIndex = nextSlotIndex;
     }
 
     const targetRoom = characterRoom;
@@ -421,9 +430,9 @@
   }
 
   .character-container:focus-visible {
-    outline: 2px solid #818cf8;
-    outline-offset: 2px;
-    border-radius: 4px;
+    outline: calc(2px * var(--overlay-scale, 1)) solid #818cf8;
+    outline-offset: calc(2px * var(--overlay-scale, 1));
+    border-radius: calc(4px * var(--overlay-scale, 1));
   }
 
   .agent-claude {

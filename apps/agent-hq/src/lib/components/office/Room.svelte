@@ -50,16 +50,16 @@
   <!-- Room Identification Label -->
   {#if showLabel && room.id !== 'hall'}
     <div
-      class="room-label pointer-events-none absolute right-1.5 top-1.5 z-20 flex items-center gap-1 rounded bg-slate-950/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-200 border border-slate-700/70 shadow-sm backdrop-blur-xs"
-      style="transform: scale({1 / CANVAS_BASE_SCALE}); transform-origin: top right;"
+      class="room-label pointer-events-none absolute z-20 flex items-center gap-1 rounded bg-slate-950/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-200 border border-slate-700/70 shadow-sm backdrop-blur-xs"
+      style="right: {6 / CANVAS_BASE_SCALE}px; top: {6 / CANVAS_BASE_SCALE}px; transform: scale({1 / CANVAS_BASE_SCALE}); transform-origin: top right;"
     >
       <span>{room.icon}</span>
       <span>{room.name}</span>
     </div>
   {:else if showLabel && room.id === 'hall'}
     <div
-      class="room-label pointer-events-none absolute left-3 top-1 z-20 flex items-center gap-1 rounded bg-slate-950/70 px-1.5 py-0.5 font-mono text-[9px] text-slate-300 border border-slate-800"
-      style="transform: scale({1 / CANVAS_BASE_SCALE}); transform-origin: top left;"
+      class="room-label pointer-events-none absolute z-20 flex items-center gap-1 rounded bg-slate-950/70 px-1.5 py-0.5 font-mono text-[9px] text-slate-300 border border-slate-800"
+      style="left: {12 / CANVAS_BASE_SCALE}px; top: {4 / CANVAS_BASE_SCALE}px; transform: scale({1 / CANVAS_BASE_SCALE}); transform-origin: top left;"
     >
       <span>{room.icon}</span>
       <span>{room.name}</span>
