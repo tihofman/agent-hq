@@ -112,7 +112,32 @@ Um Claude Code und Worker-Agenten an Agent-HQ anzubinden, stehen zwei Skripte zu
 
 ---
 
-## 5. Branching & Worktree-Strategie
+## 5. Skill `agent-hq` für Claude Code installieren
+
+Der Skill [`skills/agent-hq`](../../skills/agent-hq/SKILL.md) bringt Claude Code bei, Aufträge über die V2-Queue einzureihen, Rückfragen der Worker zu beantworten und Agent-HQ zu starten und zu prüfen.
+
+> **Hinweis:** Das Repository `tihofman/agent-hq` ist privat. Für beide Wege brauchst du Lesezugriff auf das Repo und eine funktionierende Git-Authentifizierung für GitHub (z. B. `gh auth login` oder SSH-Key).
+
+Variante A, über die [skills-CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add tihofman/agent-hq
+```
+
+Variante B, als Claude-Code-Plugin (in einer Claude-Code-Session):
+
+```text
+/plugin marketplace add tihofman/agent-hq
+/plugin install agent-hq@agent-hq
+```
+
+Der Marketplace (`.claude-plugin/marketplace.json`) und das Plugin-Manifest (`.claude-plugin/plugin.json`) liegen im Repo-Root. Prüfen lassen sie sich mit `claude plugin validate . --strict`.
+
+Der Skill steuert nur die Agent-HQ-Instanz, die im selben Repo läuft (siehe Einschränkung in `SKILL.md`).
+
+---
+
+## 6. Branching & Worktree-Strategie
 
 Alle Features und Tickets werden über isolierte Git Worktrees bearbeitet:
 
