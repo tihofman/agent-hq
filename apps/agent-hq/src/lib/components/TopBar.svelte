@@ -125,6 +125,17 @@
         {displayBranch}
       </span>
     </div>
+
+    {#if liveStore.state.teams}
+      <span
+        class="rounded bg-indigo-950/80 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-indigo-300 border border-indigo-800/60"
+        title="V2-Worker-Pool aktiv"
+        aria-label="V2-Worker-Pool aktiv"
+        data-testid="v2-badge"
+      >
+        V2
+      </span>
+    {/if}
   </div>
 
   <!-- Center: Overall System Status Indicator -->
