@@ -14,11 +14,14 @@
   import { formatCharacterAriaLabel } from '../../office/log-filter';
   import { getOldestPendingQuestionForTeam } from '../../office/question-modal';
   import {
+    CANVAS_BASE_SCALE,
     TEAM_DESKS,
     TEAM_LABELS,
     type RoomId,
     type Team,
   } from '../../office/layout';
+
+  const overlayScale = 1 / CANVAS_BASE_SCALE;
 
   interface Props {
     agent: Agent;
@@ -346,6 +349,7 @@
     width: {metadata.frameWidth}px;
     height: {metadata.frameHeight}px;
     z-index: {Math.round(currentY) + 20};
+    --overlay-scale: {overlayScale};
   "
   data-testid="character-sprite-{agent}"
   data-agent={agent}
@@ -366,6 +370,7 @@
       class="speech-bubble bubble-{bubble.type}"
       class:question-bubble={characterStatus === 'waiting_input' ||
         bubble.text === '?'}
+      style="transform: translateX(-50%) scale({overlayScale}); transform-origin: bottom center;"
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
       title={bubble.tooltip}
@@ -391,7 +396,10 @@
   ></div>
 
   <!-- Agent Retro Nametag Badge -->
-  <span class="agent-badge">
+  <span
+    class="agent-badge"
+    style="transform: translateX(-50%) scale({overlayScale}); transform-origin: bottom center;"
+  >
     {#if teamLabel}
       {teamLabel}
     {:else}
@@ -445,9 +453,10 @@
   /* 16-Bit Retro Speech Bubble */
   .speech-bubble {
     position: absolute;
-    bottom: calc(100% + 3px);
+    bottom: calc(100% + 3px * var(--overlay-scale, 1));
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scale(var(--overlay-scale, 1));
+    transform-origin: bottom center;
     display: flex;
     align-items: center;
     gap: 3px;
@@ -534,10 +543,11 @@
   @keyframes question-bob {
     0%,
     100% {
-      transform: translate(-50%, 0) scale(1);
+      transform: translateX(-50%) scale(var(--overlay-scale, 1));
     }
     50% {
-      transform: translate(-50%, -3px) scale(1.06);
+      transform: translateX(-50%) scale(var(--overlay-scale, 1))
+        translateY(-3px) scale(1.06);
     }
   }
 
@@ -557,10 +567,11 @@
   @keyframes bubble-bob {
     0%,
     100% {
-      transform: translate(-50%, 0);
+      transform: translateX(-50%) scale(var(--overlay-scale, 1));
     }
     50% {
-      transform: translate(-50%, -2px);
+      transform: translateX(-50%) scale(var(--overlay-scale, 1))
+        translateY(-2px);
     }
   }
 
@@ -577,9 +588,10 @@
   .agent-badge {
     display: block;
     position: absolute;
-    bottom: -10px;
+    bottom: calc(-10px * var(--overlay-scale, 1));
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scale(var(--overlay-scale, 1));
+    transform-origin: bottom center;
     font-family: monospace;
     font-size: 8px;
     font-weight: 700;

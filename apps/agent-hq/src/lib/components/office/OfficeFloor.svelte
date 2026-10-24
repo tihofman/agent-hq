@@ -185,10 +185,11 @@
         {#each ROOMS as room (room.id)}
           {#each room.waypoints as wp (wp.id)}
             <div
-              class="absolute flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-emerald-400/80 shadow ring-1 ring-white"
+              class="waypoint-marker absolute flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-emerald-400/80 shadow ring-1 ring-white"
               style="left: {wp.x * TILE_SIZE + TILE_SIZE / 2}px; top: {wp.y *
                 TILE_SIZE +
-                TILE_SIZE / 2}px;"
+                TILE_SIZE / 2}px; transform: scale({1 /
+                CANVAS_BASE_SCALE}); transform-origin: center;"
               title="{wp.id} ({wp.x}, {wp.y})"
             ></div>
           {/each}

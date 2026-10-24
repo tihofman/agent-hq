@@ -486,6 +486,175 @@ describe('office/sprites', () => {
       }
     });
 
+    it('scales all SPOTS dx/dy and instanceOffsets by TILE_SIZE / 32 relative to main', () => {
+      const px = TILE_SIZE / 32;
+      expect(px).toBe(4);
+
+      const mainSpots: Record<
+        Agent,
+        Record<
+          RoomId,
+          {
+            wp: string;
+            dx: number;
+            dy: number;
+            instanceOffsets: { dx: number; dy: number }[];
+          }
+        >
+      > = {
+        claude: {
+          ceo: {
+            wp: 'ceo_desk',
+            dx: 0,
+            dy: 0,
+            instanceOffsets: [{ dx: 0, dy: 36 }],
+          },
+          dev: {
+            wp: 'dev_meeting',
+            dx: -24,
+            dy: 0,
+            instanceOffsets: [{ dx: 0, dy: -36 }],
+          },
+          qa: {
+            wp: 'qa_servers',
+            dx: 0,
+            dy: 0,
+            instanceOffsets: [{ dx: 0, dy: 36 }],
+          },
+          lounge: {
+            wp: 'lounge_couch',
+            dx: -24,
+            dy: 0,
+            instanceOffsets: [{ dx: 0, dy: -36 }],
+          },
+          hall: {
+            wp: 'hall_center',
+            dx: -24,
+            dy: 0,
+            instanceOffsets: [{ dx: 0, dy: 36 }],
+          },
+        },
+        agy: {
+          ceo: {
+            wp: 'ceo_board',
+            dx: -24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: 36 },
+              { dx: -36, dy: 0 },
+            ],
+          },
+          dev: {
+            wp: 'dev_desk',
+            dx: 0,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: -36 },
+              { dx: -36, dy: 0 },
+            ],
+          },
+          qa: {
+            wp: 'qa_desk',
+            dx: -24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: 36 },
+              { dx: -36, dy: 0 },
+            ],
+          },
+          lounge: {
+            wp: 'lounge_coffee',
+            dx: 0,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: -36 },
+              { dx: -36, dy: 0 },
+            ],
+          },
+          hall: {
+            wp: 'hall_center',
+            dx: 24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: 36 },
+              { dx: 36, dy: 0 },
+            ],
+          },
+        },
+        codex: {
+          ceo: {
+            wp: 'ceo_board',
+            dx: 24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: 36 },
+              { dx: 36, dy: 0 },
+            ],
+          },
+          dev: {
+            wp: 'dev_meeting',
+            dx: 24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: -36 },
+              { dx: 36, dy: 0 },
+            ],
+          },
+          qa: {
+            wp: 'qa_desk',
+            dx: 24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: 36 },
+              { dx: 36, dy: 0 },
+            ],
+          },
+          lounge: {
+            wp: 'lounge_couch',
+            dx: 24,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: -36 },
+              { dx: 36, dy: 0 },
+            ],
+          },
+          hall: {
+            wp: 'hall_east',
+            dx: 0,
+            dy: 0,
+            instanceOffsets: [
+              { dx: 0, dy: 36 },
+              { dx: 36, dy: 0 },
+            ],
+          },
+        },
+      };
+
+      for (const agent of ['claude', 'agy', 'codex'] as const) {
+        for (const room of ROOM_IDS) {
+          const actual = SPOTS[agent][room];
+          const expected = mainSpots[agent][room];
+          expect(actual.wp).toBe(expected.wp);
+          expect(actual.dx).toBe(expected.dx * px);
+          expect(actual.dy).toBe(expected.dy * px);
+          expect(actual.instanceOffsets).toEqual(
+            expected.instanceOffsets.map((o) => ({
+              dx: o.dx * px,
+              dy: o.dy * px,
+            })),
+          );
+        }
+      }
+
+      // doSpotsOverlap default size is one full tile (TILE_SIZE)
+      expect(doSpotsOverlap({ x: 0, y: 0 }, { x: TILE_SIZE - 1, y: 0 })).toBe(
+        true,
+      );
+      expect(doSpotsOverlap({ x: 0, y: 0 }, { x: TILE_SIZE, y: 0 })).toBe(
+        false,
+      );
+    });
+
     it('guarantees pairwise distance >= 40 px between all agents in every room', () => {
       const agents: Agent[] = ['claude', 'agy', 'codex'];
       for (const room of ROOM_IDS) {
@@ -593,10 +762,10 @@ describe('office/sprites', () => {
         const claudeRes = claude.tick(dt, stateStatusClaude, stateRoomClaude);
         const agyRes = agy.tick(dt, stateStatusAgy, stateRoomAgy);
 
-        // Check if Claude passes hall_center (spot is x: 392, y: 288)
+        // Check if Claude passes hall_center
         if (
           Math.hypot(
-            claudeRes.x - (hallCenterBaseX - 24),
+            claudeRes.x - (hallCenterBaseX - 24 * (TILE_SIZE / 32)),
             claudeRes.y - hallCenterBaseY,
           ) < 5
         ) {
@@ -606,10 +775,10 @@ describe('office/sprites', () => {
           }
         }
 
-        // Check if Agy passes hall_center (spot is x: 440, y: 288)
+        // Check if Agy passes hall_center
         if (
           Math.hypot(
-            agyRes.x - (hallCenterBaseX + 24),
+            agyRes.x - (hallCenterBaseX + 24 * (TILE_SIZE / 32)),
             agyRes.y - hallCenterBaseY,
           ) < 5
         ) {

@@ -138,31 +138,6 @@ class PixelGrid {
   }
 
   /**
-   * Stroke an ellipse outline centered at (cx, cy)
-   */
-  strokeEllipse(cx, cy, rx, ry, colorIndex) {
-    cx = Math.round(cx);
-    cy = Math.round(cy);
-    rx = Math.round(rx);
-    ry = Math.round(ry);
-    if (rx <= 0 || ry <= 0) return;
-    for (let dy = -ry; dy <= ry; dy++) {
-      const halfW = Math.round(
-        rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / (ry * ry))),
-      );
-      this.set(cx - halfW, cy + dy, colorIndex);
-      this.set(cx + halfW, cy + dy, colorIndex);
-    }
-    for (let dx = -rx; dx <= rx; dx++) {
-      const halfH = Math.round(
-        ry * Math.sqrt(Math.max(0, 1 - (dx * dx) / (rx * rx))),
-      );
-      this.set(cx + dx, cy - halfH, colorIndex);
-      this.set(cx + dx, cy + halfH, colorIndex);
-    }
-  }
-
-  /**
    * Fill a circle centered at (cx, cy)
    */
   fillCircle(cx, cy, r, colorIndex) {
@@ -173,7 +148,19 @@ class PixelGrid {
    * Stroke a circle centered at (cx, cy)
    */
   strokeCircle(cx, cy, r, colorIndex) {
-    this.strokeEllipse(cx, cy, r, r, colorIndex);
+    cx = Math.round(cx);
+    cy = Math.round(cy);
+    r = Math.round(r);
+    if (r <= 0) return;
+    for (let d = -r; d <= r; d++) {
+      const span = Math.round(
+        r * Math.sqrt(Math.max(0, 1 - (d * d) / (r * r))),
+      );
+      this.set(cx - span, cy + d, colorIndex);
+      this.set(cx + span, cy + d, colorIndex);
+      this.set(cx + d, cy - span, colorIndex);
+      this.set(cx + d, cy + span, colorIndex);
+    }
   }
 
   /**
@@ -188,27 +175,6 @@ class PixelGrid {
     this.fillCircle(x + w - r - 1, y + r, r, colorIndex);
     this.fillCircle(x + r, y + h - r - 1, r, colorIndex);
     this.fillCircle(x + w - r - 1, y + h - r - 1, r, colorIndex);
-  }
-
-  /**
-   * Dither a rectangle with a 2-color pattern
-   */
-  ditherRect(x, y, w, h, color1, color2, mode = 'checker') {
-    for (let dy = 0; dy < h; dy++) {
-      for (let dx = 0; dx < w; dx++) {
-        let useC2 = false;
-        if (mode === 'checker') {
-          useC2 = (dx + dy) % 2 === 0;
-        } else if (mode === 'diag') {
-          useC2 = (dx + dy) % 4 === 0;
-        } else if (mode === 'dots') {
-          useC2 = dx % 2 === 0 && dy % 2 === 0;
-        } else if (mode === 'sparse') {
-          useC2 = dx % 4 === 0 && dy % 4 === 0;
-        }
-        this.set(x + dx, y + dy, useC2 ? color2 : color1);
-      }
-    }
   }
 
   /**
