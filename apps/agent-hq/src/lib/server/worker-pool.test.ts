@@ -88,6 +88,7 @@ class MockQueueManager implements QueueManagerLike {
       attemptsMade: 0,
       getState: async () => job.state,
       promote: vi.fn(async () => {
+        job.delayUntil = undefined;
         job.state = 'waiting';
       }),
       updateData: vi.fn(async (next: WorkerTaskPayload) => {
@@ -108,18 +109,26 @@ class MockQueueManager implements QueueManagerLike {
     while (proc && job.state === 'waiting') {
       job.state = 'active';
       job.delayUntil = undefined;
+      const workerJob: MockJobRecord = {
+        ...job,
+        data: job.data,
+        getState: () => job.getState(),
+        updateData: vi.fn(async (next: WorkerTaskPayload) => {
+          workerJob.data = next;
+          await job.updateData(next);
+        }),
+      };
       try {
-        await proc(job as unknown as Job<TaskPayload>, `t-${job.id}`);
+        await proc(workerJob as unknown as Job<TaskPayload>, `t-${job.id}`);
         if (job.state === 'active') job.state = 'completed';
       } catch (err) {
         const isDelayed =
           err instanceof DelayedError ||
           (err as Error)?.name === 'DelayedError';
         if (isDelayed) {
-          job.state =
-            job.delayUntil !== undefined && job.delayUntil <= Date.now()
-              ? 'waiting'
-              : 'delayed';
+          if (job.delayUntil !== undefined) {
+            job.state = job.delayUntil <= Date.now() ? 'waiting' : 'delayed';
+          }
         } else if (++job.attemptsMade < DEFAULT_ATTEMPTS) job.state = 'waiting';
         else job.state = 'failed';
       }
@@ -887,6 +896,109 @@ describe('WorkerPool (#98)', () => {
         question: 'Persisted across restart?',
         options: ['Yes', 'No'],
         status: 'PENDING',
+      });
+
+      await pool.close();
+    });
+
+    it('preserves answer and immediately re-queues job when answered between slot read and moveToDelayed (#119)', async () => {
+      const sessionId = '33333333-4444-5555-6666-777777777777';
+      const callsFile = join(tempDir, 'race-119-calls.jsonl');
+      const delegateScript = await makeScript(
+        tempDir,
+        `jq -nc --arg p "$2" --arg s "\${HQ_SESSION_ID:-}" '{prompt:$p,hq_session:$s}' >> "${callsFile}"
+         echo "session id: ${sessionId}"
+         exit 0`,
+        'race-119-delegate.sh',
+      );
+
+      let issue119Runs = 0;
+      let issue120Runs = 0;
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+        afterProcessExit: async (j) => {
+          if (j.data.issueId === 119 && ++issue119Runs === 1) {
+            // Slot has already read PENDING into j.data; now user answers before updateData
+            await answerQuestion('119-1', 'Answer before updateData');
+          }
+          if (j.data.issueId === 120 && ++issue120Runs === 1) {
+            // Answer arrives right as moveToDelayed(+7d) is invoked while job is still active
+            const origMoveToDelayed = j.moveToDelayed;
+            let intercepted = false;
+            j.moveToDelayed = vi.fn(async (timestamp: number, tok?: string) => {
+              if (!intercepted) {
+                intercepted = true;
+                await answerQuestion('120-1', 'Answer before moveToDelayed');
+              }
+              return origMoveToDelayed(timestamp, tok);
+            });
+          }
+        },
+      });
+      await pool.start();
+
+      // Case 1: Answer arrives after slot's initial getJob read and before updateData
+      const origGetJob = manager.getQueue.bind(manager);
+      let asked119 = false;
+      let asked120 = false;
+      vi.spyOn(manager, 'getQueue').mockImplementation((team: Team) => {
+        const q = origGetJob(team);
+        return {
+          ...q,
+          getJob: async (jobId: string) => {
+            if (jobId === 'issue-119' && !asked119) {
+              asked119 = true;
+              await askQuestion({
+                issueId: 119,
+                team: 'frontend',
+                question: 'Race before updateData?',
+              });
+            }
+            if (jobId === 'issue-120' && !asked120) {
+              asked120 = true;
+              await askQuestion({
+                issueId: 120,
+                team: 'frontend',
+                question: 'Race before moveToDelayed?',
+              });
+            }
+            return q.getJob(jobId);
+          },
+        } as unknown as Queue<TaskPayload>;
+      });
+
+      const job119 = await manager.run('frontend', makeTask(119, 'frontend'));
+      expect(job119.state).toBe('completed');
+      expect(job119.data.question).toMatchObject({
+        id: '119-1',
+        status: 'ANSWERED',
+        answer: 'Answer before updateData',
+      });
+
+      // Case 2: Answer arrives after updateData and right before moveToDelayed(+7d) completes
+      const job120 = await manager.run('frontend', makeTask(120, 'frontend'));
+      expect(job120.state).toBe('completed');
+      expect(job120.promote).toHaveBeenCalledTimes(1);
+      expect(job120.data.question).toMatchObject({
+        id: '120-1',
+        status: 'ANSWERED',
+        answer: 'Answer before moveToDelayed',
+      });
+
+      const calls = (await readFile(callsFile, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(calls).toHaveLength(4);
+      expect(calls[1]).toEqual({
+        prompt: 'Answer before updateData',
+        hq_session: sessionId,
+      });
+      expect(calls[3]).toEqual({
+        prompt: 'Answer before moveToDelayed',
+        hq_session: sessionId,
       });
 
       await pool.close();
