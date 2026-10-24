@@ -18,7 +18,7 @@
       }
     },
     "build": {
-      "command": "vite build",
+      "command": "vite build && ../../scripts/check-client-bundle.sh",
       "options": {
         "cwd": "apps/agent-hq"
       },

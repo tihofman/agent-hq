@@ -1,7 +1,7 @@
 import officeTilesData from '../assets/tilesets/office_tiles.json';
 
 export type RoomId = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
-import { TEAMS, type Team } from '@agent-hq/queue';
+import { TEAMS, type Team } from '@agent-hq/queue/types';
 export { TEAMS, type Team };
 
 export const ROOM_IDS: readonly RoomId[] = [
