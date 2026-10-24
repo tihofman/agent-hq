@@ -542,6 +542,64 @@ export const ROOMS: readonly RoomDefinition[] = [
   },
 ] as const;
 
+export const ROOM_SLOTS: Record<RoomId, readonly { x: number; y: number }[]> = {
+  ceo: [
+    { x: 4, y: 4 },
+    { x: 12, y: 4 },
+    { x: 1, y: 5 },
+    { x: 6, y: 6 },
+    { x: 8, y: 4 },
+    { x: 2, y: 6 },
+    { x: 10, y: 6 },
+    { x: 5, y: 5 },
+    { x: 9, y: 5 },
+  ],
+  hall: [
+    { x: 4, y: 8 },
+    { x: 11, y: 8 },
+    { x: 18, y: 8 },
+    { x: 6, y: 9 },
+    { x: 13, y: 9 },
+    { x: 20, y: 9 },
+    { x: 4, y: 10 },
+    { x: 11, y: 10 },
+    { x: 18, y: 10 },
+  ],
+  dev: [
+    { x: 6, y: 14 },
+    { x: 10, y: 16 },
+    { x: 3, y: 16 },
+    { x: 3, y: 12 },
+    { x: 2, y: 13 },
+    { x: 2, y: 15 },
+    { x: 9, y: 12 },
+    { x: 7, y: 13 },
+    { x: 7, y: 15 },
+  ],
+  qa: [
+    { x: 18, y: 4 },
+    { x: 22, y: 4 },
+    { x: 19, y: 6 },
+    { x: 15, y: 6 },
+    { x: 21, y: 5 },
+    { x: 24, y: 6 },
+    { x: 26, y: 4 },
+    { x: 16, y: 5 },
+    { x: 25, y: 5 },
+  ],
+  lounge: [
+    { x: 19, y: 12 },
+    { x: 24, y: 12 },
+    { x: 17, y: 14 },
+    { x: 19, y: 15 },
+    { x: 18, y: 13 },
+    { x: 20, y: 16 },
+    { x: 24, y: 15 },
+    { x: 23, y: 13 },
+    { x: 24, y: 14 },
+  ],
+};
+
 export function getRoom(id: RoomId): RoomDefinition {
   const room = ROOMS.find((r) => r.id === id);
   if (!room) {

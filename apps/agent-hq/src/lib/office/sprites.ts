@@ -1,5 +1,7 @@
 import {
   findWaypointPath,
+  getRoom,
+  ROOM_SLOTS,
   WAYPOINTS,
   TILE_SIZE,
   TEAM_DESKS,
@@ -66,17 +68,7 @@ export interface SpeechBubble {
   tooltip?: string;
 }
 
-export interface InstanceOffset {
-  dx: number;
-  dy: number;
-}
-
-export interface Spot {
-  wp: string;
-  dx: number;
-  dy: number;
-  instanceOffsets?: readonly InstanceOffset[];
-}
+export const MAX_TITLE_LEN = 20;
 
 const METADATA_BY_AGENT: Record<Agent, SpriteMetadata> = {
   claude: claudeMeta as SpriteMetadata,
@@ -243,7 +235,6 @@ export function getSpeechBubble(
       const ticket = rawTicket.startsWith('#') ? rawTicket : `#${rawTicket}`;
       const cleanTitle = options?.title?.trim();
       if (cleanTitle) {
-        const MAX_TITLE_LEN = 32;
         const shortTitle =
           cleanTitle.length > MAX_TITLE_LEN
             ? `${cleanTitle.slice(0, MAX_TITLE_LEN - 1)}…`
@@ -269,196 +260,98 @@ export function getSpeechBubble(
   return null;
 }
 
-export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
-  claude: {
-    ceo: {
-      wp: 'ceo_desk',
-      dx: 0,
-      dy: 0,
-      instanceOffsets: [{ dx: 5 * TILE_SIZE, dy: 0 }],
-    },
-    dev: {
-      wp: 'dev_meeting',
-      dx: -8 * TILE_SIZE,
-      dy: -4 * TILE_SIZE,
-      instanceOffsets: [{ dx: 8 * TILE_SIZE, dy: 0 }],
-    },
-    qa: {
-      wp: 'qa_servers',
-      dx: -2 * TILE_SIZE,
-      dy: 0,
-      instanceOffsets: [{ dx: 7 * TILE_SIZE, dy: 0 }],
-    },
-    lounge: {
-      wp: 'lounge_couch',
-      dx: 0,
-      dy: 0,
-      instanceOffsets: [{ dx: 5 * TILE_SIZE, dy: 0 }],
-    },
-    hall: {
-      wp: 'hall_west',
-      dx: -1 * TILE_SIZE,
-      dy: 0,
-      instanceOffsets: [{ dx: -4 * TILE_SIZE, dy: 0 }],
-    },
-  },
-  agy: {
-    ceo: {
-      wp: 'ceo_board',
-      dx: 0,
-      dy: 0,
-      instanceOffsets: [
-        { dx: -6 * TILE_SIZE, dy: 0 },
-        { dx: -7 * TILE_SIZE, dy: 1 * TILE_SIZE },
-      ],
-    },
-    dev: {
-      wp: 'dev_desk',
-      dx: -5 * TILE_SIZE,
-      dy: -1 * TILE_SIZE,
-      instanceOffsets: [
-        { dx: 6 * TILE_SIZE, dy: 0 },
-        { dx: 11 * TILE_SIZE, dy: 1 * TILE_SIZE },
-      ],
-    },
-    qa: {
-      wp: 'qa_desk',
-      dx: 2 * TILE_SIZE,
-      dy: -1 * TILE_SIZE,
-      instanceOffsets: [
-        { dx: -6 * TILE_SIZE, dy: 0 },
-        { dx: 4 * TILE_SIZE, dy: 0 },
-      ],
-    },
-    lounge: {
-      wp: 'lounge_coffee',
-      dx: 0,
-      dy: 0,
-      instanceOffsets: [
-        { dx: 5 * TILE_SIZE, dy: 0 },
-        { dx: 1 * TILE_SIZE, dy: -1 * TILE_SIZE },
-      ],
-    },
-    hall: {
-      wp: 'hall_center',
-      dx: 0,
-      dy: 0,
-      instanceOffsets: [
-        { dx: -4 * TILE_SIZE, dy: 0 },
-        { dx: 4 * TILE_SIZE, dy: 0 },
-      ],
-    },
-  },
-  codex: {
-    ceo: {
-      wp: 'ceo_desk',
-      dx: -5 * TILE_SIZE,
-      dy: 0,
-      instanceOffsets: [
-        { dx: 6 * TILE_SIZE, dy: -1 * TILE_SIZE },
-        { dx: 11 * TILE_SIZE, dy: -1 * TILE_SIZE },
-      ],
-    },
-    dev: {
-      wp: 'dev_desk',
-      dx: -5 * TILE_SIZE,
-      dy: 0,
-      instanceOffsets: [
-        { dx: 0, dy: 1 * TILE_SIZE },
-        { dx: 4 * TILE_SIZE, dy: 2 * TILE_SIZE },
-      ],
-    },
-    qa: {
-      wp: 'qa_desk',
-      dx: 4 * TILE_SIZE,
-      dy: 0,
-      instanceOffsets: [
-        { dx: -8 * TILE_SIZE, dy: 0 },
-        { dx: 3 * TILE_SIZE, dy: -2 * TILE_SIZE },
-      ],
-    },
-    lounge: {
-      wp: 'lounge_couch',
-      dx: 0,
-      dy: 1 * TILE_SIZE,
-      instanceOffsets: [
-        { dx: 5 * TILE_SIZE, dy: 0 },
-        { dx: -4 * TILE_SIZE, dy: -2 * TILE_SIZE },
-      ],
-    },
-    hall: {
-      wp: 'hall_east',
-      dx: 1 * TILE_SIZE,
-      dy: 0,
-      instanceOffsets: [
-        { dx: 4 * TILE_SIZE, dy: 0 },
-        { dx: -8 * TILE_SIZE, dy: 1 * TILE_SIZE },
-      ],
-    },
-  },
+const TEAM_SLOT_INDEX: Record<Team, number> = {
+  frontend: 0,
+  backend: 1,
+  qa: 2,
 };
+
+const AGENT_ORDER: Record<Agent, number> = {
+  claude: 0,
+  agy: 1,
+  codex: 2,
+};
+
+export function slotIndexFor(character: {
+  agent: Agent;
+  instanceIndex?: number;
+  team?: Team;
+  isTeamLead?: boolean;
+  id?: string;
+}): number {
+  if (character.isTeamLead && character.team) {
+    return TEAM_SLOT_INDEX[character.team];
+  }
+  if (character.id?.startsWith('team-lead-')) {
+    const team = character.id.slice('team-lead-'.length) as Team;
+    if (team in TEAM_SLOT_INDEX) {
+      return TEAM_SLOT_INDEX[team];
+    }
+  }
+  const instanceIndex = character.instanceIndex ?? 0;
+  return 3 + instanceIndex * 3 + AGENT_ORDER[character.agent];
+}
+
+function getRoomWaypointId(
+  room: RoomId,
+  pixelX: number,
+  pixelY: number,
+): string {
+  const roomDef = getRoom(room);
+  const candidates =
+    room === 'hall'
+      ? roomDef.waypoints
+      : roomDef.waypoints.filter((wp) => wp.id !== roomDef.doorWaypoint.id);
+  let closestId = roomDef.mainWaypoint.id;
+  let minDist = Infinity;
+  for (const wp of candidates) {
+    const dist = Math.hypot(
+      pixelX - wp.x * TILE_SIZE,
+      pixelY - wp.y * TILE_SIZE,
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      closestId = wp.id;
+    }
+  }
+  return closestId;
+}
 
 export function getAgentSpot(
   agent: Agent,
   room: RoomId,
   instanceIndex = 0,
+  slotIndex = slotIndexFor({ agent, instanceIndex }),
 ): { x: number; y: number; wpId: string } {
-  const spot = SPOTS[agent]?.[room] ?? { wp: 'hall_center', dx: 0, dy: 0 };
-  const wp = WAYPOINTS[spot.wp] ?? WAYPOINTS['hall_center'];
-
-  let extraDx = 0;
-  let extraDy = 0;
-
-  if (instanceIndex > 0) {
-    if (spot.instanceOffsets && spot.instanceOffsets[instanceIndex - 1]) {
-      extraDx = spot.instanceOffsets[instanceIndex - 1].dx;
-      extraDy = spot.instanceOffsets[instanceIndex - 1].dy;
-    } else {
-      const step = Math.ceil(instanceIndex / 2);
-      const sign = instanceIndex % 2 === 1 ? 1 : -1;
-      extraDy = sign * step * TILE_SIZE;
-    }
-  }
-
+  const slots = ROOM_SLOTS[room];
+  // shortcut: wraps around via modulo when slotIndex >= room capacity (9 slots: 3 team leads + 3 agents × 2 instances)
+  const slot = slots[slotIndex % slots.length];
+  const x = slot.x * TILE_SIZE;
+  const y = slot.y * TILE_SIZE;
   return {
-    x: wp.x * TILE_SIZE + spot.dx + extraDx,
-    y: wp.y * TILE_SIZE + spot.dy + extraDy,
-    wpId: spot.wp,
+    x,
+    y,
+    wpId: getRoomWaypointId(room, x, y),
   };
 }
 
-const TEAM_WORKER_OFFSETS: Record<Team, readonly InstanceOffset[]> = {
-  frontend: [
-    { dx: -5 * TILE_SIZE, dy: 0 },
-    { dx: 6 * TILE_SIZE, dy: 0 },
-    { dx: 0, dy: -2 * TILE_SIZE },
-  ],
-  backend: [
-    { dx: -5 * TILE_SIZE, dy: 0 },
-    { dx: -9 * TILE_SIZE, dy: 0 },
-    { dx: 0, dy: -4 * TILE_SIZE },
-  ],
-  qa: [
-    { dx: -4 * TILE_SIZE, dy: 0 },
-    { dx: 4 * TILE_SIZE, dy: 0 },
-    { dx: 3 * TILE_SIZE, dy: -2 * TILE_SIZE },
-  ],
-};
-
-export function getTeamSpot(
-  team: Team,
-  instanceIndex = 0,
-): { x: number; y: number; wpId: string } {
+export function getTeamSpot(team: Team): {
+  x: number;
+  y: number;
+  wpId: string;
+} {
   const desk = TEAM_DESKS[team];
-  const wp = WAYPOINTS[desk.waypointId] ?? WAYPOINTS['hall_center'];
-  const off =
-    instanceIndex > 0
-      ? TEAM_WORKER_OFFSETS[team]?.[instanceIndex - 1]
-      : undefined;
-
+  const slots = ROOM_SLOTS[desk.roomId];
+  const slotIndex = slotIndexFor({
+    agent: TEAM_LEADS[team],
+    team,
+    isTeamLead: true,
+  });
+  // shortcut: wraps around via modulo when slotIndex >= room capacity
+  const slot = slots[slotIndex % slots.length];
   return {
-    x: wp.x * TILE_SIZE + (off?.dx ?? 0),
-    y: wp.y * TILE_SIZE + (off?.dy ?? 0),
+    x: slot.x * TILE_SIZE,
+    y: slot.y * TILE_SIZE,
     wpId: desk.waypointId,
   };
 }
@@ -476,6 +369,7 @@ export interface Character {
   agent: Agent;
   runId?: string;
   instanceIndex: number;
+  slotIndex?: number;
   team?: Team;
   isTeamLead?: boolean;
 }
@@ -497,7 +391,12 @@ export function deriveCharacters(
 ): Character[] {
   const agents: Agent[] = ['claude', 'agy', 'codex'];
   if (!state) {
-    return agents.map((agent) => ({ id: agent, agent, instanceIndex: 0 }));
+    return agents.map((agent) => ({
+      id: agent,
+      agent,
+      instanceIndex: 0,
+      slotIndex: slotIndexFor({ agent, instanceIndex: 0 }),
+    }));
   }
 
   const runs = Object.values(state.runs ?? {});
@@ -513,7 +412,14 @@ export function deriveCharacters(
       );
 
     if (agentRuns.length === 0) {
-      return [{ id: agent, agent, instanceIndex: 0 }];
+      return [
+        {
+          id: agent,
+          agent,
+          instanceIndex: 0,
+          slotIndex: slotIndexFor({ agent, instanceIndex: 0 }),
+        },
+      ];
     }
 
     return agentRuns.map((run, index) => ({
@@ -521,6 +427,7 @@ export function deriveCharacters(
       agent,
       runId: run.runId,
       instanceIndex: index,
+      slotIndex: slotIndexFor({ agent, instanceIndex: index }),
     }));
   });
 
@@ -535,6 +442,13 @@ export function deriveCharacters(
       team,
       isTeamLead: true,
       instanceIndex: 0,
+      slotIndex: slotIndexFor({
+        id: `team-lead-${team}`,
+        agent: TEAM_LEADS[team],
+        team,
+        isTeamLead: true,
+        instanceIndex: 0,
+      }),
     }),
   );
 
@@ -596,6 +510,7 @@ export type HandoverPhase =
 export class AgentController {
   agent: Agent;
   instanceIndex: number;
+  slotIndex: number;
   team?: Team;
   isTeamLead: boolean;
   x: number;
@@ -614,11 +529,13 @@ export class AgentController {
     instanceIndex = 0,
     team?: Team,
     isTeamLead = false,
+    slotIndex = slotIndexFor({ agent, instanceIndex, team, isTeamLead }),
   ) {
     this.agent = agent;
     this.instanceIndex = instanceIndex;
     this.team = team;
     this.isTeamLead = isTeamLead;
+    this.slotIndex = slotIndex;
     this.currentRoom = initialRoom;
     const spot = this.getSpot(initialRoom);
     this.x = spot.x;
@@ -626,17 +543,22 @@ export class AgentController {
   }
 
   getSpot(room: RoomId): { x: number; y: number; wpId: string } {
-    if (this.team && room === TEAM_DESKS[this.team].roomId) {
-      return getTeamSpot(this.team, this.instanceIndex);
+    if (this.isTeamLead && this.team && room === TEAM_DESKS[this.team].roomId) {
+      return getTeamSpot(this.team);
     }
-    return getAgentSpot(this.agent, room, this.instanceIndex);
+    return getAgentSpot(this.agent, room, this.instanceIndex, this.slotIndex);
   }
 
   startHandover(): void {
     if (this.isTeamLead) return;
     this.handoverPhase = 'walking_to_hall';
     this.meetingElapsedMs = 0;
-    const hallSpot = getAgentSpot(this.agent, 'hall', this.instanceIndex);
+    const hallSpot = getAgentSpot(
+      this.agent,
+      'hall',
+      this.instanceIndex,
+      this.slotIndex,
+    );
     this.walkTo(hallSpot.x, hallSpot.y, hallSpot.wpId);
   }
 
