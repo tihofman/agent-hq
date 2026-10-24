@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskPayload } from '@agent-hq/queue';
 import {
   finalizeWorktree,
+  parseTitle,
   prepareWorktree,
   slugify,
   type WorktreeContext,
@@ -167,6 +168,42 @@ exit 1
         'feature-flag-for-fix-foo',
       );
       expect(slugify('feature: Foo')).toBe('feature-foo');
+    });
+  });
+
+  describe('parseTitle (#134)', () => {
+    it('extracts type and subject from conventional-commit prefixes', () => {
+      expect(parseTitle('fix: Doppeltes Präfix')).toEqual({
+        type: 'fix',
+        subject: 'Doppeltes Präfix',
+      });
+      expect(parseTitle('feat: V2-Badge')).toEqual({
+        type: 'feat',
+        subject: 'V2-Badge',
+      });
+      expect(parseTitle('Chore(deps)!: Bump x')).toEqual({
+        type: 'chore',
+        subject: 'Bump x',
+      });
+    });
+
+    it('maps bug to fix and enhancement to feat', () => {
+      expect(parseTitle('bug: X')).toEqual({ type: 'fix', subject: 'X' });
+      expect(parseTitle('Enhancement: Y')).toEqual({
+        type: 'feat',
+        subject: 'Y',
+      });
+    });
+
+    it('defaults to feat when there is no prefix', () => {
+      expect(parseTitle('Worktree Handling')).toEqual({
+        type: 'feat',
+        subject: 'Worktree Handling',
+      });
+      expect(parseTitle('feature: Foo')).toEqual({
+        type: 'feat',
+        subject: 'feature: Foo',
+      });
     });
   });
 
@@ -378,6 +415,30 @@ exit 1
         'list',
       ]).toString();
       expect(wtList).not.toContain(prepared.worktreePath);
+    });
+
+    it('takes the commit and PR type from the issue title prefix (#134)', async () => {
+      const payload = makePayload(131, 'fix: Doppeltes Präfix');
+      const prepared = await prepareWorktree(makeCtx(), payload);
+      await writeFile(join(prepared.worktreePath, 'fix.ts'), 'export {};\n');
+
+      await finalizeWorktree(makeCtx(), payload, prepared);
+
+      const lastCommitMsg = execFileSync('git', [
+        '-C',
+        serverRepoDir,
+        'log',
+        '-1',
+        '--format=%s',
+        prepared.branch,
+      ])
+        .toString()
+        .trim();
+      expect(lastCommitMsg).toBe('fix(#131): Doppeltes Präfix');
+      const ghLog = await readFile(fakeGhLog, 'utf8');
+      expect(ghLog).toContain(
+        'pr create --draft --title fix(#131): Doppeltes Präfix --body Closes #131',
+      );
     });
 
     it('aborts with a clear error and leaves worktree intact when there are no changes or commits against base (Finding 2)', async () => {
