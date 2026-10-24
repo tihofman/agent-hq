@@ -15,8 +15,14 @@ import {
   WAYPOINTS,
   TEAM_DESKS,
   TEAMS,
+  TILE_SIZE,
+  TOTAL_WIDTH_PX,
+  TOTAL_HEIGHT_PX,
+  CANVAS_BASE_SCALE,
   type RoomId,
 } from './layout';
+import fs from 'node:fs';
+import path from 'node:path';
 
 describe('office/layout', () => {
   describe('Room presence and properties', () => {
@@ -120,8 +126,8 @@ describe('office/layout', () => {
 
     it('generates correct background-position with tileBg', () => {
       expect(tileBg(0)).toBe('background-position: -0px -0px;');
-      expect(tileBg(9)).toBe('background-position: -32px -32px;');
-      expect(tileBg(18)).toBe('background-position: -64px -64px;');
+      expect(tileBg(9)).toBe('background-position: -128px -128px;');
+      expect(tileBg(18)).toBe('background-position: -256px -256px;');
     });
   });
 
@@ -242,6 +248,51 @@ describe('office/layout', () => {
         expect(path.length).toBeGreaterThan(1);
         expect(path[0].id).toBe('hall_center');
         expect(path[path.length - 1].id).toBe(desk.waypointId);
+      }
+    });
+  });
+
+  describe('128x128 Pixel-Art Grid & Scaling (Ticket #136)', () => {
+    it('uses TILE_SIZE = 128 and computes canvas dimensions accurately', () => {
+      expect(TILE_SIZE).toBe(128);
+      expect(TOTAL_WIDTH_PX).toBe(GRID_WIDTH * 128);
+      expect(TOTAL_HEIGHT_PX).toBe(GRID_HEIGHT * 128);
+      expect(TOTAL_WIDTH_PX).toBe(3584);
+      expect(TOTAL_HEIGHT_PX).toBe(2432);
+    });
+
+    it('preserves screen display dimensions across Zoom 1x and Zoom 2x', () => {
+      expect(CANVAS_BASE_SCALE).toBe(32 / 128); // 0.25
+
+      // Zoom 1x screen size: 32px per tile
+      const scale1TilePx = TILE_SIZE * CANVAS_BASE_SCALE * 1;
+      expect(scale1TilePx).toBe(32);
+      const viewportW1 = TOTAL_WIDTH_PX * CANVAS_BASE_SCALE * 1;
+      const viewportH1 = TOTAL_HEIGHT_PX * CANVAS_BASE_SCALE * 1;
+      expect(viewportW1).toBe(896);
+      expect(viewportH1).toBe(608);
+
+      // Zoom 2x screen size: 64px per tile
+      const scale2TilePx = TILE_SIZE * CANVAS_BASE_SCALE * 2;
+      expect(scale2TilePx).toBe(64);
+      const viewportW2 = TOTAL_WIDTH_PX * CANVAS_BASE_SCALE * 2;
+      const viewportH2 = TOTAL_HEIGHT_PX * CANVAS_BASE_SCALE * 2;
+      expect(viewportW2).toBe(1792);
+      expect(viewportH2).toBe(1216);
+    });
+
+    it('ensures no hardcoded 32px/16px pixel values exist in office UI components', () => {
+      const filesToCheck = [
+        path.resolve(__dirname, '../components/office/OfficeFloor.svelte'),
+        path.resolve(__dirname, '../components/office/Room.svelte'),
+        path.resolve(__dirname, '../components/office/CharacterSprite.svelte'),
+        path.resolve(__dirname, './sprites.ts'),
+      ];
+
+      const hardcodedPixelRegex = /\b(32|16)px\b/;
+      for (const file of filesToCheck) {
+        const content = fs.readFileSync(file, 'utf-8');
+        expect(hardcodedPixelRegex.test(content)).toBe(false);
       }
     });
   });

@@ -147,7 +147,7 @@ export function getFrameBackgroundPosition(
   columnsOrMeta:
     | number
     | { columns?: number; frameWidth?: number; frameHeight?: number } = 8,
-  frameSize = 32,
+  frameSize = TILE_SIZE,
 ): { x: number; y: number; css: string } {
   let columns: number;
   let width = frameSize;
@@ -155,7 +155,7 @@ export function getFrameBackgroundPosition(
 
   if (typeof columnsOrMeta === 'object' && columnsOrMeta !== null) {
     columns = columnsOrMeta.columns ?? 8;
-    width = columnsOrMeta.frameWidth ?? 32;
+    width = columnsOrMeta.frameWidth ?? TILE_SIZE;
     height = columnsOrMeta.frameHeight ?? width;
   } else {
     columns = columnsOrMeta;
@@ -269,47 +269,49 @@ export function getSpeechBubble(
   return null;
 }
 
+const PX = TILE_SIZE / 32;
+
 export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
   claude: {
     ceo: {
       wp: 'ceo_desk',
       dx: 0,
       dy: 0,
-      instanceOffsets: [{ dx: 0, dy: 36 }],
+      instanceOffsets: [{ dx: 0, dy: 36 * PX }],
     },
     dev: {
       wp: 'dev_meeting',
-      dx: -24,
+      dx: -24 * PX,
       dy: 0,
-      instanceOffsets: [{ dx: 0, dy: -36 }],
+      instanceOffsets: [{ dx: 0, dy: -36 * PX }],
     },
     qa: {
       wp: 'qa_servers',
       dx: 0,
       dy: 0,
-      instanceOffsets: [{ dx: 0, dy: 36 }],
+      instanceOffsets: [{ dx: 0, dy: 36 * PX }],
     },
     lounge: {
       wp: 'lounge_couch',
-      dx: -24,
+      dx: -24 * PX,
       dy: 0,
-      instanceOffsets: [{ dx: 0, dy: -36 }],
+      instanceOffsets: [{ dx: 0, dy: -36 * PX }],
     },
     hall: {
       wp: 'hall_center',
-      dx: -24,
+      dx: -24 * PX,
       dy: 0,
-      instanceOffsets: [{ dx: 0, dy: 36 }],
+      instanceOffsets: [{ dx: 0, dy: 36 * PX }],
     },
   },
   agy: {
     ceo: {
       wp: 'ceo_board',
-      dx: -24,
+      dx: -24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: 36 },
-        { dx: -36, dy: 0 },
+        { dx: 0, dy: 36 * PX },
+        { dx: -36 * PX, dy: 0 },
       ],
     },
     dev: {
@@ -317,17 +319,17 @@ export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
       dx: 0,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: -36 },
-        { dx: -36, dy: 0 },
+        { dx: 0, dy: -36 * PX },
+        { dx: -36 * PX, dy: 0 },
       ],
     },
     qa: {
       wp: 'qa_desk',
-      dx: -24,
+      dx: -24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: 36 },
-        { dx: -36, dy: 0 },
+        { dx: 0, dy: 36 * PX },
+        { dx: -36 * PX, dy: 0 },
       ],
     },
     lounge: {
@@ -335,55 +337,55 @@ export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
       dx: 0,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: -36 },
-        { dx: -36, dy: 0 },
+        { dx: 0, dy: -36 * PX },
+        { dx: -36 * PX, dy: 0 },
       ],
     },
     hall: {
       wp: 'hall_center',
-      dx: 24,
+      dx: 24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: 36 },
-        { dx: 36, dy: 0 },
+        { dx: 0, dy: 36 * PX },
+        { dx: 36 * PX, dy: 0 },
       ],
     },
   },
   codex: {
     ceo: {
       wp: 'ceo_board',
-      dx: 24,
+      dx: 24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: 36 },
-        { dx: 36, dy: 0 },
+        { dx: 0, dy: 36 * PX },
+        { dx: 36 * PX, dy: 0 },
       ],
     },
     dev: {
       wp: 'dev_meeting',
-      dx: 24,
+      dx: 24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: -36 },
-        { dx: 36, dy: 0 },
+        { dx: 0, dy: -36 * PX },
+        { dx: 36 * PX, dy: 0 },
       ],
     },
     qa: {
       wp: 'qa_desk',
-      dx: 24,
+      dx: 24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: 36 },
-        { dx: 36, dy: 0 },
+        { dx: 0, dy: 36 * PX },
+        { dx: 36 * PX, dy: 0 },
       ],
     },
     lounge: {
       wp: 'lounge_couch',
-      dx: 24,
+      dx: 24 * PX,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: -36 },
-        { dx: 36, dy: 0 },
+        { dx: 0, dy: -36 * PX },
+        { dx: 36 * PX, dy: 0 },
       ],
     },
     hall: {
@@ -391,8 +393,8 @@ export const SPOTS: Record<Agent, Record<RoomId, Spot>> = {
       dx: 0,
       dy: 0,
       instanceOffsets: [
-        { dx: 0, dy: 36 },
-        { dx: 36, dy: 0 },
+        { dx: 0, dy: 36 * PX },
+        { dx: 36 * PX, dy: 0 },
       ],
     },
   },
@@ -416,7 +418,7 @@ export function getAgentSpot(
     } else {
       const step = Math.ceil(instanceIndex / 2);
       const sign = instanceIndex % 2 === 1 ? 1 : -1;
-      extraDy = sign * step * 36;
+      extraDy = sign * step * 36 * PX;
     }
   }
 
@@ -429,19 +431,19 @@ export function getAgentSpot(
 
 const TEAM_WORKER_OFFSETS: Record<Team, readonly InstanceOffset[]> = {
   frontend: [
-    { dx: -36, dy: 0 },
-    { dx: -72, dy: 0 },
-    { dx: 0, dy: 36 },
+    { dx: -36 * PX, dy: 0 },
+    { dx: -72 * PX, dy: 0 },
+    { dx: 0, dy: 36 * PX },
   ],
   backend: [
-    { dx: 36, dy: 0 },
-    { dx: -36, dy: 0 },
-    { dx: 0, dy: 36 },
+    { dx: 36 * PX, dy: 0 },
+    { dx: -36 * PX, dy: 0 },
+    { dx: 0, dy: 36 * PX },
   ],
   qa: [
-    { dx: -36, dy: 0 },
-    { dx: 36, dy: 0 },
-    { dx: 0, dy: 36 },
+    { dx: -36 * PX, dy: 0 },
+    { dx: 36 * PX, dy: 0 },
+    { dx: 0, dy: 36 * PX },
   ],
 };
 
@@ -466,7 +468,7 @@ export function getTeamSpot(
 export function doSpotsOverlap(
   posA: { x: number; y: number },
   posB: { x: number; y: number },
-  size = 32,
+  size = TILE_SIZE,
 ): boolean {
   return Math.abs(posA.x - posB.x) < size && Math.abs(posA.y - posB.y) < size;
 }
@@ -606,7 +608,7 @@ export class AgentController {
   private meetingElapsedMs = 0;
   private currentRoom: RoomId;
   private deferredRoom: RoomId | null = null;
-  readonly walkSpeed = 96;
+  readonly walkSpeed = 3 * TILE_SIZE;
 
   constructor(
     agent: Agent,

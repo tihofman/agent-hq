@@ -12,6 +12,7 @@
     TILE_SIZE,
     TOTAL_WIDTH_PX,
     TOTAL_HEIGHT_PX,
+    CANVAS_BASE_SCALE,
     tile,
     tileBg,
     type RoomId,
@@ -33,6 +34,8 @@
     showRoomLabels = true,
     showWaypoints = false,
   }: Props = $props();
+
+  const canvasScale = $derived(scale * CANVAS_BASE_SCALE);
 
   let selectedLogTarget = $state<{
     agent: Agent;
@@ -128,8 +131,8 @@
 <div
   class="office-floor-viewport relative inline-block select-none overflow-hidden rounded-md border border-slate-800 bg-slate-950 shadow-2xl"
   style="
-    width: {TOTAL_WIDTH_PX * scale}px;
-    height: {TOTAL_HEIGHT_PX * scale}px;
+    width: {TOTAL_WIDTH_PX * canvasScale}px;
+    height: {TOTAL_HEIGHT_PX * canvasScale}px;
   "
   data-testid="office-floor"
 >
@@ -138,9 +141,11 @@
     style="
       width: {TOTAL_WIDTH_PX}px;
       height: {TOTAL_HEIGHT_PX}px;
-      transform: scale({scale});
+      transform: scale({canvasScale});
       transform-origin: top left;
       image-rendering: pixelated;
+      --tile-size: {TILE_SIZE}px;
+      --tileset-size: {8 * TILE_SIZE}px;
     "
   >
     <!-- Background building foundation & perimeter walls -->
@@ -180,9 +185,11 @@
         {#each ROOMS as room (room.id)}
           {#each room.waypoints as wp (wp.id)}
             <div
-              class="absolute flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-emerald-400/80 shadow ring-1 ring-white"
-              style="left: {wp.x * TILE_SIZE + 16}px; top: {wp.y * TILE_SIZE +
-                16}px;"
+              class="waypoint-marker absolute flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-emerald-400/80 shadow ring-1 ring-white"
+              style="left: {wp.x * TILE_SIZE + TILE_SIZE / 2}px; top: {wp.y *
+                TILE_SIZE +
+                TILE_SIZE / 2}px; transform: scale({1 /
+                CANVAS_BASE_SCALE}); transform-origin: center;"
               title="{wp.id} ({wp.x}, {wp.y})"
             ></div>
           {/each}
@@ -219,10 +226,10 @@
 
   :global(.pixel-tile) {
     position: absolute;
-    width: 32px;
-    height: 32px;
+    width: var(--tile-size);
+    height: var(--tile-size);
     background-image: url('../../assets/tilesets/office_tiles.png');
-    background-size: 256px 256px;
+    background-size: var(--tileset-size) var(--tileset-size);
     background-repeat: no-repeat;
     image-rendering: pixelated;
     image-rendering: -moz-crisp-edges;

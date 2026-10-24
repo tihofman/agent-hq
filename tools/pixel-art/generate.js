@@ -26,8 +26,8 @@ for (const charId of characterIds) {
   console.log(`Generating sprite sheet for ${char.name} (${char.role})...`);
 
   const frames = generateCharacterFrames(charId);
-  // 8 columns x 4 rows = 32 frames of 32x32 = 256x128 png
-  const sheet = createSheet(frames, 32, 32, 8, 4);
+  // 8 columns x 4 rows = 32 frames of 128x128 = 1024x512 png
+  const sheet = createSheet(frames, 128, 128, 8, 4);
 
   const pngPath = path.join(SPRITES_DIR, `${charId}.png`);
   sheet.savePNG(pngPath);
@@ -37,8 +37,8 @@ for (const charId of characterIds) {
     name: char.id,
     displayName: char.name,
     role: char.role,
-    frameWidth: 32,
-    frameHeight: 32,
+    frameWidth: 128,
+    frameHeight: 128,
     columns: 8,
     rows: 4,
     totalFrames: frames.length,
@@ -123,8 +123,8 @@ for (const charId of characterIds) {
 // 2. Generate Office Tileset
 console.log('\nGenerating office tileset...');
 const tiles = generateOfficeTiles();
-// 8 columns x 8 rows = 64 tiles of 32x32 = 256x256 png
-const tileSheet = createSheet(tiles, 32, 32, 8, 8);
+// 8 columns x 8 rows = 64 tiles of 128x128 = 1024x1024 png
+const tileSheet = createSheet(tiles, 128, 128, 8, 8);
 
 const tilesetPngPath = path.join(TILESETS_DIR, 'office_tiles.png');
 tileSheet.savePNG(tilesetPngPath);
@@ -143,8 +143,8 @@ for (const tile of TILE_CATALOG) {
 
 const tilesetMeta = {
   name: 'office_tiles',
-  tileWidth: 32,
-  tileHeight: 32,
+  tileWidth: 128,
+  tileHeight: 128,
   columns: 8,
   rows: 8,
   totalTiles: tiles.length,
@@ -267,7 +267,7 @@ Alle Assets basieren strikt auf der einheitlichen **Endesga 32 (EDG32)** Palette
 
 ## 2. Charakter-Spritesheets (\`sprites/\`)
 
-Jedes Spritesheet hat eine einheitliche Frame-Größe von **32×32 Pixeln** (angeordnet in 8 Spalten × 4 Reihen = 256×128 Pixel).
+Jedes Spritesheet hat eine einheitliche Frame-Größe von **128×128 Pixeln** (angeordnet in 8 Spalten × 4 Reihen = 1024×512 Pixel).
 
 ### Verfügbare Charaktere:
 - **\`claude.png\` / \`claude.json\`**: CEO & Lead Architect. Eleganter anthrazit/blauer Anzug, weißer Kragen, rote Krawatte, distinguierte Haarpracht & Bart, Klemmbrett.
@@ -294,7 +294,7 @@ Jedes Spritesheet hat eine einheitliche Frame-Größe von **32×32 Pixeln** (ang
 
 ## 3. Office-Tileset (\`tilesets/\`)
 
-Das Tileset **\`office_tiles.png\`** liegt im Format **256×256 Pixel** vor (8 Spalten × 8 Reihen = 64 Tiles à **32×32 Pixel**).
+Das Tileset **\`office_tiles.png\`** liegt im Format **1024×1024 Pixel** vor (8 Spalten × 8 Reihen = 64 Tiles à **128×128 Pixel**).
 
 ### Übersicht der Tile-Kategorien:
 - **Böden (\`floor\`)**: Helles Eichenparkett (0), dunkles Walnussparkett (1), Dev-Teppich (2), Flur-Läufer (3), Lounge-Keramikfliesen (4), Server-Doppelboden (5), Übergangsleisten (6), Fußmatte (7), Kabelbrücke (50).
@@ -328,6 +328,7 @@ npm run generate:assets
 ## 5. Lizenz & Urheberrecht
 
 - **Grafiken**: Selbst erstellt (prozedural generiert via \`tools/pixel-art/generate.js\`). Lizenziert unter **MIT** wie das Repository.
+- **Audio & Sound-FX**: Alle 16-Bit Chiptune-Sounds (\`lib/audio.ts\`) werden dynamisch über die Standard Web Audio API synthetisiert (Oszillatoren mit Square-, Triangle- und Sawtooth-Wellen). Es werden keinerlei Audio-Dateien oder externe urheberrechtlich geschützte Samples verwendet.
 - **Farbpalette**: [Endesga 32 (EDG32)](https://lospec.com/palette-list/endesga-32) von Ed Blankenship (ENDESGA), CC0 / Public Domain.
 `;
 

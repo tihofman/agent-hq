@@ -47,7 +47,7 @@ Alle Assets basieren strikt auf der einheitlichen **Endesga 32 (EDG32)** Palette
 
 ## 2. Charakter-Spritesheets (`sprites/`)
 
-Jedes Spritesheet hat eine einheitliche Frame-Größe von **32×32 Pixeln** (angeordnet in 8 Spalten × 4 Reihen = 256×128 Pixel).
+Jedes Spritesheet hat eine einheitliche Frame-Größe von **128×128 Pixeln** (angeordnet in 8 Spalten × 4 Reihen = 1024×512 Pixel).
 
 ### Verfügbare Charaktere:
 
@@ -75,7 +75,7 @@ Jedes Spritesheet hat eine einheitliche Frame-Größe von **32×32 Pixeln** (ang
 
 ## 3. Office-Tileset (`tilesets/`)
 
-Das Tileset **`office_tiles.png`** liegt im Format **256×256 Pixel** vor (8 Spalten × 8 Reihen = 64 Tiles à **32×32 Pixel**).
+Das Tileset **`office_tiles.png`** liegt im Format **1024×1024 Pixel** vor (8 Spalten × 8 Reihen = 64 Tiles à **128×128 Pixel**).
 
 ### Übersicht der Tile-Kategorien:
 

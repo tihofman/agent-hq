@@ -12,7 +12,8 @@ export const ROOM_IDS: readonly RoomId[] = [
   'lounge',
 ] as const;
 
-export const TILE_SIZE = 32;
+export const TILE_SIZE = 128;
+export const CANVAS_BASE_SCALE = 32 / TILE_SIZE;
 export const GRID_WIDTH = 28;
 export const GRID_HEIGHT = 19;
 export const TOTAL_WIDTH_PX = GRID_WIDTH * TILE_SIZE;
