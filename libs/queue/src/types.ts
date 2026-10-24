@@ -22,8 +22,6 @@ export interface TaskPayload {
   body: string;
   labels: string[];
   question?: QuestionPayload;
-  sessionId?: string;
-  provider?: Provider;
   lastError?: string;
 }
 

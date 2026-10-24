@@ -77,7 +77,28 @@ class MockQueueManager implements QueueManagerLike {
   readonly jobs: MockJobRecord[] = [];
   readonly events: string[] = [];
   readonly concurrencies: Partial<Record<Team, number>> = {};
-  connection = { ping: vi.fn(async () => 'PONG') };
+  readonly hashes = new Map<string, Record<string, string>>();
+  connection = {
+    ping: vi.fn(async () => 'PONG'),
+    hgetall: vi.fn(async (key: string) => ({
+      ...(this.hashes.get(key) ?? {}),
+    })),
+    hset: vi.fn(async (key: string, ...args: string[]) => {
+      const hash = { ...(this.hashes.get(key) ?? {}) };
+      for (let i = 0; i < args.length; i += 2) {
+        hash[args[i]] = args[i + 1];
+      }
+      this.hashes.set(key, hash);
+      return args.length / 2;
+    }),
+    del: vi.fn(async (...keys: string[]) => {
+      let deleted = 0;
+      for (const key of keys) {
+        if (this.hashes.delete(key)) deleted++;
+      }
+      return deleted;
+    }),
+  };
   private readonly procs: Partial<Record<Team, Processor<TaskPayload>>> = {};
 
   addJob(team: Team, data: TaskPayload): MockJobRecord {
@@ -88,6 +109,7 @@ class MockQueueManager implements QueueManagerLike {
       attemptsMade: 0,
       getState: async () => job.state,
       promote: vi.fn(async () => {
+        job.delayUntil = undefined;
         job.state = 'waiting';
       }),
       updateData: vi.fn(async (next: WorkerTaskPayload) => {
@@ -108,18 +130,34 @@ class MockQueueManager implements QueueManagerLike {
     while (proc && job.state === 'waiting') {
       job.state = 'active';
       job.delayUntil = undefined;
+      let movedToDelayed = false;
+      const workerJob: MockJobRecord = {
+        ...job,
+        data: job.data,
+        getState: () => job.getState(),
+        updateData: vi.fn(async (next: WorkerTaskPayload) => {
+          workerJob.data = next;
+          await job.updateData(next);
+        }),
+        moveToDelayed: vi.fn(async (timestamp: number, tok?: string) => {
+          if (movedToDelayed) {
+            throw new Error(`Missing lock for job ${job.id}. moveToDelayed`);
+          }
+          movedToDelayed = true;
+          await job.moveToDelayed(timestamp, tok);
+        }),
+      };
       try {
-        await proc(job as unknown as Job<TaskPayload>, `t-${job.id}`);
+        await proc(workerJob as unknown as Job<TaskPayload>, `t-${job.id}`);
         if (job.state === 'active') job.state = 'completed';
       } catch (err) {
         const isDelayed =
           err instanceof DelayedError ||
           (err as Error)?.name === 'DelayedError';
         if (isDelayed) {
-          job.state =
-            job.delayUntil !== undefined && job.delayUntil <= Date.now()
-              ? 'waiting'
-              : 'delayed';
+          if (job.delayUntil !== undefined) {
+            job.state = job.delayUntil <= Date.now() ? 'waiting' : 'delayed';
+          }
         } else if (++job.attemptsMade < DEFAULT_ATTEMPTS) job.state = 'waiting';
         else job.state = 'failed';
       }
@@ -576,14 +614,20 @@ describe('WorkerPool (#98)', () => {
       });
       await pool.start();
 
-      // Job 105 asks a question -> delayed, sessionId + provider saved, finalizeWorktree NOT called
+      // Job 105 asks a question -> delayed, sessionId + provider saved in Redis hash (not job.data), finalizeWorktree NOT called
       const pausedJob = await manager.run(
         'frontend',
         makeTask(105, 'frontend'),
       );
       expect(pausedJob.state).toBe('delayed');
-      expect(pausedJob.data.sessionId).toBe(sessionId);
-      expect(pausedJob.data.provider).toBe('agy');
+      expect(
+        await manager.connection.hgetall('agent-hq:session:issue-105'),
+      ).toEqual({
+        sessionId,
+        provider: 'agy',
+      });
+      expect(pausedJob.data).not.toHaveProperty('sessionId');
+      expect(pausedJob.data).not.toHaveProperty('provider');
       expect(finalizeSpy).not.toHaveBeenCalled();
       expect(await deriveTeamStatus(manager.getQueue('frontend'))).toBe(
         'waiting_input',
@@ -595,8 +639,9 @@ describe('WorkerPool (#98)', () => {
         makeTask(109, 'frontend'),
       );
       expect(normalJob.state).toBe('completed');
-      expect(normalJob.data.sessionId).toBeUndefined();
-      expect(normalJob.data.provider).toBeUndefined();
+      expect(
+        await manager.connection.hgetall('agent-hq:session:issue-109'),
+      ).toEqual({});
       expect(finalizeSpy).toHaveBeenCalledTimes(1);
 
       await pool.close();
@@ -659,8 +704,9 @@ describe('WorkerPool (#98)', () => {
         hq_session: sessionId,
       });
       expect(finalizeSpy).toHaveBeenCalledTimes(1);
-      expect(job.data.sessionId).toBeUndefined();
-      expect(job.data.provider).toBeUndefined();
+      expect(
+        await manager.connection.hgetall('agent-hq:session:issue-110'),
+      ).toEqual({});
 
       await pool.close();
     });
@@ -780,11 +826,16 @@ describe('WorkerPool (#98)', () => {
       });
       await pool.start();
 
-      // 1. Resumed run fails on attempt 1 -> sessionId cleared -> attempt 2 (repair retry) runs with full prompt + lastError + question/answer
+      // 1. Resumed run fails on attempt 1 -> session cleared -> attempt 2 (repair retry) runs with full prompt + lastError + question/answer
+      await manager.connection.hset(
+        'agent-hq:session:issue-108',
+        'sessionId',
+        'session-prev-123',
+        'provider',
+        'agy',
+      );
       const task1: TaskPayload = {
         ...makeTask(108, 'frontend'),
-        sessionId: 'session-prev-123',
-        provider: 'agy',
         question: {
           id: '108-1',
           issueId: 108,
@@ -798,8 +849,9 @@ describe('WorkerPool (#98)', () => {
       const job1 = await manager.run('frontend', task1);
       expect(job1.state).toBe('completed');
       expect(job1.attemptsMade).toBe(1);
-      expect(job1.data.sessionId).toBeUndefined();
-      expect(job1.data.provider).toBeUndefined();
+      expect(
+        await manager.connection.hgetall('agent-hq:session:issue-108'),
+      ).toEqual({});
 
       const calls1 = (await readFile(callsFile, 'utf8'))
         .trim()
@@ -824,10 +876,15 @@ describe('WorkerPool (#98)', () => {
         'agy',
         new Date(Date.now() + 60_000).toISOString(),
       );
+      await manager.connection.hset(
+        'agent-hq:session:issue-111',
+        'sessionId',
+        'session-agy-999',
+        'provider',
+        'agy',
+      );
       const task2: TaskPayload = {
         ...makeTask(111, 'frontend'),
-        sessionId: 'session-agy-999',
-        provider: 'agy',
         question: {
           id: '111-1',
           issueId: 111,
@@ -845,6 +902,9 @@ describe('WorkerPool (#98)', () => {
       await poolOk.start();
       const job2 = await manager.run('frontend', task2);
       expect(job2.state).toBe('completed');
+      expect(
+        await manager.connection.hgetall('agent-hq:session:issue-111'),
+      ).toEqual({});
       const calls2 = (await readFile(callsFile, 'utf8'))
         .trim()
         .split('\n')
@@ -887,6 +947,162 @@ describe('WorkerPool (#98)', () => {
         question: 'Persisted across restart?',
         options: ['Yes', 'No'],
         status: 'PENDING',
+      });
+
+      await pool.close();
+    });
+
+    it('preserves answer and immediately re-queues job when answered between slot read and moveToDelayed (#119)', async () => {
+      const sessionId = '33333333-4444-5555-6666-777777777777';
+      const callsFile = join(tempDir, 'race-119-calls.jsonl');
+      const delegateScript = await makeScript(
+        tempDir,
+        `jq -nc --arg p "$2" --arg s "\${HQ_SESSION_ID:-}" '{prompt:$p,hq_session:$s}' >> "${callsFile}"
+         echo "session id: ${sessionId}"
+         exit 0`,
+        'race-119-delegate.sh',
+      );
+
+      let issue120Runs = 0;
+      let issue121Runs = 0;
+      const pool = createPool({
+        delegateScript,
+        queueManager: manager,
+        subscriptionPool: new SubscriptionPool(),
+        afterProcessExit: async (j) => {
+          if (j.data.issueId === 120 && ++issue120Runs === 1) {
+            // Case 2: Answer arrives right as moveToDelayed(+7d) is invoked while job is still active
+            const origMoveToDelayed = j.moveToDelayed;
+            let intercepted = false;
+            j.moveToDelayed = vi.fn(async (timestamp: number, tok?: string) => {
+              if (!intercepted) {
+                intercepted = true;
+                await answerQuestion('120-1', 'Answer before moveToDelayed');
+              }
+              return origMoveToDelayed(timestamp, tok);
+            });
+          }
+          if (j.data.issueId === 121 && ++issue121Runs === 1) {
+            // Case 3: Answer arrives right after moveToDelayed(+7d) has transitioned job to delayed,
+            // so answerQuestion itself promotes the job before requeueIfAnswered checks state
+            const origMoveToDelayed = j.moveToDelayed;
+            let intercepted = false;
+            j.moveToDelayed = vi.fn(async (timestamp: number, tok?: string) => {
+              await origMoveToDelayed(timestamp, tok);
+              if (!intercepted) {
+                intercepted = true;
+                await answerQuestion(
+                  '121-1',
+                  'Answer promoted by answerQuestion',
+                );
+              }
+            });
+          }
+        },
+      });
+      await pool.start();
+
+      const origGetQueue = manager.getQueue.bind(manager);
+      let asked119 = false;
+      let answered119InReadHook = false;
+      let asked120 = false;
+      let asked121 = false;
+      vi.spyOn(manager, 'getQueue').mockImplementation((team: Team) => {
+        const q = origGetQueue(team);
+        return {
+          ...q,
+          getJob: async (jobId: string) => {
+            if (jobId === 'issue-119' && !asked119) {
+              asked119 = true;
+              await askQuestion({
+                issueId: 119,
+                team: 'frontend',
+                question: 'Race between read and write?',
+              });
+              // Case 1: Slot's readFreshJob reads the PENDING snapshot, and user answers right after that read
+              // before the slot writes its session and calls moveToDelayed
+              const current = await q.getJob(jobId);
+              const pendingSnapshot = {
+                ...current!,
+                data: structuredClone(current!.data),
+              };
+              if (!answered119InReadHook) {
+                answered119InReadHook = true;
+                await answerQuestion('119-1', 'Answer between read and write');
+              }
+              return pendingSnapshot;
+            }
+            if (jobId === 'issue-120' && !asked120) {
+              asked120 = true;
+              await askQuestion({
+                issueId: 120,
+                team: 'frontend',
+                question: 'Race before moveToDelayed?',
+              });
+            }
+            if (jobId === 'issue-121' && !asked121) {
+              asked121 = true;
+              await askQuestion({
+                issueId: 121,
+                team: 'frontend',
+                question: 'Race after moveToDelayed?',
+              });
+            }
+            return q.getJob(jobId);
+          },
+        } as unknown as Queue<TaskPayload>;
+      });
+
+      // Case 1: Answer arrives right after slot's getJob read and before slot writes session / delays
+      const job119 = await manager.run('frontend', makeTask(119, 'frontend'));
+      expect(job119.state).toBe('completed');
+      expect(job119.attemptsMade).toBe(0);
+      expect(job119.promote).toHaveBeenCalledTimes(1);
+      expect(job119.data.question).toMatchObject({
+        id: '119-1',
+        status: 'ANSWERED',
+        answer: 'Answer between read and write',
+      });
+
+      // Case 2: Answer arrives right before moveToDelayed(+7d) while job is still active -> requeueIfAnswered promotes
+      const job120 = await manager.run('frontend', makeTask(120, 'frontend'));
+      expect(job120.state).toBe('completed');
+      expect(job120.attemptsMade).toBe(0);
+      expect(job120.promote).toHaveBeenCalledTimes(1);
+      expect(job120.data.question).toMatchObject({
+        id: '120-1',
+        status: 'ANSWERED',
+        answer: 'Answer before moveToDelayed',
+      });
+
+      // Case 3: Answer arrives after moveToDelayed(+7d) -> answerQuestion itself promotes, requeueIfAnswered is a no-op
+      const job121 = await manager.run('frontend', makeTask(121, 'frontend'));
+      expect(job121.state).toBe('completed');
+      expect(job121.attemptsMade).toBe(0);
+      expect(job121.moveToDelayed).toHaveBeenCalledTimes(1);
+      expect(job121.promote).toHaveBeenCalledTimes(1);
+      expect(job121.data.question).toMatchObject({
+        id: '121-1',
+        status: 'ANSWERED',
+        answer: 'Answer promoted by answerQuestion',
+      });
+
+      const calls = (await readFile(callsFile, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(calls).toHaveLength(6);
+      expect(calls[1]).toEqual({
+        prompt: 'Answer between read and write',
+        hq_session: sessionId,
+      });
+      expect(calls[3]).toEqual({
+        prompt: 'Answer before moveToDelayed',
+        hq_session: sessionId,
+      });
+      expect(calls[5]).toEqual({
+        prompt: 'Answer promoted by answerQuestion',
+        hq_session: sessionId,
       });
 
       await pool.close();

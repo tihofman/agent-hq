@@ -7,6 +7,7 @@ import { DelayedError, type Job, type Queue, type Worker } from 'bullmq';
 import {
   QueueManager,
   TEAMS,
+  jobIdForIssue,
   type QueueManagerLike,
   type TaskPayload,
   type Team,
@@ -367,6 +368,7 @@ export class WorkerPool {
     if (job.data.question?.status === 'PENDING') {
       const delayUntil = Date.now() + SEVEN_DAYS_MS;
       await this.guard(() => job.moveToDelayed(delayUntil, token));
+      await this.requeueIfAnswered(team, job);
       throw new DelayedError();
     }
 
@@ -379,10 +381,11 @@ export class WorkerPool {
 
     while (true) {
       const hasAnsweredQuestion = job.data.question?.status === 'ANSWERED';
-      const savedSessionId = hasAnsweredQuestion
-        ? job.data.sessionId
+      const savedSession = hasAnsweredQuestion
+        ? await this.readSession(job)
         : undefined;
-      const savedProvider = hasAnsweredQuestion ? job.data.provider : undefined;
+      const savedSessionId = savedSession?.sessionId;
+      const savedProvider = savedSession?.provider;
 
       const picked = await this.guard(() => pool.pick(team));
       if (picked.provider === null) {
@@ -429,13 +432,7 @@ export class WorkerPool {
         script,
       );
 
-      if (this.queueManager && job.id) {
-        const queue = this.queueManager.getQueue(team);
-        if (typeof (queue as { getJob?: unknown }).getJob === 'function') {
-          const fresh = await queue.getJob(job.id);
-          if (fresh?.data) job.data = fresh.data;
-        }
-      }
+      job.data = await this.readFreshJob(team, job);
 
       await this.opts.afterProcessExit?.(job);
 
@@ -447,16 +444,17 @@ export class WorkerPool {
       if (hasUnprocessedQuestion) {
         const extractedSession =
           extractSessionId(output) ?? (isResumed ? savedSessionId : undefined);
-        const { sessionId: _s, provider: _p, ...restData } = job.data;
-        job.data = extractedSession
-          ? { ...restData, sessionId: extractedSession, provider }
-          : restData;
-        await job.updateData(job.data).catch(this.onError);
-        const delayUntil =
-          job.data.question!.status === 'PENDING'
-            ? Date.now() + SEVEN_DAYS_MS
-            : Date.now();
+        if (extractedSession) {
+          await this.saveSession(job, extractedSession, provider);
+        } else {
+          await this.clearSession(job);
+        }
+        const isPending = job.data.question?.status === 'PENDING';
+        const delayUntil = isPending ? Date.now() + SEVEN_DAYS_MS : Date.now();
         await this.guard(() => job.moveToDelayed(delayUntil, token));
+        if (isPending) {
+          await this.requeueIfAnswered(team, job);
+        }
         throw new DelayedError();
       }
 
@@ -476,13 +474,9 @@ export class WorkerPool {
         }
       }
 
-      const { sessionId: _s, provider: _p, ...cleanedData } = job.data;
-      job.data = cleanedData;
+      await this.clearSession(job);
 
       if (exitCode === 0) {
-        if (isResumed) {
-          await job.updateData(job.data).catch(this.onError);
-        }
         const result = await this.guard(() =>
           this.finalizeWorktreeFn(
             this.getWorktreeContext(),
@@ -490,19 +484,88 @@ export class WorkerPool {
             worktree,
           ),
         );
-        job.data = {
-          ...job.data,
+        await this.updateJobData(team, job, (data) => ({
+          ...data,
           prUrl: result.prUrl,
-        } as WorkerTaskPayload;
-        await job.updateData(job.data).catch(this.onError);
+        }));
         return result;
       }
 
       const maxLen = this.opts.maxErrorLength ?? MAX_ERROR_LENGTH;
       const lastError = truncateError(output, exitCode, maxLen);
-      job.data = { ...job.data, lastError };
-      await job.updateData(job.data).catch(this.onError);
+      await this.updateJobData(team, job, (data) => ({
+        ...data,
+        lastError,
+      }));
       throw new Error(lastError);
+    }
+  }
+
+  private sessionKey(job: WorkerJob): string {
+    return `agent-hq:session:${job.id ?? jobIdForIssue(job.data.issueId)}`;
+  }
+
+  private async readSession(
+    job: WorkerJob,
+  ): Promise<{ sessionId: string; provider: Agent } | undefined> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.hgetall) return undefined;
+    const raw = await conn.hgetall(this.sessionKey(job)).catch((err) => {
+      this.onError(err);
+      return undefined;
+    });
+    if (raw?.sessionId && raw?.provider) {
+      return { sessionId: raw.sessionId, provider: raw.provider as Agent };
+    }
+    return undefined;
+  }
+
+  private async saveSession(
+    job: WorkerJob,
+    sessionId: string,
+    provider: Agent,
+  ): Promise<void> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.hset) return;
+    await conn
+      .hset(this.sessionKey(job), 'sessionId', sessionId, 'provider', provider)
+      .catch(this.onError);
+  }
+
+  private async clearSession(job: WorkerJob): Promise<void> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.del) return;
+    await conn.del(this.sessionKey(job)).catch(this.onError);
+  }
+
+  private async readFreshJob(
+    team: Team,
+    job: WorkerJob,
+  ): Promise<WorkerTaskPayload> {
+    if (!this.queueManager || !job.id) return job.data;
+    const fresh = await this.queueManager.getQueue(team).getJob(job.id);
+    if (fresh?.data) job.data = fresh.data;
+    return job.data;
+  }
+
+  private async updateJobData(
+    team: Team,
+    job: WorkerJob,
+    mutate: (freshData: WorkerTaskPayload) => WorkerTaskPayload,
+  ): Promise<void> {
+    job.data = mutate(await this.readFreshJob(team, job));
+    await job.updateData(job.data).catch(this.onError);
+  }
+
+  private async requeueIfAnswered(team: Team, job: WorkerJob): Promise<void> {
+    if (!this.queueManager || !job.id) return;
+    const fresh = await this.queueManager.getQueue(team).getJob(job.id);
+    if (!fresh?.data) return;
+    job.data = fresh.data;
+    if (fresh.data.question?.status !== 'ANSWERED') return;
+    const state = await fresh.getState();
+    if (state === 'delayed') {
+      await this.guard(() => fresh.promote());
     }
   }
 
