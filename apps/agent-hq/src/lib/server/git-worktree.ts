@@ -24,8 +24,12 @@ export interface FinishWorktreeResult {
   prUrl: string;
 }
 
+const COMMIT_PREFIX =
+  /^\s*(feat|fix|refactor|test|docs|chore|enhancement|bug)(\([^)]*\))?!?:\s*/i;
+
 export function slugify(title: string, maxLength = 40): string {
   const normalized = title
+    .replace(COMMIT_PREFIX, '')
     .replace(/ß/g, 'ss')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

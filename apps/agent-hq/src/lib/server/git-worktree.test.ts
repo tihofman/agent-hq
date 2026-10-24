@@ -154,6 +154,20 @@ exit 1
       expect(slugify('---')).toBe('task');
       expect(slugify('')).toBe('task');
     });
+
+    it('strips a leading conventional-commit prefix (#131)', () => {
+      expect(slugify('feat: V2-Badge in der TopBar')).toBe(
+        'v2-badge-in-der-topbar',
+      );
+      expect(slugify('fix(ui): Foo')).toBe('foo');
+      expect(slugify('Chore(deps)!: Bump x')).toBe('bump-x');
+      expect(slugify('BUG: Crash')).toBe('crash');
+      expect(slugify('feat:')).toBe('task');
+      expect(slugify('Feature flag for fix: foo')).toBe(
+        'feature-flag-for-fix-foo',
+      );
+      expect(slugify('feature: Foo')).toBe('feature-foo');
+    });
   });
 
   describe('prepareWorktree', () => {
