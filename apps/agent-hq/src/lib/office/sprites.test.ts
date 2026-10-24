@@ -30,6 +30,9 @@ import {
   ROOM_IDS,
   findWaypointPath,
   TEAMS,
+  getRoom,
+  TEAM_DESKS,
+  CANVAS_BASE_SCALE,
   type RoomId,
 } from './layout';
 import type { Agent, AgentStatus } from '../server/state';
@@ -486,163 +489,25 @@ describe('office/sprites', () => {
       }
     });
 
-    it('scales all SPOTS dx/dy and instanceOffsets by TILE_SIZE / 32 relative to main', () => {
-      const px = TILE_SIZE / 32;
-      expect(px).toBe(4);
-
-      const mainSpots: Record<
-        Agent,
-        Record<
-          RoomId,
-          {
-            wp: string;
-            dx: number;
-            dy: number;
-            instanceOffsets: { dx: number; dy: number }[];
-          }
-        >
-      > = {
-        claude: {
-          ceo: {
-            wp: 'ceo_desk',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: 36 }],
-          },
-          dev: {
-            wp: 'dev_meeting',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: -36 }],
-          },
-          qa: {
-            wp: 'qa_servers',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: 36 }],
-          },
-          lounge: {
-            wp: 'lounge_couch',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: -36 }],
-          },
-          hall: {
-            wp: 'hall_center',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [{ dx: 0, dy: 36 }],
-          },
-        },
-        agy: {
-          ceo: {
-            wp: 'ceo_board',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: -36, dy: 0 },
-            ],
-          },
-          dev: {
-            wp: 'dev_desk',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: -36, dy: 0 },
-            ],
-          },
-          qa: {
-            wp: 'qa_desk',
-            dx: -24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: -36, dy: 0 },
-            ],
-          },
-          lounge: {
-            wp: 'lounge_coffee',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: -36, dy: 0 },
-            ],
-          },
-          hall: {
-            wp: 'hall_center',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-        },
-        codex: {
-          ceo: {
-            wp: 'ceo_board',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          dev: {
-            wp: 'dev_meeting',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          qa: {
-            wp: 'qa_desk',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          lounge: {
-            wp: 'lounge_couch',
-            dx: 24,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: -36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-          hall: {
-            wp: 'hall_east',
-            dx: 0,
-            dy: 0,
-            instanceOffsets: [
-              { dx: 0, dy: 36 },
-              { dx: 36, dy: 0 },
-            ],
-          },
-        },
-      };
-
+    it('defines dx, dy, and instanceOffsets relative to TILE_SIZE with no fixed ±24/±36 pixels', () => {
       for (const agent of ['claude', 'agy', 'codex'] as const) {
         for (const room of ROOM_IDS) {
-          const actual = SPOTS[agent][room];
-          const expected = mainSpots[agent][room];
-          expect(actual.wp).toBe(expected.wp);
-          expect(actual.dx).toBe(expected.dx * px);
-          expect(actual.dy).toBe(expected.dy * px);
-          expect(actual.instanceOffsets).toEqual(
-            expected.instanceOffsets.map((o) => ({
-              dx: o.dx * px,
-              dy: o.dy * px,
-            })),
-          );
+          const spot = SPOTS[agent][room];
+          expect(Math.abs(spot.dx) % (TILE_SIZE / 4)).toBe(0);
+          expect(Math.abs(spot.dy) % (TILE_SIZE / 4)).toBe(0);
+          if (spot.instanceOffsets) {
+            for (const off of spot.instanceOffsets) {
+              expect(Math.abs(off.dx) % (TILE_SIZE / 4)).toBe(0);
+              expect(Math.abs(off.dy) % (TILE_SIZE / 4)).toBe(0);
+            }
+          }
+        }
+      }
+      for (const team of TEAMS) {
+        for (let i = 0; i <= 3; i++) {
+          const s = getTeamSpot(team, i);
+          expect(s.x % TILE_SIZE).toBe(0);
+          expect(s.y % TILE_SIZE).toBe(0);
         }
       }
 
@@ -653,6 +518,114 @@ describe('office/sprites', () => {
       expect(doSpotsOverlap({ x: 0, y: 0 }, { x: TILE_SIZE, y: 0 })).toBe(
         false,
       );
+    });
+
+    it('ensures no figure stands on a furniture or wall tile in any room for all spots and worker slots', () => {
+      const agents: Agent[] = ['claude', 'agy', 'codex'];
+      for (const roomId of ROOM_IDS) {
+        const room = getRoom(roomId);
+        for (const agent of agents) {
+          const spot = SPOTS[agent][roomId];
+          const maxInstances = 1 + (spot.instanceOffsets?.length ?? 0);
+          for (let idx = 0; idx < maxInstances; idx++) {
+            const pos = getAgentSpot(agent, roomId, idx);
+            const tileX = Math.round(pos.x / TILE_SIZE);
+            const tileY = Math.round(pos.y / TILE_SIZE);
+            const localX = tileX - room.bounds.x;
+            const localY = tileY - room.bounds.y;
+            const cell = room.tiles.find(
+              (c) => c.localX === localX && c.localY === localY,
+            );
+            expect(cell).toBeDefined();
+            expect(cell?.objectTile).toBeUndefined();
+          }
+        }
+      }
+      for (const team of TEAMS) {
+        const desk = TEAM_DESKS[team];
+        const room = getRoom(desk.roomId);
+        for (let idx = 0; idx <= 3; idx++) {
+          const pos = getTeamSpot(team, idx);
+          const tileX = Math.round(pos.x / TILE_SIZE);
+          const tileY = Math.round(pos.y / TILE_SIZE);
+          const localX = tileX - room.bounds.x;
+          const localY = tileY - room.bounds.y;
+          const cell = room.tiles.find(
+            (c) => c.localX === localX && c.localY === localY,
+          );
+          expect(cell).toBeDefined();
+          expect(cell?.objectTile).toBeUndefined();
+        }
+      }
+    });
+
+    it('verifies speech bubbles never overlap at maximum occupancy in any room with the longest possible bubble', () => {
+      const overlayScale = 1 / CANVAS_BASE_SCALE; // 2
+      const longestText = '#9999 1234567890123456789012345678901…';
+      const charWidthCss = 6;
+      const bubblePaddingBorderCss = 14;
+      const bubbleWidthCss =
+        longestText.length * charWidthCss + bubblePaddingBorderCss; // 242px
+      const bubbleHeightCss = 22;
+      const bubbleW = bubbleWidthCss * overlayScale; // 484px in canvas coordinates
+      const bubbleH = bubbleHeightCss * overlayScale; // 44px in canvas coordinates
+
+      function getBubbleRect(x: number, y: number) {
+        const cx = x + TILE_SIZE / 2;
+        const bottom = y - 3 * overlayScale;
+        const top = bottom - bubbleH;
+        return {
+          left: cx - bubbleW / 2,
+          right: cx + bubbleW / 2,
+          top,
+          bottom,
+        };
+      }
+
+      function doRectsOverlap(
+        a: { left: number; right: number; top: number; bottom: number },
+        b: { left: number; right: number; top: number; bottom: number },
+      ): boolean {
+        return (
+          a.left < b.right &&
+          a.right > b.left &&
+          a.top < b.bottom &&
+          a.bottom > b.top
+        );
+      }
+
+      const agents: Agent[] = ['claude', 'agy', 'codex'];
+      for (const roomId of ROOM_IDS) {
+        const roomSpots: { id: string; x: number; y: number }[] = [];
+        for (const agent of agents) {
+          const spot = SPOTS[agent][roomId];
+          const maxInstances = 1 + (spot.instanceOffsets?.length ?? 0);
+          for (let idx = 0; idx < maxInstances; idx++) {
+            const pos = getAgentSpot(agent, roomId, idx);
+            roomSpots.push({ id: `${agent}-${idx}`, x: pos.x, y: pos.y });
+          }
+        }
+        for (const team of TEAMS) {
+          if (TEAM_DESKS[team].roomId === roomId) {
+            const leadPos = getTeamSpot(team, 0);
+            roomSpots.push({ id: `lead-${team}`, x: leadPos.x, y: leadPos.y });
+          }
+        }
+
+        const rects = roomSpots.map((s) => ({
+          ...s,
+          rect: getBubbleRect(s.x, s.y),
+        }));
+        for (let i = 0; i < rects.length; i++) {
+          for (let j = i + 1; j < rects.length; j++) {
+            const overlaps = doRectsOverlap(rects[i].rect, rects[j].rect);
+            expect(
+              overlaps,
+              `Speech bubbles overlap in room "${roomId}" between ${rects[i].id} (${rects[i].x}, ${rects[i].y}) and ${rects[j].id} (${rects[j].x}, ${rects[j].y})`,
+            ).toBe(false);
+          }
+        }
+      }
     });
 
     it('guarantees pairwise distance >= 40 px between all agents in every room', () => {
@@ -747,10 +720,6 @@ describe('office/sprites', () => {
       agy.setTargetRoom(stateRoomAgy);
       claude.setTargetRoom(stateRoomClaude);
 
-      const hallCenterWp = WAYPOINTS['hall_center'];
-      const hallCenterBaseX = hallCenterWp.x * TILE_SIZE; // 416
-      const hallCenterBaseY = hallCenterWp.y * TILE_SIZE; // 288
-
       let claudePassedHallCenter = false;
       let agyPassedHallCenter = false;
       let claudeHandoverAnimAtHall = false;
@@ -762,11 +731,14 @@ describe('office/sprites', () => {
         const claudeRes = claude.tick(dt, stateStatusClaude, stateRoomClaude);
         const agyRes = agy.tick(dt, stateStatusAgy, stateRoomAgy);
 
-        // Check if Claude passes hall_center
+        const claudeHallSpot = getAgentSpot('claude', 'hall');
+        const agyHallSpot = getAgentSpot('agy', 'hall');
+
+        // Check if Claude passes hall
         if (
           Math.hypot(
-            claudeRes.x - (hallCenterBaseX - 24 * (TILE_SIZE / 32)),
-            claudeRes.y - hallCenterBaseY,
+            claudeRes.x - claudeHallSpot.x,
+            claudeRes.y - claudeHallSpot.y,
           ) < 5
         ) {
           claudePassedHallCenter = true;
@@ -775,12 +747,9 @@ describe('office/sprites', () => {
           }
         }
 
-        // Check if Agy passes hall_center
+        // Check if Agy passes hall
         if (
-          Math.hypot(
-            agyRes.x - (hallCenterBaseX + 24 * (TILE_SIZE / 32)),
-            agyRes.y - hallCenterBaseY,
-          ) < 5
+          Math.hypot(agyRes.x - agyHallSpot.x, agyRes.y - agyHallSpot.y) < 5
         ) {
           agyPassedHallCenter = true;
           if (agyRes.animation === 'handover') {

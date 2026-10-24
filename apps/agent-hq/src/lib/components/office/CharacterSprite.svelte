@@ -421,9 +421,9 @@
   }
 
   .character-container:focus-visible {
-    outline: 2px solid #818cf8;
-    outline-offset: 2px;
-    border-radius: 4px;
+    outline: calc(2px * var(--overlay-scale, 1)) solid #818cf8;
+    outline-offset: calc(2px * var(--overlay-scale, 1));
+    border-radius: calc(4px * var(--overlay-scale, 1));
   }
 
   .agent-claude {

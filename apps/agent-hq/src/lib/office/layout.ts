@@ -13,7 +13,7 @@ export const ROOM_IDS: readonly RoomId[] = [
 ] as const;
 
 export const TILE_SIZE = 128;
-export const CANVAS_BASE_SCALE = 32 / TILE_SIZE;
+export const CANVAS_BASE_SCALE = 64 / TILE_SIZE;
 export const GRID_WIDTH = 28;
 export const GRID_HEIGHT = 19;
 export const TOTAL_WIDTH_PX = GRID_WIDTH * TILE_SIZE;
@@ -126,13 +126,13 @@ export const WAYPOINTS: Record<string, Waypoint> = {
     id: 'ceo_desk',
     roomId: 'ceo',
     x: 6,
-    y: 5,
+    y: 6,
   },
   ceo_board: {
     id: 'ceo_board',
     roomId: 'ceo',
     x: 9,
-    y: 3,
+    y: 4,
   },
   ceo_door: {
     id: 'ceo_door',
@@ -201,16 +201,16 @@ export const WAYPOINTS: Record<string, Waypoint> = {
   dev_meeting: {
     id: 'dev_meeting',
     roomId: 'dev',
-    x: 9,
-    y: 14,
+    x: 10,
+    y: 16,
   },
 
   // QA Station
   qa_desk: {
     id: 'qa_desk',
     roomId: 'qa',
-    x: 20,
-    y: 5,
+    x: 19,
+    y: 6,
   },
   qa_servers: {
     id: 'qa_servers',
@@ -235,13 +235,13 @@ export const WAYPOINTS: Record<string, Waypoint> = {
   lounge_couch: {
     id: 'lounge_couch',
     roomId: 'lounge',
-    x: 20,
-    y: 14,
+    x: 19,
+    y: 15,
   },
   lounge_coffee: {
     id: 'lounge_coffee',
     roomId: 'lounge',
-    x: 17,
+    x: 18,
     y: 13,
   },
 };

@@ -145,9 +145,9 @@ describe('office/layout', () => {
       }
     });
 
-    it('positions ceo_desk and qa_desk at their respective chairs', () => {
-      expect(WAYPOINTS['ceo_desk']).toMatchObject({ x: 6, y: 5 });
-      expect(WAYPOINTS['qa_desk']).toMatchObject({ x: 20, y: 5 });
+    it('positions ceo_desk and qa_desk at walkable floor tiles', () => {
+      expect(WAYPOINTS['ceo_desk']).toMatchObject({ x: 6, y: 6 });
+      expect(WAYPOINTS['qa_desk']).toMatchObject({ x: 19, y: 6 });
     });
 
     it('ensures every waypoint is reachable from hall_center', () => {
@@ -261,24 +261,24 @@ describe('office/layout', () => {
       expect(TOTAL_HEIGHT_PX).toBe(2432);
     });
 
-    it('preserves screen display dimensions across Zoom 1x and Zoom 2x', () => {
-      expect(CANVAS_BASE_SCALE).toBe(32 / 128); // 0.25
+    it('scales canvas dimensions across Zoom 1x (64px) and Zoom 2x (128px)', () => {
+      expect(CANVAS_BASE_SCALE).toBe(64 / 128); // 0.5
 
-      // Zoom 1x screen size: 32px per tile
+      // Zoom 1x screen size: 64px per tile
       const scale1TilePx = TILE_SIZE * CANVAS_BASE_SCALE * 1;
-      expect(scale1TilePx).toBe(32);
+      expect(scale1TilePx).toBe(64);
       const viewportW1 = TOTAL_WIDTH_PX * CANVAS_BASE_SCALE * 1;
       const viewportH1 = TOTAL_HEIGHT_PX * CANVAS_BASE_SCALE * 1;
-      expect(viewportW1).toBe(896);
-      expect(viewportH1).toBe(608);
+      expect(viewportW1).toBe(1792);
+      expect(viewportH1).toBe(1216);
 
-      // Zoom 2x screen size: 64px per tile
+      // Zoom 2x screen size: 128px per tile
       const scale2TilePx = TILE_SIZE * CANVAS_BASE_SCALE * 2;
-      expect(scale2TilePx).toBe(64);
+      expect(scale2TilePx).toBe(128);
       const viewportW2 = TOTAL_WIDTH_PX * CANVAS_BASE_SCALE * 2;
       const viewportH2 = TOTAL_HEIGHT_PX * CANVAS_BASE_SCALE * 2;
-      expect(viewportW2).toBe(1792);
-      expect(viewportH2).toBe(1216);
+      expect(viewportW2).toBe(3584);
+      expect(viewportH2).toBe(2432);
     });
 
     it('ensures no hardcoded 32px/16px pixel values exist in office UI components', () => {
