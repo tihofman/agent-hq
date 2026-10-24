@@ -46,6 +46,8 @@ export function startTail(options: {
       if (!entry.isFile() || !name.endsWith('.log')) continue;
       const runId = name.slice(0, -4);
       if (!runId.trim() || finished.has(runId)) continue;
+      const agent = options.resolveAgent(runId);
+      if (!agent) continue;
       if (options.isRunActive?.(runId) === false) {
         runs.delete(runId);
         finished.add(runId);
@@ -62,7 +64,6 @@ export function startTail(options: {
         };
         runs.set(runId, run);
       }
-      const agent = options.resolveAgent(runId);
       let fd: number;
       try {
         fd = openSync(join(options.dir, name), 'r');
@@ -88,11 +89,6 @@ export function startTail(options: {
         }
       } finally {
         closeSync(fd);
-      }
-      if (!agent) {
-        run.pending = '';
-        run.decoder = new StringDecoder('utf8');
-        continue;
       }
       const lines = (run.pending + text).split('\n');
       run.pending = lines.pop()!;

@@ -178,6 +178,28 @@ describe('hooks.server log-tailer wiring', { timeout: 60_000 }, () => {
     },
   );
 
+  it.skipIf(!canWatchFs)(
+    'processes quota output written before TASK_START through init()',
+    async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      init();
+      await appendFile(
+        join(tempDir, 'early-quota.log'),
+        'You have exhausted your quota on this model.\n',
+      );
+      // Guarantee a scan while the run is still unknown to the production store.
+      vi.advanceTimersByTime(1_000);
+      expect(getState().runs['early-quota']).toBeUndefined();
+      dispatch(
+        parseEvent({ event: 'TASK_START', agent: 'agy', runId: 'early-quota' }),
+      );
+      vi.advanceTimersByTime(1_000);
+      await expect
+        .poll(() => getState().agents.agy.status, POLL_OPTIONS)
+        .toBe('cooldown');
+    },
+  );
+
   it('uses AGENT_HQ_LOG_DIR env or defaults to os.tmpdir()/agent-hq', () => {
     expect(getLogDir()).toBe(tempDir);
     delete process.env.AGENT_HQ_LOG_DIR;
