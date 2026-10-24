@@ -19,6 +19,7 @@ export interface QueueManagerLike {
     hgetall?: (key: string) => Promise<Record<string, string>>;
     hset?: (key: string, ...args: string[]) => Promise<number>;
     del?: (...keys: string[]) => Promise<number>;
+    expire?: (key: string, seconds: number) => Promise<number>;
   };
   getQueue(team: Team): Queue<TaskPayload>;
   createWorker(

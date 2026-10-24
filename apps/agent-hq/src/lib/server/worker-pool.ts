@@ -34,6 +34,7 @@ export const DEFAULT_CONCURRENCY: Record<Team, number> = {
 export const DEFAULT_ATTEMPTS = 4;
 export const MAX_ERROR_LENGTH = 2000;
 export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+export const SESSION_TTL_SECONDS = 691200; // 8 Tage
 export const DEFAULT_QUESTION_GRACE_PERIOD_MS = 60_000;
 const PING_TIMEOUT_MS = 2_000;
 const KILL_TIMEOUT_MS = 2_000;
@@ -366,6 +367,7 @@ export class WorkerPool {
     if (!this.enabled) return;
 
     if (job.data.question?.status === 'PENDING') {
+      await this.expireSession(job);
       const delayUntil = Date.now() + SEVEN_DAYS_MS;
       await this.guard(() => job.moveToDelayed(delayUntil, token));
       await this.requeueIfAnswered(team, job);
@@ -529,6 +531,15 @@ export class WorkerPool {
     if (!conn?.hset) return;
     await conn
       .hset(this.sessionKey(job), 'sessionId', sessionId, 'provider', provider)
+      .catch(this.onError);
+    await this.expireSession(job);
+  }
+
+  private async expireSession(job: WorkerJob): Promise<void> {
+    const conn = this.queueManager?.connection;
+    if (!conn?.expire) return;
+    await conn
+      .expire(this.sessionKey(job), SESSION_TTL_SECONDS)
       .catch(this.onError);
   }
 
