@@ -83,7 +83,10 @@ export async function askQuestion(
 
   const prev = Number(job.data.question?.id.split('-')[1]) || 0;
   const questionId = `${issueId}-${prev + 1}`;
-  const cleanedOptions = options?.map((o) => o.trim()).filter(Boolean);
+  const trimmedOptions = options?.map((o) => o.trim()).filter(Boolean);
+  const cleanedOptions = trimmedOptions
+    ? [...new Set(trimmedOptions)]
+    : undefined;
 
   const questionPayload: QuestionPayload = {
     id: questionId,

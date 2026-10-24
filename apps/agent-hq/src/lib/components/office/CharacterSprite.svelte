@@ -12,6 +12,7 @@
     type CharacterStatus,
   } from '../../office/sprites';
   import { formatCharacterAriaLabel } from '../../office/log-filter';
+  import { getOldestPendingQuestionForTeam } from '../../office/question-modal';
   import {
     TEAM_DESKS,
     TEAM_LABELS,
@@ -74,9 +75,20 @@
       : undefined,
   );
 
+  const pendingQuestion = $derived(
+    team
+      ? getOldestPendingQuestionForTeam(
+          liveStore.state?.questions,
+          team,
+          liveStore.feed,
+        )
+      : undefined,
+  );
+
   const characterStatus = $derived.by<CharacterStatus>(() => {
     if (isTeamLead && team) {
-      if (teamState?.status === 'waiting_input') return 'waiting_input';
+      if (teamState?.status === 'waiting_input' || Boolean(pendingQuestion))
+        return 'waiting_input';
       if (teamState?.status === 'working' || activeTeamRun) {
         return team === 'qa' ? 'reviewing' : 'coding';
       }
@@ -247,10 +259,22 @@
 
   const bubble = $derived(
     getSpeechBubble(characterStatus, {
-      ticketId: isTeamLead ? activeTeamRun?.ticketId : ticketId,
-      title: isTeamLead ? (activeTeamRun?.data?.title ?? 'Working…') : title,
+      ticketId: isTeamLead
+        ? pendingQuestion
+          ? String(pendingQuestion.issueId)
+          : activeTeamRun?.ticketId
+        : ticketId,
+      title: isTeamLead
+        ? pendingQuestion
+          ? pendingQuestion.question
+          : (activeTeamRun?.data?.title ?? 'Working…')
+        : title,
       prNumber,
-      statusText: isTeamLead ? activeTeamRun?.data?.statusText : statusText,
+      statusText: isTeamLead
+        ? pendingQuestion
+          ? pendingQuestion.question
+          : activeTeamRun?.data?.statusText
+        : statusText,
       cooldownUntil,
       now,
     }),
@@ -340,12 +364,18 @@
   {#if bubble}
     <span
       class="speech-bubble bubble-{bubble.type}"
+      class:question-bubble={characterStatus === 'waiting_input' ||
+        bubble.text === '?'}
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
       title={bubble.tooltip}
     >
       {#if bubble.icon}
-        <span class="bubble-icon" class:gear-icon={bubble.type === 'testing'}
+        <span
+          class="bubble-icon"
+          class:gear-icon={bubble.type === 'testing'}
+          class:question-icon={characterStatus === 'waiting_input' ||
+            bubble.text === '?'}
           >{bubble.icon}</span
         >
       {/if}
@@ -483,12 +513,44 @@
     font-size: 9px;
   }
 
+  .question-bubble {
+    animation: question-bob 1.5s ease-in-out infinite;
+  }
+
+  .question-icon {
+    display: inline-block;
+    animation: question-wiggle 1.5s ease-in-out infinite;
+  }
+
   @keyframes gear-spin {
     from {
       transform: rotate(0deg);
     }
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @keyframes question-bob {
+    0%,
+    100% {
+      transform: translate(-50%, 0) scale(1);
+    }
+    50% {
+      transform: translate(-50%, -3px) scale(1.06);
+    }
+  }
+
+  @keyframes question-wiggle {
+    0%,
+    100% {
+      transform: rotate(0deg);
+    }
+    25% {
+      transform: rotate(-8deg);
+    }
+    75% {
+      transform: rotate(8deg);
     }
   }
 
@@ -499,6 +561,15 @@
     }
     50% {
       transform: translate(-50%, -2px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .speech-bubble,
+    .question-bubble,
+    .question-icon,
+    .gear-icon {
+      animation: none !important;
     }
   }
 

@@ -2,7 +2,9 @@
   import Room from './Room.svelte';
   import CharacterSprite from './CharacterSprite.svelte';
   import CharacterLogModal from './CharacterLogModal.svelte';
+  import QuestionModal from './QuestionModal.svelte';
   import type { Agent } from '../../server/state';
+  import type { QuestionPayload } from '@agent-hq/queue';
   import {
     ROOMS,
     GRID_WIDTH,
@@ -15,6 +17,7 @@
     type RoomId,
   } from '../../office/layout';
   import { deriveCharacters, type Character } from '../../office/sprites';
+  import { resolveCharacterClickTarget } from '../../office/question-modal';
   import { liveStore } from '../../live.svelte';
 
   interface Props {
@@ -31,9 +34,14 @@
     showWaypoints = false,
   }: Props = $props();
 
-  let selectedTarget = $state<{
+  let selectedLogTarget = $state<{
     agent: Agent;
     runId?: string;
+    triggerEl?: HTMLElement | null;
+  } | null>(null);
+
+  let selectedQuestionTarget = $state<{
+    question: QuestionPayload;
     triggerEl?: HTMLElement | null;
   } | null>(null);
 
@@ -41,18 +49,28 @@
     char: Character,
     event: MouseEvent | KeyboardEvent,
   ) {
-    let targetRunId = char.runId;
-    if (!targetRunId && char.team) {
-      const teamRuns = Object.values(liveStore.state?.runs ?? {})
-        .filter((r) => r.data?.team === char.team)
-        .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''));
-      targetRunId = teamRuns[0]?.runId;
+    const triggerEl = (event.currentTarget as HTMLElement) ?? null;
+    const target = resolveCharacterClickTarget(
+      char,
+      liveStore.state?.questions,
+      liveStore.state?.runs,
+      liveStore.feed,
+    );
+
+    if (target.type === 'question') {
+      selectedLogTarget = null;
+      selectedQuestionTarget = {
+        question: target.question,
+        triggerEl,
+      };
+    } else {
+      selectedQuestionTarget = null;
+      selectedLogTarget = {
+        agent: target.agent,
+        runId: target.runId,
+        triggerEl,
+      };
     }
-    selectedTarget = {
-      agent: char.agent,
-      runId: targetRunId,
-      triggerEl: (event.currentTarget as HTMLElement) ?? null,
-    };
   }
 
   const characters = $derived(deriveCharacters(liveStore.state));
@@ -173,12 +191,20 @@
     {/if}
   </div>
 
-  {#if selectedTarget}
+  {#if selectedLogTarget}
     <CharacterLogModal
-      agent={selectedTarget.agent}
-      runId={selectedTarget.runId}
-      triggerEl={selectedTarget.triggerEl}
-      onclose={() => (selectedTarget = null)}
+      agent={selectedLogTarget.agent}
+      runId={selectedLogTarget.runId}
+      triggerEl={selectedLogTarget.triggerEl}
+      onclose={() => (selectedLogTarget = null)}
+    />
+  {/if}
+
+  {#if selectedQuestionTarget}
+    <QuestionModal
+      question={selectedQuestionTarget.question}
+      triggerEl={selectedQuestionTarget.triggerEl}
+      onclose={() => (selectedQuestionTarget = null)}
     />
   {/if}
 </div>
