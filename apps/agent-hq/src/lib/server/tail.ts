@@ -166,13 +166,14 @@ export function startTail(options: {
   }
 
   mkdirSync(options.dir, { recursive: true });
-  const watcher = watch(options.dir, () => {
+  const scanSafely = () => {
     try {
       scan();
     } catch (error) {
       console.error('Log tail scan failed:', error);
     }
-  });
+  };
+  const watcher = watch(options.dir, scanSafely);
   watcher.on('error', (error) => {
     console.error('Log tail watcher failed:', error);
   });
@@ -182,9 +183,13 @@ export function startTail(options: {
     watcher.close();
     throw error;
   }
+  // fs.watch can miss a write after notifying us about an empty new file.
+  const timer = setInterval(scanSafely, 1_000);
+  timer.unref();
   return () => {
     if (stopped) return;
     stopped = true;
+    clearInterval(timer);
     watcher.close();
     runs.clear();
     finished.clear();

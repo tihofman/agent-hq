@@ -107,6 +107,37 @@ describe('startTail', () => {
     ]);
   });
 
+  it('reads the first line of a new log when the write notification is lost', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      start(() => 'agy');
+      await writeFile(join(dir, 'one.log'), '');
+      signals.notify(); // The create notification can arrive before the first write.
+      await appendFile(
+        join(dir, 'one.log'),
+        'You have exhausted your quota on this model.\n',
+      );
+      // No further watch notification: the first line must still be consumed.
+      vi.advanceTimersByTime(1_000);
+      expect(progress().map((e) => e.data.logChunk)).toEqual([
+        'You have exhausted your quota on this model.\n',
+      ]);
+      expect(events).toContainEqual(
+        expect.objectContaining({ event: 'RATE_LIMITED', runId: 'one' }),
+      );
+      vi.advanceTimersByTime(1_000);
+      expect(progress()).toHaveLength(1);
+      stop!();
+      await appendFile(join(dir, 'one.log'), 'after stop\n');
+      vi.advanceTimersByTime(1_000);
+      expect(progress()).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      stop?.();
+      vi.useRealTimers();
+    }
+  });
+
   it('preserves UTF-8 characters split between appends', async () => {
     start();
     const bytes = Buffer.from('🙂\n');
