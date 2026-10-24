@@ -129,7 +129,7 @@ describe('hooks.server log-tailer wiring', { timeout: 60_000 }, () => {
         }),
       );
       init();
-      expect(vi.getTimerCount()).toBe(2);
+      expect(vi.getTimerCount()).toBe(3);
       vi.advanceTimersByTime(5_000);
       expect(ticks).toEqual([
         { type: 'TICK', timestamp: '2026-10-22T12:00:10.000Z' },
