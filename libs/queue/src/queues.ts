@@ -16,10 +16,12 @@ export function getQueueName(team: Team): QueueName {
   return QUEUE_NAMES[team];
 }
 
-export function jobIdForIssue(issueId: number): string {
-  return `issue-${issueId}`;
+/** Repo-unique job ID `<owner>/<name>#<n>`; without repo the legacy `issue-<n>`. */
+export function jobIdForIssue(issueId: number, repo?: string): string {
+  return repo ? `${repo}#${issueId}` : `issue-${issueId}`;
 }
 
+/** Only for legacy `issue-<n>` IDs; repo jobs are read via their job data. */
 export function issueIdFromJobId(jobId: string): number | undefined {
   if (!/^issue-[1-9]\d*$/.test(jobId)) return undefined;
   const issueId = Number(jobId.slice(6));

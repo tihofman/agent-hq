@@ -9,22 +9,24 @@ import {
   type TaskPayload,
   type Team,
 } from '@agent-hq/queue';
+import {
+  HQ_LABELS,
+  ISSUE_STATUSES,
+  ingestTargets,
+  loadRepos,
+  type IssueStatus,
+  type RepoTarget,
+} from './repos';
 
-export type IssueStatus = 'queued' | 'in-progress' | 'blocked' | 'done';
+export type { IssueStatus };
 
 const execFile = promisify(nodeExecFile);
 const teams: Team[] = ['frontend', 'backend', 'qa'];
-const statuses: readonly IssueStatus[] = [
-  'queued',
-  'in-progress',
-  'blocked',
-  'done',
-];
 const log = (message: string, error?: unknown) =>
   console.warn(`[issue-ingest] ${message}`, error ?? '');
 
 let activeGhRunner: ((args: string[]) => Promise<string>) | undefined;
-const labelEdits = new Map<number, Promise<void>>();
+const labelEdits = new Map<string, Promise<void>>();
 
 export function setGhRunner(
   runner?: (args: string[]) => Promise<string>,
@@ -32,17 +34,18 @@ export function setGhRunner(
   activeGhRunner = runner;
 }
 
+/** Serializes label edits per issue; key is the job ID (repo-unique). */
 export function serializeIssueLabel(
-  issueId: number,
+  key: string,
   action: () => Promise<void>,
 ): Promise<void> {
-  const next = (labelEdits.get(issueId) ?? Promise.resolve())
+  const next = (labelEdits.get(key) ?? Promise.resolve())
     .catch(() => undefined)
     .then(action);
-  labelEdits.set(issueId, next);
+  labelEdits.set(key, next);
   void next
     .finally(() => {
-      if (labelEdits.get(issueId) === next) labelEdits.delete(issueId);
+      if (labelEdits.get(key) === next) labelEdits.delete(key);
     })
     .catch(() => undefined);
   return next;
@@ -59,10 +62,13 @@ interface IngestOptions {
   queueManager: {
     close(): Promise<void>;
     getQueue(team: Team): {
-      getJob(
-        jobId: string,
-      ): Promise<
-        { attemptsMade: number; opts: { attempts?: number } } | undefined
+      getJob(jobId: string): Promise<
+        | {
+            attemptsMade: number;
+            opts: { attempts?: number };
+            data?: Pick<TaskPayload, 'issueId' | 'repo'>;
+          }
+        | undefined
       >;
       add(
         name: string,
@@ -84,10 +90,14 @@ async function gh(args: string[]): Promise<string> {
   return stdout;
 }
 
+/** Legacy home repo (no `repo`) keeps today's calls without `--repo`. */
+const repoArgs = (repo?: string) => (repo ? ['--repo', repo] : []);
+
 async function updateStatus(
   run: (args: string[]) => Promise<string>,
   issueId: number,
   status: IssueStatus,
+  repo?: string,
   knownLabels?: readonly string[],
 ): Promise<void> {
   let currentLabels = knownLabels;
@@ -98,6 +108,7 @@ async function updateStatus(
       String(issueId),
       '--json',
       'labels',
+      ...repoArgs(repo),
     ]);
     try {
       const parsed = JSON.parse(output) as { labels?: { name: string }[] };
@@ -108,8 +119,7 @@ async function updateStatus(
       currentLabels = [];
     }
   }
-  const toRemove = statuses
-    .filter((value) => value !== status)
+  const toRemove = ISSUE_STATUSES.filter((value) => value !== status)
     .map((value) => `status:${value}`)
     .filter((label) => currentLabels.includes(label));
   const args = [
@@ -122,16 +132,17 @@ async function updateStatus(
   if (toRemove.length > 0) {
     args.push('--remove-label', toRemove.join(','));
   }
-  await run(args);
+  await run([...args, ...repoArgs(repo)]);
 }
 
 export function updateIssueStatus(
   issueId: number,
   status: IssueStatus,
+  repo?: string,
   run?: (args: string[]) => Promise<string>,
 ): Promise<void> {
-  return serializeIssueLabel(issueId, () =>
-    updateStatus(run ?? activeGhRunner ?? gh, issueId, status),
+  return serializeIssueLabel(jobIdForIssue(issueId, repo), () =>
+    updateStatus(run ?? activeGhRunner ?? gh, issueId, status, repo),
   );
 }
 
@@ -163,19 +174,33 @@ export function startIssueIngest(options: IngestOptions): () => void {
         ['completed', 'done'],
       ] as const) {
         event.on(name, ({ jobId }: { jobId: string }) => {
-          const issueId = issueIdFromJobId(jobId);
-          if (issueId === undefined || stopped) return;
-          void serializeIssueLabel(issueId, async () => {
+          const legacyIssueId = issueIdFromJobId(jobId);
+          // Only our own IDs: legacy `issue-<n>` or `<owner>/<name>#<n>`.
+          if (stopped || (legacyIssueId === undefined && !jobId.includes('#')))
+            return;
+          void serializeIssueLabel(jobId, async () => {
             if (stopped) return;
-            if (name === 'failed') {
+            let issueId = legacyIssueId;
+            let repo: string | undefined;
+            if (name === 'failed' || issueId === undefined) {
               const job = await options.queueManager
                 .getQueue(team)
                 .getJob(jobId);
-              if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
+              if (!job) return;
+              if (issueId === undefined) {
+                issueId = job.data?.issueId;
+                repo = job.data?.repo;
+                if (!issueId || !repo) return;
+              }
+              if (
+                name === 'failed' &&
+                job.attemptsMade < (job.opts.attempts ?? 1)
+              )
+                return;
             }
-            if (!stopped) await updateStatus(run, issueId, status);
+            if (!stopped) await updateStatus(run, issueId, status, repo);
           }).catch((error) =>
-            log(`could not set status:${status} on issue #${issueId}`, error),
+            log(`could not set status:${status} on ${jobId}`, error),
           );
         });
       }
@@ -189,18 +214,21 @@ export function startIssueIngest(options: IngestOptions): () => void {
   }
 
   let labelsReady = false;
+  // Registered repos get their labels at registration; only the legacy home repo here.
   const ensureLabels = async () => {
     if (labelsReady) return;
     await Promise.all(
-      [
-        ...statuses.map((status) => `status:${status}`),
-        ...teams.map((team) => `team:${team}`),
-      ].map((label) => run(['label', 'create', label, '--force'])),
+      HQ_LABELS.map((label) => run(['label', 'create', label, '--force'])),
     );
     labelsReady = true;
   };
-  const ingest = async (signal: AbortSignal, expired: Promise<never>) => {
-    await ensureLabels();
+  const ingest = async (
+    target: RepoTarget,
+    signal: AbortSignal,
+    expired: Promise<never>,
+  ) => {
+    const { repo } = target;
+    if (!repo) await ensureLabels();
     for (const team of teams) {
       if (signal.aborted || stopped) return;
       try {
@@ -213,13 +241,15 @@ export function startIssueIngest(options: IngestOptions): () => void {
           `team:${team}`,
           '--json',
           'number,title,body,labels',
+          ...repoArgs(repo),
         ]);
         const issues = JSON.parse(output) as IngestIssue[];
         for (const issue of issues) {
           if (signal.aborted || stopped) return;
           if (issue.labels.some(({ name }) => name.startsWith('status:')))
             continue;
-          await serializeIssueLabel(issue.number, async () => {
+          const jobId = jobIdForIssue(issue.number, repo);
+          await serializeIssueLabel(jobId, async () => {
             if (signal.aborted || stopped) return;
             const queue = options.queueManager.getQueue(team);
             const issueLabels = issue.labels.map(({ name }) => name);
@@ -229,27 +259,30 @@ export function startIssueIngest(options: IngestOptions): () => void {
                 issue.title,
                 {
                   issueId: issue.number,
+                  ...(repo ? { repo } : {}),
                   title: issue.title,
                   team,
                   body: issue.body ?? '',
                   labels: issueLabels,
                 },
-                { jobId: jobIdForIssue(issue.number) },
+                { jobId },
               ),
               expired,
             ]);
             if (signal.aborted || stopped) return;
-            await updateStatus(run, issue.number, 'queued', issueLabels);
+            await updateStatus(run, issue.number, 'queued', repo, issueLabels);
           });
         }
       } catch (error) {
-        log(`poll failed for ${team}; retrying next poll`, error);
+        log(
+          `poll failed for ${team}${repo ? ` in ${repo}` : ''}; retrying next poll`,
+          error,
+        );
       }
     }
   };
-  const poll = async () => {
-    if (polling || stopped) return;
-    polling = true;
+  // The timeout applies per repo so many repos cannot starve each other.
+  const pollTarget = async (target: RepoTarget) => {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<never>((_, reject) => {
@@ -259,11 +292,32 @@ export function startIssueIngest(options: IngestOptions): () => void {
       }, 10_000);
     });
     try {
-      await Promise.race([ingest(controller.signal, expired), expired]);
+      await Promise.race([ingest(target, controller.signal, expired), expired]);
     } catch (error) {
-      log('poll failed; server continues running', error);
+      log(
+        `poll failed${target.repo ? ` for ${target.repo}` : ''}; server continues running`,
+        error,
+      );
     } finally {
       clearTimeout(timeout);
+    }
+  };
+  const poll = async () => {
+    if (polling || stopped) return;
+    polling = true;
+    try {
+      let targets: RepoTarget[];
+      try {
+        targets = ingestTargets(loadRepos());
+      } catch (error) {
+        log('poll failed: could not read repo registry', error);
+        return;
+      }
+      for (const target of targets) {
+        if (stopped) return;
+        await pollTarget(target);
+      }
+    } finally {
       polling = false;
     }
   };

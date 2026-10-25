@@ -21,6 +21,7 @@ import {
 } from './git-worktree';
 import { recordEvent } from './history';
 import { resetQuestionsState, setQueueManager } from './questions';
+import { getHomeRepoRoot, targetForRepo, type RepoTarget } from './repos';
 import { parseEvent, type Agent } from './state';
 import { dispatch, subscribe } from './store';
 import { SubscriptionPool } from './subscription-pool';
@@ -173,11 +174,12 @@ export async function deriveAllTeamStatuses(
   return statuses;
 }
 
-function resolveDefaultDelegateScript(): string {
+/** Absolute, relative to the home repo, never to the server or worker cwd. */
+function resolveDefaultDelegateScript(base = getHomeRepoRoot()): string {
   if (process.env.AGENT_HQ_DELEGATE_SCRIPT) {
-    return process.env.AGENT_HQ_DELEGATE_SCRIPT;
+    return resolve(base, process.env.AGENT_HQ_DELEGATE_SCRIPT);
   }
-  const direct = resolve(process.cwd(), 'scripts/delegate.sh');
+  const direct = resolve(base, 'scripts/delegate.sh');
   return existsSync(direct)
     ? direct
     : resolve(process.cwd(), '../../scripts/delegate.sh');
@@ -262,12 +264,24 @@ export class WorkerPool {
     this.subscriptionPool = options.subscriptionPool;
   }
 
-  private getWorktreeContext(): WorktreeContext {
+  /** Registered repos run in their registry path; legacy jobs in the home repo. */
+  private getWorktreeContext(target: RepoTarget): WorktreeContext {
     return {
-      repoRoot: this.repoRoot ?? resolve(this.opts.cwd ?? process.cwd()),
+      repoRoot: target.repo
+        ? target.path
+        : (this.repoRoot ?? resolve(this.opts.cwd ?? process.cwd())),
+      ...(target.repo ? { repo: target.repo } : {}),
       ghBinary: this.opts.ghBinary,
       env: this.opts.env,
     };
+  }
+
+  private resolveDelegateScript(): string {
+    const base = this.opts.cwd ?? getHomeRepoRoot();
+    return resolve(
+      base,
+      this.opts.delegateScript ?? resolveDefaultDelegateScript(base),
+    );
   }
 
   async start(): Promise<boolean> {
@@ -329,6 +343,7 @@ export class WorkerPool {
                   data: {
                     questionId: q.id,
                     issueId: q.issueId,
+                    ...(q.repo ? { repo: q.repo } : {}),
                     team: q.team,
                     question: q.question,
                     ...(q.options?.length ? { options: q.options } : {}),
@@ -377,8 +392,10 @@ export class WorkerPool {
     const pool = this.ensureSubscriptionPool();
     const restartedProviders = new Set<Agent>();
 
+    // A removed repo fails the job; it never falls back to the home repo.
+    const target = await this.guard(async () => targetForRepo(job.data.repo));
     const worktree = await this.guard(() =>
-      this.prepareWorktreeFn(this.getWorktreeContext(), job.data),
+      this.prepareWorktreeFn(this.getWorktreeContext(target), job.data),
     );
 
     while (true) {
@@ -409,10 +426,7 @@ export class WorkerPool {
         }
       }
 
-      const script = resolve(
-        this.opts.cwd ?? process.cwd(),
-        this.opts.delegateScript ?? resolveDefaultDelegateScript(),
-      );
+      const script = this.resolveDelegateScript();
       const isResumed =
         hasAnsweredQuestion &&
         Boolean(savedSessionId) &&
@@ -432,6 +446,7 @@ export class WorkerPool {
         worktree.worktreePath,
         isResumed ? savedSessionId : undefined,
         script,
+        job.id ?? jobIdForIssue(job.data.issueId, job.data.repo),
       );
 
       job.data = await this.readFreshJob(team, job);
@@ -481,7 +496,7 @@ export class WorkerPool {
       if (exitCode === 0) {
         const result = await this.guard(() =>
           this.finalizeWorktreeFn(
-            this.getWorktreeContext(),
+            this.getWorktreeContext(target),
             job.data,
             worktree,
           ),
@@ -504,7 +519,7 @@ export class WorkerPool {
   }
 
   private sessionKey(job: WorkerJob): string {
-    return `agent-hq:session:${job.id ?? jobIdForIssue(job.data.issueId)}`;
+    return `agent-hq:session:${job.id ?? jobIdForIssue(job.data.issueId, job.data.repo)}`;
   }
 
   private async readSession(
@@ -623,6 +638,7 @@ export class WorkerPool {
     cwd?: string,
     sessionId?: string,
     resolvedScript?: string,
+    jobId?: string,
   ): Promise<{ exitCode: number; output: string }> {
     return new Promise((resolveRun) => {
       const env = this.opts.env ?? process.env;
@@ -638,17 +654,17 @@ export class WorkerPool {
         HQ_TEAM: team,
         ...(sessionId ? { HQ_SESSION_ID: sessionId } : {}),
       };
+      // hq-ask.sh maps questions via repo and job ID; never inherit stale values.
+      delete childEnv.HQ_REPO;
+      delete childEnv.HQ_JOB_ID;
+      if (payload.repo) childEnv.HQ_REPO = payload.repo;
+      if (jobId) childEnv.HQ_JOB_ID = jobId;
 
       let stdout = '';
       let stderr = '';
       let settled = false;
 
-      const script =
-        resolvedScript ??
-        resolve(
-          this.opts.cwd ?? process.cwd(),
-          this.opts.delegateScript ?? resolveDefaultDelegateScript(),
-        );
+      const script = resolvedScript ?? this.resolveDelegateScript();
       const child = spawn(script, [provider, prompt], {
         cwd: cwd ?? this.opts.cwd ?? process.cwd(),
         env: childEnv,
@@ -669,7 +685,8 @@ export class WorkerPool {
         if (
           'event' in ev &&
           ev.event === 'QUESTION_PENDING' &&
-          ev.data?.issueId === payload.issueId
+          ev.data?.issueId === payload.issueId &&
+          ev.data?.repo === payload.repo
         ) {
           if (!graceTimer && !settled) {
             graceTimer = setTimeout(() => {

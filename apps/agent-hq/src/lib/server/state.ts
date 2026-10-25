@@ -352,6 +352,8 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     const q: QuestionPayload = {
       id: event.data.questionId ?? `${event.data.issueId ?? 0}-1`,
       issueId: event.data.issueId ?? 0,
+      // Without repo the question belongs to the home repo (ADR 0007).
+      ...(event.data.repo ? { repo: event.data.repo } : {}),
       team: event.data.team ?? 'frontend',
       question: event.data.question ?? '',
       ...(event.data.options ? { options: event.data.options } : {}),

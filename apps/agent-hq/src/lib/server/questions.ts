@@ -7,6 +7,7 @@ import {
 } from '@agent-hq/queue';
 import { recordEvent } from './history';
 import { setGhRunner, updateIssueStatus } from './issue-ingest';
+import { getHomeRepoRoot, loadRepos } from './repos';
 import { parseEvent } from './state';
 
 export { setGhRunner };
@@ -50,12 +51,34 @@ export interface AskQuestionInput {
   team: Team;
   question: string;
   options?: string[];
+  /** `owner/name`; without it the question belongs to the home repo. */
+  repo?: string;
+  jobId?: string;
+}
+
+async function jobState(job: {
+  getState?: () => Promise<string>;
+}): Promise<string | undefined> {
+  return typeof job.getState === 'function'
+    ? await job.getState()
+    : (job as { state?: string }).state;
+}
+
+/** Job IDs a question may belong to, most specific first. */
+function candidateJobIds({ issueId, repo, jobId }: AskQuestionInput): string[] {
+  if (jobId) return [jobId];
+  if (repo) return [jobIdForIssue(issueId, repo)];
+  const home = loadRepos().find((e) => e.path === getHomeRepoRoot());
+  return [
+    jobIdForIssue(issueId),
+    ...(home ? [jobIdForIssue(issueId, home.repo)] : []),
+  ];
 }
 
 export async function askQuestion(
   input: AskQuestionInput,
 ): Promise<QuestionPayload> {
-  const { issueId, team, question, options } = input;
+  const { issueId, team, question, options, repo } = input;
   if (!activeQueueManager) {
     throw new QuestionConflictError(
       'No active job for issue (queue unavailable)',
@@ -63,17 +86,28 @@ export async function askQuestion(
   }
 
   const queue = activeQueueManager.getQueue(team);
-  const jobId = jobIdForIssue(issueId);
-  const job = await queue.getJob(jobId);
-
-  if (!job) {
-    throw new QuestionConflictError(`No active job for issue #${issueId}`);
+  let job: Awaited<ReturnType<typeof queue.getJob>>;
+  let state: string | undefined;
+  // A finished legacy `issue-<n>` job must not shadow the active one.
+  for (const id of candidateJobIds(input)) {
+    const candidate = await queue.getJob(id);
+    if (!candidate) continue;
+    const candidateState = await jobState(candidate);
+    if (!job || candidateState === 'active') {
+      job = candidate;
+      state = candidateState;
+    }
+    if (state === 'active') break;
   }
 
-  const state =
-    typeof job.getState === 'function'
-      ? await job.getState()
-      : (job as unknown as { state?: string }).state;
+  if (
+    !job ||
+    job.data.issueId !== issueId ||
+    (repo !== undefined && job.data.repo !== repo)
+  ) {
+    throw new QuestionConflictError(`No active job for issue #${issueId}`);
+  }
+  const jobRepo = job.data.repo;
 
   if (state !== 'active') {
     throw new QuestionConflictError(
@@ -81,8 +115,10 @@ export async function askQuestion(
     );
   }
 
-  const prev = Number(job.data.question?.id.split('-')[1]) || 0;
-  const questionId = `${issueId}-${prev + 1}`;
+  // Repo names contain '-', so the counter is the last segment. Owners never contain '.'.
+  const prevId = job.data.question?.id ?? '';
+  const prev = Number(prevId.slice(prevId.lastIndexOf('-') + 1)) || 0;
+  const questionId = `${jobRepo ? `${jobRepo.replace('/', '.')}.` : ''}${issueId}-${prev + 1}`;
   const trimmedOptions = options?.map((o) => o.trim()).filter(Boolean);
   const cleanedOptions = trimmedOptions
     ? [...new Set(trimmedOptions)]
@@ -91,6 +127,7 @@ export async function askQuestion(
   const questionPayload: QuestionPayload = {
     id: questionId,
     issueId,
+    ...(jobRepo ? { repo: jobRepo } : {}),
     team,
     question: question.trim(),
     status: 'PENDING',
@@ -107,7 +144,7 @@ export async function askQuestion(
   await job.updateData(updatedData);
 
   try {
-    await updateIssueStatus(issueId, 'blocked');
+    await updateIssueStatus(issueId, 'blocked', jobRepo);
   } catch (err) {
     console.warn(
       `[questions] Failed to set status:blocked on issue #${issueId}:`,
@@ -120,6 +157,7 @@ export async function askQuestion(
     data: {
       questionId,
       issueId,
+      ...(jobRepo ? { repo: jobRepo } : {}),
       team,
       question: questionPayload.question,
       ...(questionPayload.options ? { options: questionPayload.options } : {}),
@@ -150,8 +188,8 @@ export async function answerQuestion(
   questionId: string,
   answer: string,
 ): Promise<{ ok: boolean }> {
-  const match = questionId.match(/^(\d+)-(\d+)$/);
-  if (!match) {
+  // Legacy `<n>-<k>` or `<owner>.<name>.<n>-<k>`; the job is found via its data, not the ID.
+  if (!/^[A-Za-z0-9_.-]+-\d+$/.test(questionId)) {
     throw new QuestionNotFoundError(`Invalid question ID: ${questionId}`);
   }
   if (!activeQueueManager) {
@@ -163,21 +201,23 @@ export async function answerQuestion(
 
   answeringIds.add(questionId);
   try {
-    const issueId = Number(match[1]);
     const trimmedAnswer = answer.trim();
-    const jobId = jobIdForIssue(issueId);
 
     let targetTeam: Team | undefined;
+    let jobId: string | undefined;
     for (const team of TEAMS) {
-      const queue = activeQueueManager.getQueue(team);
-      const job = await queue.getJob(jobId);
-      if (job?.data?.question?.id === questionId) {
+      const jobs = await activeQueueManager
+        .getQueue(team)
+        .getJobs(['active', 'delayed', 'waiting']);
+      const job = jobs.find((j) => j?.data?.question?.id === questionId);
+      if (job?.id) {
         targetTeam = team;
+        jobId = job.id;
         break;
       }
     }
 
-    if (!targetTeam) {
+    if (!targetTeam || !jobId) {
       throw new QuestionNotFoundError(`Question ${questionId} not found`);
     }
 
@@ -210,8 +250,9 @@ export async function answerQuestion(
       await fresh.promote();
     }
 
+    const { issueId, repo } = fresh.data;
     try {
-      await updateIssueStatus(issueId, 'queued');
+      await updateIssueStatus(issueId, 'queued', repo);
     } catch (err) {
       console.warn(
         `[questions] Failed to set status:queued on issue #${issueId}:`,
@@ -224,6 +265,7 @@ export async function answerQuestion(
       data: {
         questionId,
         issueId,
+        ...(repo ? { repo } : {}),
         team: fresh.data.team,
         answer: trimmedAnswer,
       },

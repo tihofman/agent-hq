@@ -55,16 +55,21 @@ if [ -z "$QUESTION" ]; then
   exit 1
 fi
 
+# HQ_REPO/HQ_JOB_ID come from the worker slot; without them the server assumes the home repo.
 PAYLOAD="$(jq -nc \
   --argjson issueId "$HQ_ISSUE_ID" \
   --arg team "$HQ_TEAM" \
   --arg question "$QUESTION" \
+  --arg repo "${HQ_REPO:-}" \
+  --arg jobId "${HQ_JOB_ID:-}" \
   --args \
   '{
     issueId: $issueId,
     team: $team,
     question: $question
-  } + (if ($ARGS.positional | length) > 0 then {options: $ARGS.positional} else {} end)' \
+  } + (if $repo != "" then {repo: $repo} else {} end)
+    + (if $jobId != "" then {jobId: $jobId} else {} end)
+    + (if ($ARGS.positional | length) > 0 then {options: $ARGS.positional} else {} end)' \
   -- ${OPTIONS[@]+"${OPTIONS[@]}"})"
 
 if [ -z "$PAYLOAD" ]; then

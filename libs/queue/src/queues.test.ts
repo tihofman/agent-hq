@@ -32,6 +32,14 @@ describe('issue job IDs', () => {
     expect(jobIdForIssue(99)).toBe('issue-99');
     expect(issueIdFromJobId(jobIdForIssue(99))).toBe(99);
   });
+  it('makes repo job IDs unique per repo without colons', () => {
+    const a = jobIdForIssue(12, 'acme/alpha');
+    expect(a).toBe('acme/alpha#12');
+    expect(a).not.toBe(jobIdForIssue(12, 'acme/beta'));
+    expect(a.includes(':')).toBe(false);
+    // Repo IDs are read from job data, never parsed back.
+    expect(issueIdFromJobId(a)).toBeUndefined();
+  });
   it.each([
     '99',
     'other-99',
