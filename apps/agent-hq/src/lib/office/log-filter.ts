@@ -1,4 +1,9 @@
-import type { Agent, HQEvent, InternalAction, Run } from '../server/state';
+import type {
+  Agent,
+  HQEvent,
+  InternalAction,
+  Run,
+} from '@agent-hq/queue/types';
 
 export interface CharacterTarget {
   agent: Agent;

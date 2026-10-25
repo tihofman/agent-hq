@@ -12,6 +12,7 @@ import {
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { TEAMS } from '@agent-hq/queue';
+import type { RepoEntry } from '@agent-hq/queue/types';
 import { getHistoryDir } from './history';
 
 const execFile = promisify(nodeExecFile);
@@ -31,11 +32,7 @@ export const HQ_LABELS = [
 /** GitHub owners are alphanumeric with inner hyphens; repo names add `.` and `_`. */
 const REPO_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9_.-]+$/;
 
-export interface RepoEntry {
-  repo: string;
-  path: string;
-  enabled: boolean;
-}
+export type { RepoEntry } from '@agent-hq/queue/types';
 
 /** Where a job runs; `repo` is absent for the legacy home repo (no `--repo`). */
 export interface RepoTarget {

@@ -1,4 +1,4 @@
-import type { State, HQEvent } from './server/state';
+import type { HQState, HQEvent } from '@agent-hq/queue/types';
 
 export interface NotificationPayload {
   title: string;
@@ -14,7 +14,7 @@ export interface NotificationPayload {
  */
 export function notificationFor(
   entry: unknown,
-  state?: State,
+  state?: HQState,
 ): NotificationPayload | null {
   if (!entry || typeof entry !== 'object' || !('event' in entry)) {
     return null;

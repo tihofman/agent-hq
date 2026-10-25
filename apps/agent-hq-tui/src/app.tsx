@@ -8,7 +8,12 @@ import {
   killRun,
 } from './api/client';
 import { startSseSubscription } from './api/sse';
-import type { HQState, QuestionPayload, RepoItem, Run } from './api/types';
+import type {
+  HQState,
+  QuestionPayload,
+  RepoStats,
+  Run,
+} from '@agent-hq/queue/types';
 import { AnswerModal } from './components/AnswerModal';
 import { Footer } from './components/Footer';
 import { Header } from './components/Header';
@@ -28,7 +33,7 @@ export interface AppProps {
   baseUrl?: string;
   fetchFn?: typeof fetch;
   initialState?: HQState;
-  initialRepos?: RepoItem[];
+  initialRepos?: RepoStats[];
   initialQuestions?: QuestionPayload[];
   disableAutoConnect?: boolean;
 }
@@ -60,7 +65,7 @@ export function App({
     },
   );
 
-  const [repos, setRepos] = useState<RepoItem[]>(initialRepos);
+  const [repos, setRepos] = useState<RepoStats[]>(initialRepos);
   const [logChunks, setLogChunks] = useState<Record<string, string[]>>({});
   const [questionsList, setQuestionsList] =
     useState<QuestionPayload[]>(initialQuestions);

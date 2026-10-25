@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Box, Text, useInput, useStdin } from 'ink';
-import type { Run } from '../api/types';
+import type { Run } from '@agent-hq/queue/types';
 
 interface KillConfirmModalProps {
   run: Run;

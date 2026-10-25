@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { QueueManagerLike, TaskPayload, Team } from '@agent-hq/queue';
+import type { RepoStatsResponse } from '@agent-hq/queue/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   resetQuestionsState,
@@ -11,7 +12,6 @@ import {
 import {
   GH_CACHE_TTL_MS,
   resetRepoStatsCache,
-  type RepoStatsResponse,
 } from '../../../../lib/server/repo-stats';
 import {
   getReposPath,

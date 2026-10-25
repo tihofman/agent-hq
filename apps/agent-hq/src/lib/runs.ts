@@ -1,4 +1,4 @@
-import type { Run } from './server/state';
+import type { Run } from '@agent-hq/queue/types';
 
 export const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
 

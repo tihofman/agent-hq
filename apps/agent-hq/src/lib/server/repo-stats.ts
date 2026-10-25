@@ -1,29 +1,19 @@
 import { TEAMS, type Team } from '@agent-hq/queue';
+import type {
+  DraftPR,
+  QueueCounts,
+  QueueState,
+  RepoStatsResponse,
+} from '@agent-hq/queue/types';
 import { getQueueManager } from './questions';
 import { getHomeRepoRoot, loadRepos, runRepoGh } from './repos';
 
-export const QUEUE_STATES = ['waiting', 'active', 'delayed', 'failed'] as const;
-export type QueueState = (typeof QUEUE_STATES)[number];
-export type QueueCounts = Record<QueueState, number>;
-
-export interface DraftPR {
-  number: number;
-  title: string;
-  url: string;
-}
-
-export interface RepoStats {
-  /** `owner/name`; null for the home repo when `gh` cannot name it. */
-  repo: string | null;
-  home: boolean;
-  queues: Record<Team, QueueCounts>;
-  draftPRs: DraftPR[];
-}
-
-export interface RepoStatsResponse {
-  homeRepo: string | null;
-  repos: RepoStats[];
-}
+export const QUEUE_STATES = [
+  'waiting',
+  'active',
+  'delayed',
+  'failed',
+] as const satisfies readonly QueueState[];
 
 export const GH_CACHE_TTL_MS = 60_000;
 

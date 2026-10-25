@@ -22,11 +22,11 @@ import {
 import { recordEvent } from './history';
 import { resetQuestionsState, setQueueManager } from './questions';
 import { getHomeRepoRoot, targetForRepo, type RepoTarget } from './repos';
-import { parseEvent, type Agent } from './state';
+import { parseEvent, type Agent, type TeamStatus } from './state';
 import { dispatch, subscribe } from './store';
 import { SubscriptionPool } from './subscription-pool';
 
-export { TEAMS, type QueueManagerLike, type Team };
+export { TEAMS, type QueueManagerLike, type Team, type TeamStatus };
 export const DEFAULT_CONCURRENCY: Record<Team, number> = {
   frontend: 2,
   backend: 1,
@@ -40,7 +40,6 @@ export const DEFAULT_QUESTION_GRACE_PERIOD_MS = 60_000;
 const PING_TIMEOUT_MS = 2_000;
 const KILL_TIMEOUT_MS = 2_000;
 
-export type TeamStatus = 'idle' | 'working' | 'waiting_input';
 export type WorkerTaskPayload = TaskPayload & { prUrl?: string };
 export type WorkerJob = Pick<Job<TaskPayload>, 'id' | 'moveToDelayed'> & {
   data: WorkerTaskPayload;

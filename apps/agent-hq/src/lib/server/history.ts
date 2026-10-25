@@ -1,21 +1,10 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import {
-  initialState,
-  parseEvent,
-  reduce,
-  type HQEvent,
-  type Run,
-} from './state';
+import { initialState, parseEvent, reduce, type HQEvent } from './state';
+import type { HistoryRun } from '@agent-hq/queue/types';
 import { dispatch, getState } from './store';
 import { isRunStale, type RunStaleOptions } from '../runs';
-
-export interface HistoryRun extends Run {
-  startedAt: string;
-  durationMs: number;
-  events: HQEvent[];
-}
 
 function isBlockedHistoryDir(dir: string): boolean {
   const home = resolve(homedir());

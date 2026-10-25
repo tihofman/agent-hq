@@ -10,7 +10,7 @@ import {
   QuestionNotFoundError,
 } from '../../../lib/server/questions';
 import { isValidRepoName } from '../../../lib/server/repos';
-import type { Team } from '@agent-hq/queue';
+import type { QuestionPayload, Team } from '@agent-hq/queue/types';
 
 const VALID_TEAMS: readonly string[] = ['frontend', 'backend', 'qa'];
 
@@ -20,7 +20,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
   }
 
   const questions = await getOpenQuestions();
-  return json(questions);
+  return json(questions satisfies QuestionPayload[]);
 };
 
 export const POST: RequestHandler = async ({ request, url }) => {
@@ -119,7 +119,10 @@ export const POST: RequestHandler = async ({ request, url }) => {
       repo,
       jobId,
     });
-    return json({ ok: true, question: result }, { status: 201 });
+    return json(
+      { ok: true, question: result satisfies QuestionPayload },
+      { status: 201 },
+    );
   } catch (err) {
     if (err instanceof QuestionConflictError) {
       return json({ error: err.message }, { status: 409 });

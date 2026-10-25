@@ -15,7 +15,7 @@ import type {
   RunStatus,
   AgentState,
   TeamState,
-} from '../server/state';
+} from '@agent-hq/queue/types';
 import claudeMeta from '../assets/sprites/claude.json';
 import agyMeta from '../assets/sprites/agy.json';
 import codexMeta from '../assets/sprites/codex.json';

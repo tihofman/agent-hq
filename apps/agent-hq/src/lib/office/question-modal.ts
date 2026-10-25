@@ -1,5 +1,10 @@
 import type { QuestionPayload, Team } from '@agent-hq/queue';
-import type { Agent, HQEvent, InternalAction, Run } from '../server/state';
+import type {
+  Agent,
+  HQEvent,
+  InternalAction,
+  Run,
+} from '@agent-hq/queue/types';
 import type { Character } from './sprites';
 
 export interface QuestionAnswerResult {
