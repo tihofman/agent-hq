@@ -11,27 +11,41 @@ export interface ProjectApiResult<T = unknown> {
   status?: number;
 }
 
+async function apiRequest<T>(
+  fetchFn: typeof fetch,
+  url: string,
+  init: RequestInit | undefined,
+  defaultHttpError: (status: number) => string,
+  networkError: string,
+  hasData = true,
+): Promise<ProjectApiResult<T>> {
+  try {
+    const res = init ? await fetchFn(url, init) : await fetchFn(url);
+    if (res.ok) {
+      const data = hasData ? ((await res.json()) as T) : undefined;
+      return { ok: true, data, status: res.status };
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return {
+      ok: false,
+      error: body.error || defaultHttpError(res.status),
+      status: res.status,
+    };
+  } catch {
+    return { ok: false, error: networkError };
+  }
+}
+
 export async function fetchProjectRepos(
   fetchFn: typeof fetch = fetch,
 ): Promise<ProjectApiResult<RepoEntryData[]>> {
-  try {
-    const res = await fetchFn('/api/repos');
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      return {
-        ok: false,
-        error: body.error || `Server antwortete mit Status ${res.status}`,
-        status: res.status,
-      };
-    }
-    const data = (await res.json()) as RepoEntryData[];
-    return { ok: true, data, status: res.status };
-  } catch {
-    return {
-      ok: false,
-      error: 'Netzwerkfehler beim Laden der Repositories',
-    };
-  }
+  return apiRequest<RepoEntryData[]>(
+    fetchFn,
+    '/api/repos',
+    undefined,
+    (status) => `Server antwortete mit Status ${status}`,
+    'Netzwerkfehler beim Laden der Repositories',
+  );
 }
 
 export async function addProjectRepo(
@@ -47,8 +61,10 @@ export async function addProjectRepo(
     };
   }
 
-  try {
-    const res = await fetchFn('/api/repos', {
+  return apiRequest<RepoEntryData>(
+    fetchFn,
+    '/api/repos',
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -56,23 +72,10 @@ export async function addProjectRepo(
         path,
         enabled: input.enabled ?? true,
       }),
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as RepoEntryData;
-      return { ok: true, data, status: res.status };
-    }
-
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    const errorMsg =
-      body.error || `Fehler beim Hinzufügen des Repositories (${res.status})`;
-    return { ok: false, error: errorMsg, status: res.status };
-  } catch {
-    return {
-      ok: false,
-      error: 'Netzwerkfehler beim Hinzufügen des Repositories',
-    };
-  }
+    },
+    (status) => `Fehler beim Hinzufügen des Repositories (${status})`,
+    'Netzwerkfehler beim Hinzufügen des Repositories',
+  );
 }
 
 export async function removeProjectRepo(
@@ -84,28 +87,17 @@ export async function removeProjectRepo(
     return { ok: false, error: 'Repository-Name darf nicht leer sein' };
   }
 
-  try {
-    const res = await fetchFn(`/api/repos/${trimmed}`, {
-      method: 'DELETE',
-    });
-
-    if (res.ok) {
-      return { ok: true, status: res.status };
-    }
-
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    const errorMsg =
-      body.error ||
-      (res.status === 404
+  return apiRequest<void>(
+    fetchFn,
+    `/api/repos/${trimmed}`,
+    { method: 'DELETE' },
+    (status) =>
+      status === 404
         ? `Repo ${trimmed} ist nicht registriert (404)`
-        : `Fehler beim Entfernen des Repositories (${res.status})`);
-    return { ok: false, error: errorMsg, status: res.status };
-  } catch {
-    return {
-      ok: false,
-      error: 'Netzwerkfehler beim Entfernen des Repositories',
-    };
-  }
+        : `Fehler beim Entfernen des Repositories (${status})`,
+    'Netzwerkfehler beim Entfernen des Repositories',
+    false,
+  );
 }
 
 export async function toggleProjectRepo(
@@ -118,26 +110,15 @@ export async function toggleProjectRepo(
     return { ok: false, error: 'Repository-Name darf nicht leer sein' };
   }
 
-  try {
-    const res = await fetchFn(`/api/repos/${trimmed}`, {
+  return apiRequest<RepoEntryData>(
+    fetchFn,
+    `/api/repos/${trimmed}`,
+    {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as RepoEntryData;
-      return { ok: true, data, status: res.status };
-    }
-
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    const errorMsg =
-      body.error || `Fehler beim Ändern des Status (${res.status})`;
-    return { ok: false, error: errorMsg, status: res.status };
-  } catch {
-    return {
-      ok: false,
-      error: 'Netzwerkfehler beim Ändern des Status',
-    };
-  }
+    },
+    (status) => `Fehler beim Ändern des Status (${status})`,
+    'Netzwerkfehler beim Ändern des Status',
+  );
 }

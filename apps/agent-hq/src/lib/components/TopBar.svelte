@@ -79,13 +79,14 @@
 >
   <!-- Left: Brand Logo & Repo / Branch Badge -->
   <div class="flex items-center gap-3">
-    <div
-      class="flex items-center gap-2 rounded bg-indigo-950/80 px-2.5 py-1 text-indigo-300 border border-indigo-800/60 font-semibold tracking-wider"
+    <a
+      href={resolve('/')}
+      class="flex items-center gap-2 rounded bg-indigo-950/80 px-2.5 py-1 text-indigo-300 border border-indigo-800/60 font-semibold tracking-wider hover:bg-indigo-900/80 transition"
     >
       <span class="inline-block h-2 w-2 rounded-full bg-indigo-400"></span>
       <span class="text-sm font-bold tracking-tight text-white">AGENT-HQ</span>
       <span class="text-[10px] text-indigo-400 uppercase">v0.1</span>
-    </div>
+    </a>
 
     <!-- Repo / Branch Badge Placeholder -->
     <div
@@ -183,6 +184,12 @@
         <span class="text-[11px] font-medium text-slate-400">MUTED</span>
       {/if}
     </button>
+
+    <a
+      href={resolve('/')}
+      class="flex items-center gap-1.5 rounded bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
+      data-testid="dashboard-link">Dashboard</a
+    >
 
     <a
       href={resolve('/projects')}

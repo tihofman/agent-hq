@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { resolve } from '$app/paths';
   import { liveStore } from '../../live.svelte';
   import type { Team } from '../../server/state';
   import {
@@ -11,13 +10,21 @@
   } from '../../projects';
 
   export interface RepoMetrics {
-    queue: {
+    running: {
       frontend: number;
       backend: number;
       qa: number;
     };
     openQuestions: number;
-    openDraftPrs: number;
+    runsPrs: number;
+    /** Backward compatibility alias */
+    queue?: {
+      frontend: number;
+      backend: number;
+      qa: number;
+    };
+    /** Backward compatibility alias */
+    openDraftPrs?: number;
   }
 
   export interface ProjectRepoItem {
@@ -57,7 +64,7 @@
     const isMatch = (targetRepo?: string) =>
       targetRepo === repoName || (!targetRepo && isHome);
 
-    const countQueue = (team: Team) =>
+    const countRunning = (team: Team) =>
       runs.filter(
         (r) =>
           isMatch(r.repo ?? r.data?.repo) &&
@@ -69,22 +76,39 @@
       (q) => isMatch(q.repo) && q.status === 'PENDING',
     ).length;
 
-    const openDraftPrs = runs.filter(
-      (r) =>
+    const prNumbers: number[] = [];
+    for (const r of runs) {
+      if (
         isMatch(r.repo ?? r.data?.repo) &&
-        (Boolean(r.data?.prNumber) ||
-          (liveStore.state?.activePR &&
-            isMatch(liveStore.state.activePR.repo))),
-    ).length;
+        typeof r.data?.prNumber === 'number' &&
+        !prNumbers.includes(r.data.prNumber)
+      ) {
+        prNumbers.push(r.data.prNumber);
+      }
+    }
+    const activePR = liveStore.state?.activePR;
+    if (
+      activePR &&
+      isMatch(activePR.repo) &&
+      typeof activePR.prNumber === 'number' &&
+      !prNumbers.includes(activePR.prNumber)
+    ) {
+      prNumbers.push(activePR.prNumber);
+    }
+    const runsPrs = prNumbers.length;
+
+    const running = {
+      frontend: countRunning('frontend'),
+      backend: countRunning('backend'),
+      qa: countRunning('qa'),
+    };
 
     return {
-      queue: {
-        frontend: countQueue('frontend'),
-        backend: countQueue('backend'),
-        qa: countQueue('qa'),
-      },
+      running,
       openQuestions,
-      openDraftPrs,
+      runsPrs,
+      queue: running,
+      openDraftPrs: runsPrs,
     };
   }
 
@@ -105,7 +129,10 @@
         (r) => r.repo || r.data?.repo,
       );
       const homeName =
-        activeRun?.repo ?? activeRun?.data?.repo ?? 'tihofman/agent-hq';
+        activeRun?.repo ??
+        activeRun?.data?.repo ??
+        liveStore.state?.activePR?.repo ??
+        'Home-Repository';
       repos = [
         {
           repo: homeName,
@@ -184,56 +211,9 @@
 </script>
 
 <div
-  class="flex min-h-screen w-full flex-col bg-slate-950 text-slate-100 font-sans"
+  class="flex flex-1 w-full flex-col bg-slate-950 text-slate-100 font-sans"
   data-testid="projects-page"
 >
-  <!-- Top Navigation Header -->
-  <header
-    class="flex h-14 w-full shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/95 px-6 font-mono text-xs backdrop-blur select-none"
-  >
-    <div class="flex items-center gap-4">
-      <div
-        class="flex items-center gap-2 rounded bg-indigo-950/80 px-2.5 py-1 text-indigo-300 border border-indigo-800/60 font-semibold tracking-wider"
-      >
-        <span class="inline-block h-2 w-2 rounded-full bg-indigo-400"></span>
-        <span class="text-sm font-bold tracking-tight text-white">AGENT-HQ</span>
-        <span class="text-[10px] text-indigo-400 uppercase">PROJEKTE</span>
-      </div>
-      <span class="text-slate-400 text-xs font-mono">
-        Registrierte Repositories & Kennzahlen
-      </span>
-    </div>
-
-    <div class="flex items-center gap-3">
-      <button
-        type="button"
-        onclick={loadRepos}
-        class="flex items-center gap-1.5 rounded bg-slate-800/90 px-3 py-1 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition cursor-pointer"
-        title="Liste aktualisieren"
-        data-testid="refresh-button"
-      >
-        <span>↻</span>
-        <span>Aktualisieren</span>
-      </button>
-
-      <a
-        href={resolve('/history')}
-        class="flex items-center gap-1.5 rounded bg-slate-800/90 px-3 py-1 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
-        data-testid="history-link"
-      >
-        Verlauf
-      </a>
-
-      <a
-        href={resolve('/')}
-        class="flex items-center gap-1.5 rounded bg-indigo-600/90 px-3 py-1 font-semibold text-white hover:bg-indigo-500 border border-indigo-500/80 transition"
-        data-testid="dashboard-link"
-      >
-        ← Dashboard
-      </a>
-    </div>
-  </header>
-
   <!-- Main Content -->
   <main class="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
     <div class="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -245,12 +225,25 @@
           <span>Projektansicht</span>
         </h1>
         <p class="text-xs text-slate-400 mt-1">
-          Alle registrierten Repositories mit Status, Queue-Zählern und offenen Vorgängen auf einem Bildschirm.
+          Alle registrierten Repositories mit Status, laufenden Teams und offenen Vorgängen auf einem Bildschirm.
         </p>
       </div>
 
-      <div class="text-xs font-mono text-slate-400">
-        Projekte: <strong class="text-slate-200">{repos.length}</strong>
+      <div class="flex items-center gap-4">
+        <button
+          type="button"
+          onclick={loadRepos}
+          class="flex items-center gap-1.5 rounded bg-slate-800/90 px-3 py-1 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition cursor-pointer font-mono text-xs"
+          title="Liste aktualisieren"
+          data-testid="refresh-button"
+        >
+          <span>↻</span>
+          <span>Aktualisieren</span>
+        </button>
+
+        <div class="text-xs font-mono text-slate-400">
+          Projekte: <strong class="text-slate-200">{repos.length}</strong>
+        </div>
       </div>
     </div>
 
@@ -373,42 +366,42 @@
               class="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-slate-800/80 text-xs"
               data-testid="repo-metrics-{repoSlug}"
             >
-              <!-- Frontend Queue -->
+              <!-- Frontend Laufend -->
               <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
                 <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Queue: Frontend
+                  Laufend: Frontend
                 </span>
                 <span
                   class="text-sm font-bold text-sky-400 mt-0.5 block"
-                  data-testid="queue-frontend-{repoSlug}"
+                  data-testid="running-frontend-{repoSlug}"
                 >
-                  Frontend: {metrics.queue.frontend}
+                  Frontend: {metrics.running?.frontend ?? metrics.queue?.frontend ?? 0}
                 </span>
               </div>
 
-              <!-- Backend Queue -->
+              <!-- Backend Laufend -->
               <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
                 <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Queue: Backend
+                  Laufend: Backend
                 </span>
                 <span
                   class="text-sm font-bold text-orange-400 mt-0.5 block"
-                  data-testid="queue-backend-{repoSlug}"
+                  data-testid="running-backend-{repoSlug}"
                 >
-                  Backend: {metrics.queue.backend}
+                  Backend: {metrics.running?.backend ?? metrics.queue?.backend ?? 0}
                 </span>
               </div>
 
-              <!-- QA Queue -->
+              <!-- QA Laufend -->
               <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
                 <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Queue: QA
+                  Laufend: QA
                 </span>
                 <span
                   class="text-sm font-bold text-purple-400 mt-0.5 block"
-                  data-testid="queue-qa-{repoSlug}"
+                  data-testid="running-qa-{repoSlug}"
                 >
-                  QA: {metrics.queue.qa}
+                  QA: {metrics.running?.qa ?? metrics.queue?.qa ?? 0}
                 </span>
               </div>
 
@@ -427,16 +420,16 @@
                 </span>
               </div>
 
-              <!-- Offene Draft-PRs -->
+              <!-- PRs aus Läufen -->
               <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
                 <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Draft-PRs
+                  PRs aus Läufen
                 </span>
                 <span
                   class="text-sm font-bold text-emerald-400 mt-0.5 block"
-                  data-testid="open-prs-{repoSlug}"
+                  data-testid="runs-prs-{repoSlug}"
                 >
-                  Draft-PRs: {metrics.openDraftPrs}
+                  PRs aus Läufen: {metrics.runsPrs ?? metrics.openDraftPrs ?? 0}
                 </span>
               </div>
             </div>
@@ -528,7 +521,7 @@
               data-testid="enabled-checkbox"
             />
             <label for="enabled-checkbox" class="text-slate-300 text-xs select-none cursor-pointer">
-              Sofort aktivieren (Queue-Ingest aktiv)
+              Sofort aktivieren (Ingest aktiv)
             </label>
           </div>
 

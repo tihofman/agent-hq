@@ -385,7 +385,7 @@
       style="transform: translateX(-50%) scale({overlayScale}); transform-origin: bottom center;"
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
-      title="{bubble.tooltip ?? bubble.text}{runRepo ? ` • ${runRepo}` : ''}"
+      title={bubble.tooltip}
     >
       {#if bubble.icon}
         <span

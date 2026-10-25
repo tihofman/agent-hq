@@ -109,7 +109,9 @@ describe('OfficeFloor.svelte scaling and layout', () => {
 
     const { html } = render(OfficeFloor, { props: { scale: 1 } });
     expect(html).toContain('data-repo="acme/webapp"');
-    expect(html).toContain('[acme/webapp]');
-    expect(html).toContain('title="#149 Multi-Repo • acme/webapp"');
+    expect(html).toContain(
+      'title="agy (Core Developer) • coding • [acme/webapp]"',
+    );
+    expect(html).toContain('title="#149 Multi-Repo"');
   });
 });
