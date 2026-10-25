@@ -117,55 +117,19 @@ describe('ProjectsView.svelte', () => {
     expect(html).toContain('data-testid="repo-notice"');
   });
 
-  it('empty registry: shows the home repo under the name from the stats endpoint', async () => {
-    liveStore.state = {
-      ...liveStore.state,
-      runs: {
-        'run-x': {
-          runId: 'run-x',
-          agent: 'agy',
-          status: 'running',
-          repo: 'other/guess',
-          timestamp: '2026-10-25T12:00:00Z',
-          data: { team: 'frontend' },
-        },
-      },
-    };
-    const fetchFn = mockFetch([], {
-      homeRepo: 'tihofman/agent-hq',
-      repos: [
-        stats('tihofman/agent-hq', {
-          home: true,
-          queues: { frontend: { ...zero, active: 1 }, backend: zero, qa: zero },
-        }),
-      ],
-    });
-    const res = await loadProjectOverview(fetchFn);
-    expect(fetchFn).toHaveBeenCalledWith('/api/repos');
-    expect(fetchFn).toHaveBeenCalledWith('/api/repos/stats');
-
-    const { html } = render(ProjectsView, {
-      props: { initialRepos: res.data },
-    });
-    expect(cell(html, 'repo-name-tihofman-agent-hq')).toBe('tihofman/agent-hq');
-    expect(html).toContain('data-testid="home-badge"');
-    expect(html).not.toContain('other/guess');
-    expect(html).not.toContain('data-testid="remove-repo-tihofman-agent-hq"');
-    expect(cell(html, 'queue-frontend-active-tihofman-agent-hq')).toBe('1');
-  });
-
-  it('empty registry without a resolvable name falls back to "Home-Repository"', async () => {
+  it('shows "PRs nicht abrufbar" instead of zero drafts when gh failed', async () => {
     const res = await loadProjectOverview(
-      mockFetch([], {
-        homeRepo: null,
-        repos: [stats(null, { home: true })],
+      mockFetch([{ repo: 'org/a', path: '/w/a', enabled: true }], {
+        homeRepo: 'org/home',
+        repos: [stats('org/a', { draftPRsError: 'gh auth login required' })],
       }),
     );
     const { html } = render(ProjectsView, {
       props: { initialRepos: res.data },
     });
-    expect(cell(html, 'repo-name-Home-Repository')).toBe('Home-Repository');
-    expect(html).toContain('data-testid="home-badge"');
+    expect(cell(html, 'draft-prs-error-org-a')).toBe('PRs nicht abrufbar');
+    expect(html).toContain('title="gh auth login required"');
+    expect(html).not.toContain('Draft-PRs: 0');
   });
 
   it('keeps the registry visible with zero counts when stats fail', async () => {

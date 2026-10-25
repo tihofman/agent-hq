@@ -339,11 +339,21 @@
                 class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60 min-w-0"
                 data-testid="draft-prs-{repoSlug}"
               >
-                <span
-                  class="text-[10px] text-slate-400 uppercase tracking-wider block"
-                >
-                  Draft-PRs: {draftPRs.length}
-                </span>
+                {#if r.stats?.draftPRsError}
+                  <span
+                    class="text-[10px] text-amber-400 uppercase tracking-wider block"
+                    title={r.stats.draftPRsError}
+                    data-testid="draft-prs-error-{repoSlug}"
+                  >
+                    PRs nicht abrufbar
+                  </span>
+                {:else}
+                  <span
+                    class="text-[10px] text-slate-400 uppercase tracking-wider block"
+                  >
+                    Draft-PRs: {draftPRs.length}
+                  </span>
+                {/if}
                 <ul class="mt-1 space-y-0.5 text-[11px]">
                   {#each draftPRs as pr (pr.number)}
                     <li class="truncate">
