@@ -113,7 +113,7 @@ describe('/api/repos', () => {
     ).toBe(400);
   });
 
-  // Matches the curl example in skills/agent-hq: no Origin header.
+  // Belegt, dass ein POST ohne Origin-Header (wie bei curl) 201 liefert.
   it('registers a repo from curl without Origin header', async () => {
     const res = await POST(event(post({ repo: 'acme/alpha', path: repoDir })));
     expect(res.status).toBe(201);

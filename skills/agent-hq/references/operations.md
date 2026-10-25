@@ -50,7 +50,7 @@ Prüfe vorher mit `gh issue list --label status:in-progress`, ob gerade ein Work
 Die Registry liegt in `$AGENT_HQ_HOME/repos.json`:
 
 ```json
-[{ "repo": "acme/shop", "path": "/Users/me/src/shop", "enabled": true }]
+[{ "repo": "acme/shop", "path": "/abs/pfad/shop", "enabled": true }]
 ```
 
 - Fehlt die Datei oder ist sie leer, bearbeitet der Server nur das Repo, aus dem er läuft (Job-ID `issue-<n>`).
@@ -65,7 +65,7 @@ Die Registry liegt in `$AGENT_HQ_HOME/repos.json`:
 HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"
 curl -s "$HQ/api/repos"                                                      # auflisten
 curl -s -X POST "$HQ/api/repos" -H "Content-Type: application/json" \
-  -d "$(jq -nc --arg r acme/shop --arg p /Users/me/src/shop '{repo: $r, path: $p}')"   # registrieren
+  -d "$(jq -nc --arg r acme/shop --arg p /abs/pfad/shop '{repo: $r, path: $p}')"   # registrieren
 curl -s -X PATCH "$HQ/api/repos/acme/shop" -H "Content-Type: application/json" \
   -d '{"enabled":false}'                                                     # pausieren
 curl -s -X DELETE "$HQ/api/repos/acme/shop"                                  # entfernen

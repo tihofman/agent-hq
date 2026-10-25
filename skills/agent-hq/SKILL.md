@@ -33,7 +33,7 @@ curl -sN --max-time 2 "$HQ/api/stream" | head -n 2 | grep -q '"teams"' \
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"                        # owner/name
 REPO_PATH="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"    # Hauptklon, auch aus einem Worktree
 curl -s "$HQ/api/repos"                                # Registry: [{repo, path, enabled}]
-curl -s "$HQ/api/repos/stats" | jq -r .homeRepo        # Repo, aus dem der Server läuft
+curl -s "$HQ/api/repos/stats" | jq -r .homeRepo        # Repo, aus dem der Server läuft ("null" = Home-Repo-Name unbekannt)
 ```
 
 `repo` vergleicht der Server ohne Groß-/Kleinschreibung. Dann gilt:
