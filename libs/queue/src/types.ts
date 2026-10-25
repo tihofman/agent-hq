@@ -192,11 +192,15 @@ export interface RepoStats {
   home: boolean;
   queues: Record<Team, QueueCounts>;
   draftPRs: DraftPR[];
+  /** Set when `gh` failed; `draftPRs` is then empty, not "zero drafts". */
+  draftPRsError?: string;
 }
 
 /** `/api/repos/stats` response. */
 export interface RepoStatsResponse {
   homeRepo: string | null;
+  /** Set when a team queue holds more failed jobs than are counted. */
+  failedTruncated?: boolean;
   repos: RepoStats[];
 }
 

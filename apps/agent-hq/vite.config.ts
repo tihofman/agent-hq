@@ -25,11 +25,30 @@ export default defineConfig({
     }),
   ],
   test: {
-    environment: 'node',
     env: {
       AGENT_HQ_HOME: join(tmpdir(), 'agent-hq-test'),
     },
-    include: ['src/**/*.{test,spec}.{js,ts}'],
     expect: { requireAssertions: true },
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'server',
+          environment: 'node',
+          include: ['src/**/*.{test,spec}.{js,ts}'],
+          exclude: ['src/**/*.client.{test,spec}.{js,ts}'],
+        },
+      },
+      {
+        // Component tests that mount in a DOM need Svelte's browser build.
+        extends: true,
+        resolve: { conditions: ['browser'] },
+        test: {
+          name: 'client',
+          environment: 'happy-dom',
+          include: ['src/**/*.client.{test,spec}.{js,ts}'],
+        },
+      },
+    ],
   },
 });

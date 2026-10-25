@@ -10,6 +10,8 @@ import {
   setQueueManager,
 } from '../../../../lib/server/questions';
 import {
+  COUNTS_CACHE_TTL_MS,
+  FAILED_CAP,
   GH_CACHE_TTL_MS,
   resetRepoStatsCache,
 } from '../../../../lib/server/repo-stats';
@@ -34,15 +36,19 @@ function mockManager(
 ): QueueManagerLike {
   return {
     getQueue: (team: Team) => ({
-      getJobs: async ([state]: State[]) =>
+      getJobs: async ([state]: State[], start = 0, end = -1) =>
         jobs
           .filter((j) => j.team === team && j.state === state)
           .map((j, i) => ({
             data: { issueId: i + 1, team, repo: j.repo } as TaskPayload,
-          })),
+          }))
+          .slice(start, end < 0 ? undefined : end + 1),
     }),
   } as unknown as QueueManagerLike;
 }
+
+const many = (n: number, team: Team, state: State) =>
+  Array.from({ length: n }, () => ({ team, state, repo: 'acme/home' }));
 
 const zero = { waiting: 0, active: 0, delayed: 0, failed: 0 };
 
@@ -188,6 +194,58 @@ describe('/api/repos/stats', () => {
     vi.advanceTimersByTime(GH_CACHE_TTL_MS + 1);
     await get();
     expect(prCalls()).toBe(2);
+  });
+
+  it('caches queue counts for a short TTL', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const manager = mockManager([
+      { team: 'frontend', state: 'waiting', repo: 'acme/home' },
+    ]);
+    const getQueue = vi.spyOn(manager, 'getQueue');
+    setQueueManager(manager);
+
+    await get();
+    const calls = getQueue.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    const body = (await (await get()).json()) as RepoStatsResponse;
+    expect(getQueue.mock.calls.length).toBe(calls);
+    expect(body.repos[0].queues.frontend.waiting).toBe(1);
+
+    vi.advanceTimersByTime(COUNTS_CACHE_TTL_MS + 1);
+    await get();
+    expect(getQueue.mock.calls.length).toBe(2 * calls);
+  });
+
+  it('pages through jobs and caps failed jobs per queue', async () => {
+    setQueueManager(
+      mockManager([
+        ...many(FAILED_CAP + 1, 'qa', 'failed'),
+        ...many(2_500, 'backend', 'waiting'),
+      ]),
+    );
+    const body = (await (await get()).json()) as RepoStatsResponse;
+    expect(body.failedTruncated).toBe(true);
+    expect(body.repos[0].queues.qa.failed).toBe(FAILED_CAP);
+    expect(body.repos[0].queues.backend.waiting).toBe(2_500);
+  });
+
+  it('omits failedTruncated when failed jobs fit under the cap', async () => {
+    setQueueManager(mockManager(many(FAILED_CAP, 'qa', 'failed')));
+    const body = (await (await get()).json()) as RepoStatsResponse;
+    expect(body.failedTruncated).toBeUndefined();
+    expect(body.repos[0].queues.qa.failed).toBe(FAILED_CAP);
+  });
+
+  it('reports a gh failure as draftPRsError instead of zero drafts', async () => {
+    gh.mockImplementation(async (args) => {
+      if (args[1] === 'view') return 'acme/home\n';
+      throw new Error('gh auth login required\nmore details');
+    });
+    const body = (await (await get()).json()) as RepoStatsResponse;
+    expect(body.repos[0]).toMatchObject({
+      draftPRs: [],
+      draftPRsError: 'gh auth login required',
+    });
   });
 
   it('answers 200 with empty counts without Redis and an empty registry', async () => {
