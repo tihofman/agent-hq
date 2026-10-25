@@ -41,7 +41,7 @@ export function JobsView({
 }: JobsViewProps) {
   const { stdout } = useStdout();
   const terminalColumns = columns ?? stdout?.columns ?? 80;
-  // App padding (2) + own border (2) + paddingX (2), plus 1: Ink wraps styled text one column early.
+  // App padding (2) + own border (2) + paddingX (2), plus 1: the styled row was measured to wrap one column early.
   const innerWidth = Math.max(40, terminalColumns - 7);
 
   if (runs.length === 0) {

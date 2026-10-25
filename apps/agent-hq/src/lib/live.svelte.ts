@@ -1,4 +1,9 @@
-import type { HQState, HQEvent, InternalAction } from '@agent-hq/queue/types';
+import type {
+  HQState,
+  HQEvent,
+  InternalAction,
+  StreamUpdatePayload,
+} from '@agent-hq/queue/types';
 
 const initial = (): HQState => ({
   agents: {
@@ -41,10 +46,9 @@ export function connect(url = '/api/stream'): () => void {
     liveStore.feed = [];
   });
   es.addEventListener('UPDATE', (e) => {
-    const { event, state } = JSON.parse((e as MessageEvent).data) as {
-      event: HQEvent | InternalAction;
-      state: HQState;
-    };
+    const { event, state } = JSON.parse(
+      (e as MessageEvent).data,
+    ) as StreamUpdatePayload;
     liveStore.state = state;
     if ('type' in event && event.type === 'SET_TEAM_STATUSES') {
       return;
