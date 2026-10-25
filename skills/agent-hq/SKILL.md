@@ -7,9 +7,9 @@ description: Arbeit über die V2-Queue an Agent-HQ-Worker (agy, codex, claude) a
 
 Agent-HQ (SvelteKit-App `apps/agent-hq`) zieht GitHub-Issues mit `team:*`-Label in BullMQ-Queues, lässt sie von Workern in eigenen Worktrees bearbeiten und erstellt daraus Draft-PRs. Dieser Skill steuert das von Claude Code aus.
 
-Pfade sind relativ zum Repo-Root des Servers (`<root>`). Server-URL: `HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"`.
+`<root>` ist der Repo-Root des Servers (dort liegen `run.sh` und `scripts/`). `<repo-path>` ist der lokale Klon des Repos, an das der Auftrag geht. Server-URL: `HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"`.
 
-> **Einschränkung: nur das Repo des Servers.** V2 ruft `gh issue list` ohne `--repo` im Verzeichnis des Servers auf und legt Worktrees unter `<root>/.worktrees/` an. Aufträge gehen also nur an das Repo, in dem der Server läuft. Für ein anderes Repo muss dort eine eigene Agent-HQ-Instanz laufen, sonst geht es mit V2 nicht. Sag das dem User offen. Lege keine Issues in fremden Repos an und erwarte nicht, dass sie bearbeitet werden.
+Eine Instanz bearbeitet mehrere Repos. Welche, steht in der Registry `$AGENT_HQ_HOME/repos.json` (ADR 0007). **Grenzen:** nur GitHub-Repos (`gh repo view` muss im Klon funktionieren), keine `local`-Repos ohne GitHub-Remote. `gh` braucht Rechte, im Repo Labels anzulegen.
 
 ## 1. Voraussetzungen prüfen
 
@@ -21,17 +21,49 @@ gh auth status                                         # gh authentifiziert
 curl -s --max-time 2 "$HQ/api/questions"               # Server erreichbar, liefert JSON-Array
 curl -sN --max-time 2 "$HQ/api/stream" | head -n 2 | grep -q '"teams"' \
   && echo "V2 aktiv" || echo "V2 aus oder Redis fehlt"
-lsof -a -d cwd -p "$(lsof -t -nP -iTCP:"${PORT:-3333}" -sTCP:LISTEN)"   # cwd des Servers
 ```
 
 - **V2 aktiv:** `teams` steht im `INIT_STATE` von `/api/stream` nur, wenn der Worker-Pool läuft. Das heißt `AGENT_HQ_V2_WORKERS=1` ist gesetzt und Redis antwortet. `GET /api/questions` liefert ohne V2 nur `[]` und taugt deshalb nicht als V2-Test.
 - **Redis:** `docker compose exec -T redis redis-cli ping` im `<root>` muss `PONG` liefern.
-- **Gleiches Repo:** Das cwd des Servers ist `<root>/apps/agent-hq`. Vergleiche `git -C <cwd> remote get-url origin` mit `git remote get-url origin` im aktuellen Repo. Weichen sie ab, gilt die Einschränkung oben.
 - **Sandbox:** Die Claude-Sandbox blockiert `localhost`. Wenn `curl` mit Verbindungsfehler abbricht, kann das an der Sandbox liegen statt am Server. Dann den Befehl außerhalb der Sandbox ausführen oder den User bitten, ihn auszuführen.
+
+### Repo registriert?
+
+```bash
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"                        # owner/name
+REPO_PATH="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"    # Hauptklon, auch aus einem Worktree
+curl -s "$HQ/api/repos"                                # Registry: [{repo, path, enabled}]
+curl -s "$HQ/api/repos/stats" | jq -r .homeRepo        # Repo, aus dem der Server läuft ("null" = Home-Repo-Name unbekannt)
+```
+
+`repo` vergleicht der Server ohne Groß-/Kleinschreibung. Dann gilt:
+
+| Registry                            | Ergebnis                                                                |
+| :---------------------------------- | :---------------------------------------------------------------------- |
+| `$REPO` mit `enabled: true`         | bereit, weiter mit 2                                                    |
+| `$REPO` mit `enabled: false`        | wird nicht eingelesen; Aktivieren vorschlagen (`PATCH`, unten)          |
+| leer und `$REPO` ist das `homeRepo` | bereit: Ohne Registry bearbeitet der Server nur sein eigenes Repo       |
+| leer, `$REPO` ist ein anderes Repo  | Registrierung vorschlagen, **und das `homeRepo` gleich mit** (s. unten) |
+| andere Einträge, `$REPO` fehlt      | Registrierung vorschlagen                                               |
+
+**Sobald die Registry einen Eintrag hat, liest der Server nur noch die Registry ein.** Wer bei leerer Registry ein fremdes Repo registriert, schaltet damit das Server-Repo ab, wenn es nicht auch registriert wird. Sag das dem User.
+
+**Registrieren nur nach ausdrücklicher Zustimmung des Users.** Lege ihm vorher `$REPO` und `$REPO_PATH` vor und erkläre, was passiert: Der Server prüft, dass `$REPO_PATH` ein Git-Repo ist und `gh repo view` dort `$REPO` meldet. Dann legt er **auf GitHub** die Labels `team:frontend|backend|qa` und `status:queued|in-progress|blocked|done` an und trägt `.worktrees/` in `.git/info/exclude` des Klons ein. Worker bekommen in diesem Repo weitreichende Rechte. Ein Neustart ist nicht nötig, der nächste Ingest-Durchlauf nimmt das Repo mit.
+
+```bash
+curl -s -X POST "$HQ/api/repos" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg r "$REPO" --arg p "$REPO_PATH" '{repo: $r, path: $p}')"
+# 201 {"repo":"owner/name","path":"/abs/pfad","enabled":true}
+
+curl -s -X PATCH "$HQ/api/repos/$REPO" -H "Content-Type: application/json" \
+  -d '{"enabled":true}'                                # deaktiviertes Repo wieder einlesen
+```
+
+`400` heißt: Pfad fehlt oder ist nicht absolut, ist kein Git-Repo, hat kein GitHub-Remote (`local`-Repo) oder gehört zu einem anderen `owner/name` (Text in `error`). `500` heißt meist, dass `gh label create` gescheitert ist (fehlende Rechte). Einträge entfernen und `repos.json`: [Betrieb](references/operations.md#repos).
 
 ## 2. Auftrag einreihen
 
-Ein Auftrag ist ein offenes GitHub-Issue im Server-Repo mit genau einem `team:*`-Label und noch **ohne** `status:*`-Label. Der Ingest prüft alle 60 s (`AGENT_HQ_ISSUE_POLL_INTERVAL_MS`). Issues, die schon ein `status:*`-Label haben, überspringt er.
+Ein Auftrag ist ein offenes GitHub-Issue in einem eingelesenen Repo (siehe oben) mit genau einem `team:*`-Label und noch **ohne** `status:*`-Label. Der Ingest prüft alle 60 s (`AGENT_HQ_ISSUE_POLL_INTERVAL_MS`). Issues, die schon ein `status:*`-Label haben, überspringt er.
 
 1. **Titel mit Präfix:** `feat:`, `fix:`, `refactor:`, `test:`, `docs:` oder `chore:` (`enhancement:` wird zu `feat`, `bug:` zu `fix`). Fehlt das Präfix, gilt `feat`. Das Präfix bestimmt Commit- und PR-Titel `<type>(#<n>): <subject>`. Der Branch heißt unabhängig davon immer `feat/<n>-<slug>`.
 2. **Body nach Schema:** Kurzbeschreibung, Bearbeiter-Empfehlung & Agent-Zuweisung, Hintergrund, Ziel, Akzeptanzkriterien (prüfbare Checkliste). Der Body ist der Prompt für den Worker. Nenne Dateien, Befehle und Tests konkret.
@@ -47,31 +79,31 @@ Ein Auftrag ist ein offenes GitHub-Issue im Server-Repo mit genau einem `team:*`
    Welcher Worker den Auftrag bekommt, wählt der Server je nach Verfügbarkeit und Rate-Limit. `agent:*` beeinflusst das nicht.
 
 ```bash
-gh issue create --title "fix: <Titel>" --body-file ticket.md \
+gh issue create --repo "$REPO" --title "fix: <Titel>" --body-file ticket.md \
   --label bug --label agent:claude --label team:backend
 ```
 
-**Abhängige Tickets:** Lege sie ohne `team:*`-Label an. Setze das Label erst, wenn das vorherige Ticket gemergt ist (`gh issue edit <n> --add-label team:<team>`). Sonst baut der Worker auf einem veralteten `origin/main` auf.
+**Abhängige Tickets:** Lege sie ohne `team:*`-Label an. Setze das Label erst, wenn das vorherige Ticket gemergt ist (`gh issue edit <n> --repo "$REPO" --add-label team:<team>`). Sonst baut der Worker auf einem veralteten `origin/main` auf.
 
 ## 3. Fortschritt verfolgen
 
 | Status-Label         | Bedeutung                                                                   |
 | :------------------- | :-------------------------------------------------------------------------- |
 | `status:queued`      | eingereiht oder nach beantworteter Rückfrage wieder eingereiht              |
-| `status:in-progress` | Worker läuft im Worktree `<root>/.worktrees/feat-<n>-<slug>`                |
+| `status:in-progress` | Worker läuft im Worktree `<repo-path>/.worktrees/feat-<n>-<slug>`           |
 | `status:blocked`     | offene Rückfrage (siehe 5) oder endgültig fehlgeschlagen (nach 4 Versuchen) |
 | `status:done`        | Worker fertig, Branch gepusht, Draft-PR `<type>(#<n>): …` mit `Closes #<n>` |
 
 ```bash
-gh issue view <n> --json labels -q '.labels[].name'
-gh pr list --head feat/<n>-<slug> --json number,url,isDraft
+gh issue view <n> --repo "$REPO" --json labels -q '.labels[].name'
+gh pr list --repo "$REPO" --head feat/<n>-<slug> --json number,url,isDraft
 ```
 
-Den Draft-PR legt der Server an, nicht der Worker. Danach entfernt er den Worktree. **Reviewe erst bei `status:done`.** Vorher kann der Worker noch committen. Live-Status liefert `GET /api/stream` (SSE), das Dashboard läuft unter `$HQ`.
+Den Draft-PR legt der Server an, nicht der Worker. Danach entfernt er den Worktree. **Reviewe erst bei `status:done`.** Vorher kann der Worker noch committen. Live-Status liefert `GET /api/stream` (SSE), das Dashboard läuft unter `$HQ`. Warteschlangen und Draft-PRs je Repo: `GET /api/repos/stats`.
 
 ## 4. Review und Merge
 
-1. **Eigener Worktree, nie im Server-Verzeichnis**, denn dort liegt der laufende Build (`apps/agent-hq/build`). Checke den Branch detached aus. Ein normal ausgecheckter `feat/<n>-<slug>` blockiert spätere Worker-Läufe und `--delete-branch`:
+1. **Eigener Worktree im `<repo-path>`, nie im Server-Verzeichnis**, denn dort liegt der laufende Build (`apps/agent-hq/build`). Checke den Branch detached aus. Ein normal ausgecheckter `feat/<n>-<slug>` blockiert spätere Worker-Läufe und `--delete-branch`:
 
    ```bash
    git fetch origin feat/<n>-<slug>
@@ -79,7 +111,7 @@ Den Draft-PR legt der Server an, nicht der Worker. Danach entfernt er den Worktr
    ```
 
 2. **Gegen das Ticket prüfen:** `gh issue view <n>` und `gh pr diff <pr>`. Hake jedes Akzeptanzkriterium einzeln ab. Führe die Tests im Review-Worktree aus.
-3. **Nachbesserungen auf demselben Branch:** Ein erneutes Einreihen wirkt nicht. Der Job `issue-<n>` bleibt nach Abschluss in Redis, und der Ingest überspringt das Issue. Delegiere stattdessen direkt:
+3. **Nachbesserungen auf demselben Branch:** Ein erneutes Einreihen wirkt nicht. Der Job `<owner>/<name>#<n>` (bei leerer Registry `issue-<n>`) bleibt nach Abschluss in Redis, und der Ingest überspringt das Issue. Delegiere stattdessen direkt:
 
    ```bash
    git worktree remove .worktrees/review-<n>
@@ -100,7 +132,7 @@ Den Draft-PR legt der Server an, nicht der Worker. Danach entfernt er den Worktr
    Ohne CI-Pipeline nicht selbst mergen. Sag dem User, dass Review und lokale Tests grün sind, und überlass ihm den Merge.
 
 5. **Aufräumen:** `git worktree remove .worktrees/review-<n>` (bzw. `fix-<n>`) und `git worktree prune`.
-6. **Server neu starten**, wenn der Merge Server-Code betrifft (`apps/agent-hq/**`, `libs/**`). Der laufende Prozess nutzt den alten Build. Siehe [Betrieb](references/operations.md#neustart).
+6. **Server neu starten**, wenn der Merge im Server-Repo Server-Code betrifft (`apps/agent-hq/**`, `libs/**`). Der laufende Prozess nutzt den alten Build. Siehe [Betrieb](references/operations.md#neustart).
 
 ## 5. Rückfragen beantworten
 
@@ -108,14 +140,14 @@ Ein Worker fragt über `scripts/hq-ask.sh`. Die Frage landet per `POST /api/ques
 
 ```bash
 HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"
-curl -s "$HQ/api/questions" | jq '.[] | {id, issueId, team, question, options}'
+curl -s "$HQ/api/questions" | jq '.[] | {id, repo, issueId, team, question, options}'
 ```
 
-1. Lege jede Frage dem User wörtlich vor, mit Issue-Nummer und Optionen. Beantworte sie nicht selbst, außer der User hat die Entscheidung vorher getroffen.
-2. Poste die Antwort. Die ID hat das Format `<issue>-<k>`, z. B. `105-1`:
+1. Lege jede Frage dem User wörtlich vor, mit Repo, Issue-Nummer und Optionen. Beantworte sie nicht selbst, außer der User hat die Entscheidung vorher getroffen.
+2. Poste die Antwort. Übernimm `id` unverändert: `<owner>.<name>.<issue>-<k>` für registrierte Repos (z. B. `acme.shop.105-1`), `<issue>-<k>` ohne `repo`-Feld (z. B. `105-1`):
 
    ```bash
-   curl -s -X POST "$HQ/api/questions/105-1/answer" \
+   curl -s -X POST "$HQ/api/questions/acme.shop.105-1/answer" \
      -H "Content-Type: application/json" \
      -d "$(jq -nc --arg a "Dark als Default" '{answer: $a}')"
    ```
@@ -138,6 +170,6 @@ AGENT_HQ_V2_WORKERS=1 ./run.sh            # Redis via Docker Compose + Build + S
 | Port belegt                 | `run.sh`: „Port 3333 ist bereits … belegt“, Exit 1        | alten Server beenden (siehe Neustart) oder anderen `PORT` und `AGENT_HQ_URL` |
 | Redis fehlt                 | Log: „Redis nicht erreichbar, V2 deaktiviert“             | Docker starten, `docker compose up -d redis`, Server neu starten             |
 | V2-Flag fehlt               | kein `teams` in `/api/stream`, Issues bleiben ohne Status | Server mit `AGENT_HQ_V2_WORKERS=1` neu starten                               |
-| Issue wird nicht eingezogen | kein `status:queued` nach über 60 s                       | genau ein `team:*`, kein `status:*`, Issue offen, richtiges Repo?            |
+| Issue wird nicht eingezogen | kein `status:queued` nach über 60 s                       | genau ein `team:*`, kein `status:*`, Issue offen, Repo eingelesen (1)?       |
 
 Neustart, Logs, alle Umgebungsvariablen und weitere Fehlerbilder: [Betrieb](references/operations.md).
