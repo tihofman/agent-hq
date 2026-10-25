@@ -37,17 +37,23 @@ export function Footer({ statusMessage }: FooterProps) {
           <Text bold color="cyan">
             [k]{' '}
           </Text>
-          <Text dimColor>Kill │ </Text>
+          <Text dimColor>Kill</Text>
+        </Box>
+        <Box>
           <Text bold color="cyan">
             [Tab/1-4]{' '}
           </Text>
           <Text dimColor>Ansichten</Text>
         </Box>
+      </Box>
+      <Box justifyContent="space-between">
         <Box>
           <Text bold color="cyan">
             [?]{' '}
           </Text>
-          <Text dimColor>Hilfe │ </Text>
+          <Text dimColor>Hilfe</Text>
+        </Box>
+        <Box>
           <Text bold color="red">
             [q]{' '}
           </Text>

@@ -1,9 +1,17 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type { Run } from '../api/types';
 
 interface JobsViewProps {
   runs: Run[];
   selectedIndex: number;
+  title?: string;
+  columns?: number;
+}
+
+export function truncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  if (maxLen <= 1) return '…';
+  return str.slice(0, maxLen - 1) + '…';
 }
 
 function statusColor(status: string): string {
@@ -25,7 +33,16 @@ function statusColor(status: string): string {
   }
 }
 
-export function JobsView({ runs, selectedIndex }: JobsViewProps) {
+export function JobsView({
+  runs,
+  selectedIndex,
+  title = 'LAUFENDE JOBS',
+  columns,
+}: JobsViewProps) {
+  const { stdout } = useStdout();
+  const terminalColumns = columns ?? stdout?.columns ?? 80;
+  const innerWidth = Math.max(40, terminalColumns - 8);
+
   if (runs.length === 0) {
     return (
       <Box
@@ -42,6 +59,10 @@ export function JobsView({ runs, selectedIndex }: JobsViewProps) {
     );
   }
 
+  const hasKillable = runs.some(
+    (r) => r.status === 'running' || r.status === 'handover',
+  );
+
   return (
     <Box
       flexDirection="column"
@@ -51,9 +72,11 @@ export function JobsView({ runs, selectedIndex }: JobsViewProps) {
     >
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold color="yellow">
-          LAUFENDE JOBS ({runs.length})
+          {title} ({runs.length})
         </Text>
-        <Text dimColor>[Enter] Log öffnen │ [k] Abbrechen</Text>
+        <Text dimColor>
+          [Enter] Log öffnen{hasKillable ? ' │ [k] Abbrechen' : ''}
+        </Text>
       </Box>
 
       {runs.map((run, idx) => {
@@ -64,31 +87,50 @@ export function JobsView({ runs, selectedIndex }: JobsViewProps) {
           run.ticketId ||
           (run.data?.issueId ? `#${run.data.issueId}` : '') ||
           '-';
-        const title = run.data?.title ? ` - ${run.data.title}` : '';
+        const titleText = run.data?.title ? ` - ${run.data.title}` : '';
+
+        const prefix = isSelected ? '▶ ' : '  ';
+        const idStr = `[${run.runId}]`;
+        const issueStr = `Issue: ${issue}`;
+        const agentStr = `Agent: ${run.agent}`;
+        const statusStr = run.status;
+        const nonRepoWidth =
+          prefix.length +
+          idStr.length +
+          3 + // ' │ '
+          6 + // 'Repo: '
+          3 + // ' │ '
+          issueStr.length +
+          3 + // ' │ '
+          agentStr.length +
+          3 + // ' │ '
+          statusStr.length;
+        const maxRepoLen = Math.max(4, innerWidth - nonRepoWidth);
+        const displayRepo = truncate(repo, maxRepoLen);
 
         return (
           <Box key={run.runId} flexDirection="column" marginBottom={1}>
-            <Box>
+            <Text>
               <Text bold color={isSelected ? 'cyan' : 'gray'}>
-                {isSelected ? '▶ ' : '  '}
+                {prefix}
               </Text>
               <Text bold color="white">
-                [{run.runId}]
+                {idStr}
               </Text>
               <Text dimColor> │ </Text>
-              <Text color="yellow">Repo: {repo}</Text>
+              <Text color="yellow">Repo: {displayRepo}</Text>
               <Text dimColor> │ </Text>
-              <Text color="magenta">Issue: {issue}</Text>
+              <Text color="magenta">{issueStr}</Text>
               <Text dimColor> │ </Text>
-              <Text color="cyan">Agent: {run.agent}</Text>
+              <Text color="cyan">{agentStr}</Text>
               <Text dimColor> │ </Text>
               <Text color={color} bold>
-                {run.status}
+                {statusStr}
               </Text>
-            </Box>
-            {title && (
+            </Text>
+            {titleText && (
               <Box paddingLeft={4}>
-                <Text dimColor>{title}</Text>
+                <Text dimColor>{truncate(titleText, innerWidth - 4)}</Text>
               </Box>
             )}
           </Box>

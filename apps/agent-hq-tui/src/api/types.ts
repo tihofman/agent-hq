@@ -76,10 +76,26 @@ export interface RepoStatsResponse {
   repos: RepoItem[];
 }
 
+export interface ActivePR {
+  prNumber?: number;
+  title?: string;
+  statusText?: string;
+  exitCode?: number | null;
+  logFile?: string;
+  criteriaTotal?: number;
+  criteriaCompleted?: number;
+  cooldownUntil?: string;
+  logChunk?: string;
+  repo?: string;
+  status?: 'draft' | 'reviewing' | 'ready' | 'merged' | 'closed' | string;
+  ci?: 'pass' | 'fail';
+  [key: string]: unknown;
+}
+
 export interface HQState {
   agents: Record<Agent, AgentSlotState>;
   runs: Record<string, Run>;
-  activePR: (DraftPR & { status?: string }) | null;
+  activePR: ActivePR | null;
   questions?: Record<string, QuestionPayload>;
   teams?: Record<Team, { status: TeamStatus }>;
 }

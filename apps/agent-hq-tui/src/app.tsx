@@ -29,6 +29,7 @@ export interface AppProps {
   fetchFn?: typeof fetch;
   initialState?: HQState;
   initialRepos?: RepoItem[];
+  initialQuestions?: QuestionPayload[];
   disableAutoConnect?: boolean;
 }
 
@@ -37,6 +38,7 @@ export function App({
   fetchFn = fetch,
   initialState,
   initialRepos = [],
+  initialQuestions = [],
   disableAutoConnect = false,
 }: AppProps) {
   const { exit } = useApp();
@@ -60,7 +62,8 @@ export function App({
 
   const [repos, setRepos] = useState<RepoItem[]>(initialRepos);
   const [logChunks, setLogChunks] = useState<Record<string, string[]>>({});
-  const [questionsList, setQuestionsList] = useState<QuestionPayload[]>([]);
+  const [questionsList, setQuestionsList] =
+    useState<QuestionPayload[]>(initialQuestions);
 
   const [selectedJobIndex, setSelectedJobIndex] = useState(0);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
@@ -79,14 +82,14 @@ export function App({
   }, [state.runs]);
 
   const activeRuns = useMemo(() => {
-    const active = runsList.filter(
-      (r) =>
-        r.status === 'running' ||
-        r.status === 'handover' ||
-        r.status === 'cooldown',
+    return runsList.filter(
+      (r) => r.status === 'running' || r.status === 'handover',
     );
-    return active.length > 0 ? active : runsList;
   }, [runsList]);
+
+  const hasActiveRuns = activeRuns.length > 0;
+  const displayedRuns = hasActiveRuns ? activeRuns : runsList;
+  const jobsTitle = hasActiveRuns ? 'LAUFENDE JOBS' : 'Letzte Jobs';
 
   // Combine questions from state and questionsList
   const pendingQuestions = useMemo(() => {
@@ -97,12 +100,20 @@ export function App({
       }
     }
     for (const q of questionsList) {
-      if (q.status === 'PENDING') map.set(q.id, q);
+      if (q.status === 'PENDING') {
+        const sseQ = state.questions?.[q.id];
+        if (sseQ && sseQ.status !== 'PENDING') {
+          continue;
+        }
+        if (!map.has(q.id)) {
+          map.set(q.id, q);
+        }
+      }
     }
     return Array.from(map.values());
   }, [state.questions, questionsList]);
 
-  const selectedRun: Run | undefined = activeRuns[selectedJobIndex];
+  const selectedRun: Run | undefined = displayedRuns[selectedJobIndex];
   const selectedQuestion: QuestionPayload | undefined =
     pendingQuestions[selectedQuestionIndex] ?? pendingQuestions[0];
 
@@ -238,7 +249,7 @@ export function App({
           );
         } else {
           setSelectedJobIndex((prev) =>
-            prev > 0 ? prev - 1 : Math.max(0, activeRuns.length - 1),
+            prev > 0 ? prev - 1 : Math.max(0, displayedRuns.length - 1),
           );
         }
         return;
@@ -251,7 +262,7 @@ export function App({
           );
         } else {
           setSelectedJobIndex((prev) =>
-            prev < activeRuns.length - 1 ? prev + 1 : 0,
+            prev < displayedRuns.length - 1 ? prev + 1 : 0,
           );
         }
         return;
@@ -274,10 +285,17 @@ export function App({
       }
 
       if (input === 'k') {
-        if (selectedRun) {
+        if (!selectedRun) {
+          setStatusMessage('Kein aktiver Lauf ausgewählt.');
+        } else if (
+          selectedRun.status === 'running' ||
+          selectedRun.status === 'handover'
+        ) {
           setActiveModal('kill');
         } else {
-          setStatusMessage('Kein aktiver Lauf ausgewählt.');
+          setStatusMessage(
+            `Lauf [${selectedRun.runId}] ist im Status '${selectedRun.status}' und kann nicht abgebrochen werden (nur running/handover).`,
+          );
         }
         return;
       }
@@ -304,7 +322,12 @@ export function App({
   };
 
   const handleKillConfirm = async () => {
-    if (!selectedRun) return;
+    if (
+      !selectedRun ||
+      (selectedRun.status !== 'running' && selectedRun.status !== 'handover')
+    ) {
+      return;
+    }
     const res = await killRun(
       selectedRun.runId,
       'Abbruch per TUI Dashboard',
@@ -362,7 +385,11 @@ export function App({
               <Box marginY={1}>
                 <TeamsView teams={state.teams} agents={state.agents} />
               </Box>
-              <JobsView runs={activeRuns} selectedIndex={selectedJobIndex} />
+              <JobsView
+                runs={displayedRuns}
+                selectedIndex={selectedJobIndex}
+                title={jobsTitle}
+              />
               <Box marginTop={1}>
                 <QuestionsView
                   questions={pendingQuestions}
@@ -374,7 +401,11 @@ export function App({
 
           {activeTab === 'jobs' && (
             <Box flexDirection="column">
-              <JobsView runs={activeRuns} selectedIndex={selectedJobIndex} />
+              <JobsView
+                runs={displayedRuns}
+                selectedIndex={selectedJobIndex}
+                title={jobsTitle}
+              />
               {selectedRun && (
                 <Box marginTop={1}>
                   <LogViewer

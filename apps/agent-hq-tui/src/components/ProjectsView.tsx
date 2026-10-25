@@ -1,9 +1,9 @@
 import { Box, Text } from 'ink';
-import type { DraftPR, RepoItem } from '../api/types';
+import type { ActivePR, RepoItem } from '../api/types';
 
 interface ProjectsViewProps {
   repos: RepoItem[];
-  activePR?: (DraftPR & { status?: string }) | null;
+  activePR?: ActivePR | null;
 }
 
 export function ProjectsView({ repos, activePR }: ProjectsViewProps) {
@@ -106,9 +106,11 @@ export function ProjectsView({ repos, activePR }: ProjectsViewProps) {
           marginTop={1}
         >
           <Text bold color="magenta">
-            Aktiver PR #{activePR.number}:{' '}
+            Aktiver PR{' '}
+            {activePR.prNumber !== undefined ? `#${activePR.prNumber}` : ''}
+            :{' '}
           </Text>
-          <Text>{activePR.title} </Text>
+          {activePR.title && <Text>{activePR.title} </Text>}
           {activePR.status && <Text color="yellow">[{activePR.status}]</Text>}
         </Box>
       )}

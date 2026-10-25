@@ -1,7 +1,10 @@
 import { cleanup, render } from 'ink-testing-library';
+import { Box } from 'ink';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
-import type { HQState, RepoItem } from './api/types';
+import type { HQState, QuestionPayload, RepoItem, Run } from './api/types';
+import { Footer } from './components/Footer';
+import { JobsView } from './components/JobsView';
 
 const sleep = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,9 +77,8 @@ describe('App TUI Dashboard with mocked SSE stream for two repos', () => {
       },
     },
     activePR: {
-      number: 153,
+      prNumber: 153,
       title: 'Draft PR for multi-repo',
-      url: 'https://github.com/tihofman/agent-hq/pull/153',
       status: 'draft',
     },
     questions: {
@@ -118,6 +120,7 @@ describe('App TUI Dashboard with mocked SSE stream for two repos', () => {
     expect(frame).toContain('Draft PRs:');
     expect(frame).toContain('#153');
     expect(frame).toContain('Draft PR for multi-repo');
+    expect(frame).toContain('Aktiver PR #153:');
 
     // 2. Teams & Slots
     expect(frame).toContain('Teams:');
@@ -340,5 +343,237 @@ describe('App TUI Dashboard with mocked SSE stream for two repos', () => {
     stdin.write('\t'); // Tab cycles back to dashboard
     await sleep();
     expect(lastFrame()).toContain('DASHBOARD');
+  });
+
+  it('shows "Letzte Jobs" instead of "LAUFENDE JOBS" when no runs are active, and prevents kill for non-running status', async () => {
+    const mockFetch = vi.fn();
+    const completedState: HQState = {
+      ...mockState,
+      runs: {
+        'run-done-1': {
+          runId: 'run-done-1',
+          agent: 'claude',
+          status: 'complete',
+          ticketId: '#303',
+          repo: 'tihofman/agent-hq',
+          timestamp: '2026-10-25T11:00:00Z',
+          data: { title: 'Finished task', issueId: 303 },
+        },
+      },
+    };
+
+    const { lastFrame, stdin } = render(
+      <App
+        baseUrl="http://127.0.0.1:3333"
+        fetchFn={mockFetch as unknown as typeof fetch}
+        initialRepos={mockRepos}
+        initialState={completedState}
+        disableAutoConnect={true}
+      />,
+    );
+
+    expect(lastFrame()).toContain('DASHBOARD');
+    await sleep();
+
+    const frame = lastFrame();
+    expect(frame).toContain('Letzte Jobs (1)');
+    expect(frame).not.toContain('LAUFENDE JOBS');
+    expect(frame).not.toContain('[k] Abbrechen');
+
+    // Press 'k' to attempt kill
+    stdin.write('k');
+    await sleep();
+
+    // Kill modal must NOT open
+    expect(lastFrame()).not.toContain('LAUF ABBRECHEN (KILL SWITCH)');
+    // No request to /api/kill sent
+    expect(mockFetch).not.toHaveBeenCalled();
+    // Hint displayed in TUI statusMessage
+    expect(lastFrame()).toContain(
+      "Lauf [run-done-1] ist im Status 'complete' und kann nicht abgebrochen werden",
+    );
+  });
+
+  it('fits JobsView and Footer within 80 columns without truncation of issue numbers and with repo truncation', () => {
+    const longRun: Run = {
+      runId: 'run-long-1',
+      agent: 'claude',
+      status: 'running',
+      ticketId: '#99988',
+      repo: 'some-very-long-org/extremely-long-microservice-backend',
+      timestamp: '2026-10-25T12:00:00Z',
+      data: {
+        title: 'Refactor everything across repos',
+        issueId: 99988,
+      },
+    };
+
+    const resJobs = render(
+      <Box width={80} padding={1}>
+        <JobsView runs={[longRun]} selectedIndex={0} columns={80} />
+      </Box>,
+    );
+
+    const jobsFrame = resJobs.lastFrame()!;
+    // Issue number must NOT be cut off
+    expect(jobsFrame).toContain('Issue: #99988');
+    // Long repo must be truncated with …
+    expect(jobsFrame).toContain('…');
+    expect(jobsFrame).not.toContain('extremely-long-microservice-backend');
+    // Check line lengths at 80 cols
+    const stripAnsi = (str: string) =>
+      str.replace(
+        new RegExp(String.fromCharCode(27) + '\\[[0-9;]*[a-zA-Z]', 'g'),
+        '',
+      );
+
+    const jobsLines = jobsFrame.split('\n');
+    for (const line of jobsLines) {
+      expect(stripAnsi(line).length).toBeLessThanOrEqual(80);
+    }
+
+    const resFooter = render(
+      <Box width={80} padding={1}>
+        <Footer statusMessage="Erfolgreich ausgeführt" />
+      </Box>,
+    );
+
+    const footerFrame = resFooter.lastFrame()!;
+    const footerLines = footerFrame.split('\n');
+    for (const line of footerLines) {
+      expect(stripAnsi(line).length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it('immediately hides questions that are no longer PENDING in SSE state even if 5s poll list contains them', async () => {
+    const pollQuestions: QuestionPayload[] = [
+      {
+        id: 'poll-q-1',
+        issueId: 301,
+        repo: 'acme/shop',
+        team: 'frontend',
+        question: 'Should we enable dark mode by default?',
+        options: ['Yes', 'No'],
+        status: 'PENDING',
+      },
+    ];
+
+    // SSE state already answered this question
+    const stateWithAnsweredQuestion: HQState = {
+      ...mockState,
+      questions: {
+        'poll-q-1': {
+          id: 'poll-q-1',
+          issueId: 301,
+          repo: 'acme/shop',
+          team: 'frontend',
+          question: 'Should we enable dark mode by default?',
+          options: ['Yes', 'No'],
+          status: 'ANSWERED',
+        },
+      },
+    };
+
+    const { lastFrame } = render(
+      <App
+        baseUrl="http://127.0.0.1:3333"
+        initialRepos={mockRepos}
+        initialState={stateWithAnsweredQuestion}
+        initialQuestions={pollQuestions}
+        disableAutoConnect={true}
+      />,
+    );
+
+    const frame = lastFrame();
+    // The question must NOT be displayed in RÜCKFRAGEN because SSE-state has status ANSWERED
+    expect(frame).not.toContain('poll-q-1');
+    expect(frame).not.toContain('Should we enable dark mode by default?');
+  });
+
+  it('immediately hides questions when SSE updates to ANSWERED even if 5s poll list still contains them', async () => {
+    let pushSse: (data: string) => void = () => {};
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        pushSse = (data: string) => {
+          controller.enqueue(encoder.encode(data));
+        };
+      },
+    });
+
+    const pollQuestions: QuestionPayload[] = [
+      {
+        id: 'poll-q-stream-1',
+        issueId: 404,
+        repo: 'acme/shop',
+        team: 'frontend',
+        question: 'Should we add animated sprites?',
+        options: ['Yes', 'No'],
+        status: 'PENDING',
+      },
+    ];
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/api/stream')) {
+        return new Response(stream);
+      }
+      if (url.includes('/questions')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => pollQuestions,
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ repos: mockRepos }),
+      };
+    });
+
+    const { lastFrame } = render(
+      <App
+        baseUrl="http://127.0.0.1:3333"
+        fetchFn={mockFetch as unknown as typeof fetch}
+        initialRepos={mockRepos}
+        initialState={{
+          ...mockState,
+          questions: {
+            'poll-q-stream-1': {
+              ...pollQuestions[0],
+              status: 'PENDING',
+            },
+          },
+        }}
+        initialQuestions={pollQuestions}
+        disableAutoConnect={false}
+      />,
+    );
+
+    await sleep();
+    expect(lastFrame()).toContain('Should we add animated sprites?');
+
+    // Now SSE emits UPDATE where poll-q-stream-1 is marked as ANSWERED
+    const updatePayload = {
+      event: {
+        event: 'QUESTION_RESOLVED',
+        timestamp: '2026-10-25T13:00:00Z',
+      },
+      state: {
+        ...mockState,
+        questions: {
+          'poll-q-stream-1': {
+            ...pollQuestions[0],
+            status: 'ANSWERED',
+          },
+        },
+      },
+    };
+
+    pushSse(`event: UPDATE\ndata: ${JSON.stringify(updatePayload)}\n\n`);
+    await sleep();
+
+    // Must be hidden immediately despite pollQuestions having it as PENDING
+    expect(lastFrame()).not.toContain('Should we add animated sprites?');
   });
 });
