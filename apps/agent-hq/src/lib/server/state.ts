@@ -248,6 +248,7 @@ export interface Run {
   room?: Room;
   timestamp: string;
   data: EventData;
+  repo?: string;
 }
 export type { Team } from '@agent-hq/queue';
 export type TeamStatus = 'idle' | 'working' | 'waiting_input';
@@ -467,6 +468,7 @@ export function reduce(state: State, event: HQEvent | InternalAction): State {
     if (event.data.logFile !== undefined) run.logFile = event.data.logFile;
     if (event.data.exitCode !== undefined && event.data.exitCode !== null)
       run.exitCode = event.data.exitCode;
+    if (event.data.repo !== undefined) run.repo = event.data.repo;
     runs = { ...runs, [event.runId]: run };
   }
   let agents = state.agents;

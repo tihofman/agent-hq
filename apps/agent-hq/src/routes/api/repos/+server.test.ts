@@ -6,7 +6,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadRepos, setRepoGhRunner } from '../../../lib/server/repos';
 import { GET, POST } from './+server';
-import { DELETE } from './[...repo]/+server';
+import { DELETE, PATCH } from './[...repo]/+server';
 
 const URL_BASE = 'http://127.0.0.1:3333/api/repos';
 const event = (request: Request, params: Record<string, string> = {}) =>
@@ -14,6 +14,15 @@ const event = (request: Request, params: Record<string, string> = {}) =>
 const post = (body: unknown, origin?: string) =>
   new Request(URL_BASE, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(origin ? { Origin: origin } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+const patch = (repo: string, body: unknown, origin?: string) =>
+  new Request(`${URL_BASE}/${repo}`, {
+    method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       ...(origin ? { Origin: origin } : {}),
@@ -48,6 +57,10 @@ describe('/api/repos', () => {
       (await POST(event(post({ repo: 'acme/alpha', path: repoDir }, evil))))
         .status,
     ).toBe(403);
+    const patchReq = patch('acme/alpha', { enabled: false }, evil);
+    expect((await PATCH(event(patchReq, { repo: 'acme/alpha' }))).status).toBe(
+      403,
+    );
     const del = new Request(`${URL_BASE}/acme/alpha`, {
       method: 'DELETE',
       headers: { Origin: evil },
@@ -98,5 +111,74 @@ describe('/api/repos', () => {
         )
       ).status,
     ).toBe(400);
+  });
+
+  it('updates repo enabled status via PATCH', async () => {
+    await POST(
+      event(
+        post({ repo: 'acme/alpha', path: repoDir }, 'http://127.0.0.1:3333'),
+      ),
+    );
+
+    // Invalid body / enabled
+    expect(
+      (
+        await PATCH(
+          event(patch('acme/alpha', { enabled: 'not-bool' }), {
+            repo: 'acme/alpha',
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    // Invalid repo param
+    expect(
+      (
+        await PATCH(
+          event(patch('invalid', { enabled: false }), {
+            repo: 'invalid',
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    // Non-existent repo
+    expect(
+      (
+        await PATCH(
+          event(patch('acme/missing', { enabled: false }), {
+            repo: 'acme/missing',
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    // Disable repo
+    const resDisable = await PATCH(
+      event(patch('acme/alpha', { enabled: false }), { repo: 'acme/alpha' }),
+    );
+    expect(resDisable.status).toBe(200);
+    expect(await resDisable.json()).toEqual({
+      repo: 'acme/alpha',
+      path: repoDir,
+      enabled: false,
+    });
+    expect(loadRepos()).toEqual([
+      { repo: 'acme/alpha', path: repoDir, enabled: false },
+    ]);
+
+    // Re-enable repo
+    const resEnable = await PATCH(
+      event(patch('acme/alpha', { enabled: true }), { repo: 'acme/alpha' }),
+    );
+    expect(resEnable.status).toBe(200);
+    expect(await resEnable.json()).toEqual({
+      repo: 'acme/alpha',
+      path: repoDir,
+      enabled: true,
+    });
+    expect(loadRepos()).toEqual([
+      { repo: 'acme/alpha', path: repoDir, enabled: true },
+    ]);
   });
 });

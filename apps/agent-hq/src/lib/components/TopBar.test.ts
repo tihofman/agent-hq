@@ -36,4 +36,16 @@ describe('TopBar.svelte', () => {
     expect(html).toContain('aria-label="V2-Worker-Pool aktiv"');
     expect(html).toContain('>V2<');
   });
+
+  it('renders navigation links to dashboard, projects and history', () => {
+    const { html } = render(TopBar);
+    expect(html).toContain('data-testid="dashboard-link"');
+    expect(html).toContain('href="/"');
+    expect(html).toContain('Dashboard');
+    expect(html).toContain('data-testid="projects-link"');
+    expect(html).toContain('href="/projects"');
+    expect(html).toContain('Projekte');
+    expect(html).toContain('data-testid="history-link"');
+    expect(html).toContain('href="/history"');
+  });
 });

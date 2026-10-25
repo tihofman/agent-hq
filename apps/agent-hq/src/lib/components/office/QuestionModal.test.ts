@@ -89,4 +89,25 @@ describe('QuestionModal.svelte', () => {
 
     expect(html).not.toContain('role="document"');
   });
+
+  it('renders repository badge when question.repo is set', () => {
+    const questionWithRepo: QuestionPayload = {
+      id: 'acme.webapp.105-1',
+      issueId: 105,
+      repo: 'acme/webapp',
+      team: 'frontend',
+      status: 'PENDING',
+      question: 'Deploy now?',
+    };
+
+    const { html } = render(QuestionModal, {
+      props: {
+        question: questionWithRepo,
+        onclose: () => {},
+      },
+    });
+
+    expect(html).toContain('data-testid="question-repo"');
+    expect(html).toContain('acme/webapp');
+  });
 });

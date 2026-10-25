@@ -10,6 +10,7 @@ import {
   loadRepos,
   registerRepo,
   removeRepo,
+  setRepoEnabled,
   RepoValidationError,
   setRepoGhRunner,
   targetForRepo,
@@ -110,6 +111,13 @@ describe('repo registry (ADR 0007)', () => {
     expect(loadRepos()).toEqual([
       { repo: 'acme/alpha', path: repoDir, enabled: false },
     ]);
+
+    expect(await setRepoEnabled('acme/alpha', true)).toEqual({
+      repo: 'acme/alpha',
+      path: repoDir,
+      enabled: true,
+    });
+    expect(await setRepoEnabled('non/existent', true)).toBeNull();
 
     expect(await removeRepo('ACME/Alpha')).toBe(true);
     expect(await removeRepo('acme/alpha')).toBe(false);
