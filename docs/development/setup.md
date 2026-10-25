@@ -133,7 +133,7 @@ Variante B, als Claude-Code-Plugin (in einer Claude-Code-Session):
 
 Der Marketplace (`.claude-plugin/marketplace.json`) und das Plugin-Manifest (`.claude-plugin/plugin.json`) liegen im Repo-Root. Prüfen lassen sie sich mit `claude plugin validate . --strict`.
 
-Der Skill steuert nur die Agent-HQ-Instanz, die im selben Repo läuft (siehe Einschränkung in `SKILL.md`).
+Der Skill steuert die Agent-HQ-Instanz unter `AGENT_HQ_URL` und schlägt vor, das aktuelle Repo zu registrieren, wenn es noch fehlt (siehe Abschnitt 6).
 
 ---
 
@@ -148,11 +148,13 @@ curl -s -X POST "$HQ/api/repos" -H 'Content-Type: application/json' \
   -d '{"repo":"owner/name","path":"/abs/pfad/zum/klon"}'
 # Auflisten
 curl -s "$HQ/api/repos"
+# Pausieren bzw. wieder aktivieren
+curl -s -X PATCH "$HQ/api/repos/owner/name" -H 'Content-Type: application/json' -d '{"enabled":false}'
 # Entfernen
 curl -s -X DELETE "$HQ/api/repos/owner/name"
 ```
 
-Beim Registrieren prüft der Server, dass der Pfad existiert, ein Git-Repo ist und `gh repo view` dort `owner/name` meldet. Danach legt er **auf GitHub** die Labels `team:*` und `status:*` an und trägt `.worktrees/` in `.git/info/exclude` des Repos ein. Mit `"enabled": false` bleibt ein Repo registriert, wird aber nicht mehr eingelesen.
+Beim Registrieren prüft der Server, dass der Pfad existiert, ein Git-Repo ist und `gh repo view` dort `owner/name` meldet. Danach legt er **auf GitHub** die Labels `team:*` und `status:*` an und trägt `.worktrees/` in `.git/info/exclude` des Repos ein. Mit `"enabled": false` bleibt ein Repo registriert, wird aber nicht mehr eingelesen. Der Ingest liest `repos.json` bei jedem Durchlauf neu, ein Neustart ist nicht nötig. Nur GitHub-Repos lassen sich registrieren, `local`-Repos nicht.
 
 Registrierte Repos bekommen Worker mit weitreichenden Rechten. Registriere nur Repos, denen du vertraust. Laufende Jobs eines entfernten Repos schlagen fehl, statt im Home-Repo weiterzulaufen.
 

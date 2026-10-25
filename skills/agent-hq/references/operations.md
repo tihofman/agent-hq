@@ -1,6 +1,6 @@
 # Agent-HQ Betrieb
 
-Alle Befehle laufen im Repo-Root des Servers (`<root>`).
+Alle Befehle laufen im Repo-Root des Servers (`<root>`), außer denen zur Registry: Die laufen gegen die API.
 
 ## Start
 
@@ -45,32 +45,60 @@ AGENT_HQ_V2_WORKERS=1 ./run.sh
 
 Prüfe vorher mit `gh issue list --label status:in-progress`, ob gerade ein Worker läuft. Beim Stoppen beendet der Server laufende Worker-Prozesse (SIGTERM, nach 2 s SIGKILL). Starte deshalb möglichst neu, wenn kein Job aktiv ist. Die Jobs selbst liegen in Redis. Offene Rückfragen lädt der Server beim Start wieder aus Redis.
 
+## Repos
+
+Die Registry liegt in `$AGENT_HQ_HOME/repos.json`:
+
+```json
+[{ "repo": "acme/shop", "path": "/Users/me/src/shop", "enabled": true }]
+```
+
+- Fehlt die Datei oder ist sie leer, bearbeitet der Server nur das Repo, aus dem er läuft (Job-ID `issue-<n>`).
+- Mit mindestens einem Eintrag liest der Ingest nur noch Einträge mit `enabled: true` ein (Job-ID `<owner>/<name>#<n>`). Das Server-Repo muss dann selbst registriert sein, wenn es weiter bearbeitet werden soll.
+- Worktrees liegen unter `<path>/.worktrees/feat-<n>-<slug>`, Draft-PRs legt der Server mit `--repo <owner>/<name>` an.
+- Der Ingest liest die Datei bei jedem Durchlauf neu. Änderungen über die API brauchen keinen Neustart.
+- Nur GitHub-Repos: `gh repo view` muss im Klon den Namen liefern. `local`-Repos ohne GitHub-Remote lassen sich nicht registrieren.
+
+Ändere die Registry über die API statt von Hand. Beim Registrieren prüft der Server Pfad und Repo-Namen, legt die `team:*`- und `status:*`-Labels auf GitHub an und trägt `.worktrees/` in `.git/info/exclude` ein:
+
+```bash
+HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"
+curl -s "$HQ/api/repos"                                                      # auflisten
+curl -s -X POST "$HQ/api/repos" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg r acme/shop --arg p /Users/me/src/shop '{repo: $r, path: $p}')"   # registrieren
+curl -s -X PATCH "$HQ/api/repos/acme/shop" -H "Content-Type: application/json" \
+  -d '{"enabled":false}'                                                     # pausieren
+curl -s -X DELETE "$HQ/api/repos/acme/shop"                                  # entfernen
+```
+
+Laufende Jobs eines entfernten Repos schlagen fehl, statt im Server-Repo weiterzulaufen. Entferne oder pausiere ein Repo deshalb, wenn dort kein Job aktiv ist (`gh issue list --repo acme/shop --label status:in-progress`). Codes und Felder: [API-Referenz](api.md#repos).
+
 ## Umgebungsvariablen
 
-| Variable                             | Standard                     | Wirkung                                                             |
-| :----------------------------------- | :--------------------------- | :------------------------------------------------------------------ |
-| `PORT` / `HOST`                      | `3333` / `127.0.0.1`         | Bind-Adresse des Servers                                            |
-| `AGENT_HQ_V2_WORKERS`                | _(leer)_                     | `1` oder `true` aktiviert Issue-Ingest und Worker-Pool              |
-| `AGENT_HQ_URL`                       | `http://127.0.0.1:3333`      | Server-URL für `delegate.sh`, `hq-ask.sh` und `hq-hook.sh`          |
-| `AGENT_HQ_HOME`                      | `~/.agent-hq`                | Verzeichnis der Event-Historie (`history.jsonl`)                    |
-| `AGENT_HQ_LOG_DIR`                   | `${TMPDIR:-/tmp}/agent-hq`   | Run-Logs, aus denen der Server liest; muss zu `delegate.sh` passen  |
-| `AGENT_HQ_ISSUE_POLL_INTERVAL_MS`    | `60000`                      | Abstand zwischen zwei Ingest-Durchläufen                            |
-| `AGENT_HQ_QUESTION_GRACE_PERIOD_MS`  | `60000`                      | Wartezeit nach einer Rückfrage, bis der Worker beendet wird         |
-| `AGENT_HQ_DELEGATE_SCRIPT`           | `<root>/scripts/delegate.sh` | anderes Delegations-Skript                                          |
-| `REDIS_URL`                          | `redis://127.0.0.1:6379`     | Redis-Verbindung der Queues                                         |
-| `AGENT_MODEL`, `AGENT_MODEL_<AGENT>` | _(leer)_                     | Modell für alle Worker bzw. pro Worker (z. B. `AGENT_MODEL_CLAUDE`) |
+| Variable                             | Standard                     | Wirkung                                                               |
+| :----------------------------------- | :--------------------------- | :-------------------------------------------------------------------- |
+| `PORT` / `HOST`                      | `3333` / `127.0.0.1`         | Bind-Adresse des Servers                                              |
+| `AGENT_HQ_V2_WORKERS`                | _(leer)_                     | `1` oder `true` aktiviert Issue-Ingest und Worker-Pool                |
+| `AGENT_HQ_URL`                       | `http://127.0.0.1:3333`      | Server-URL für `delegate.sh`, `hq-ask.sh` und `hq-hook.sh`            |
+| `AGENT_HQ_HOME`                      | `~/.agent-hq`                | Verzeichnis der Event-Historie (`history.jsonl`) und von `repos.json` |
+| `AGENT_HQ_LOG_DIR`                   | `${TMPDIR:-/tmp}/agent-hq`   | Run-Logs, aus denen der Server liest; muss zu `delegate.sh` passen    |
+| `AGENT_HQ_ISSUE_POLL_INTERVAL_MS`    | `60000`                      | Abstand zwischen zwei Ingest-Durchläufen                              |
+| `AGENT_HQ_QUESTION_GRACE_PERIOD_MS`  | `60000`                      | Wartezeit nach einer Rückfrage, bis der Worker beendet wird           |
+| `AGENT_HQ_DELEGATE_SCRIPT`           | `<root>/scripts/delegate.sh` | anderes Delegations-Skript                                            |
+| `REDIS_URL`                          | `redis://127.0.0.1:6379`     | Redis-Verbindung der Queues                                           |
+| `AGENT_MODEL`, `AGENT_MODEL_<AGENT>` | _(leer)_                     | Modell für alle Worker bzw. pro Worker (z. B. `AGENT_MODEL_CLAUDE`)   |
 
 ## Typische Fehler
 
-| Symptom                                       | Ursache                                                                      | Lösung                                                                                       |
-| :-------------------------------------------- | :--------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------- |
-| `Fehler: Port 3333 ist bereits … belegt`      | alter Server oder anderer Dienst                                             | Prozess aus der Ausgabe beenden oder `PORT=3335 AGENT_HQ_URL=http://127.0.0.1:3335 ./run.sh` |
-| `Warnung: Docker läuft nicht …`               | Docker Desktop aus                                                           | Docker starten, dann neu starten                                                             |
-| `Redis nicht erreichbar, V2 deaktiviert`      | Redis-Container fehlt oder `REDIS_URL` falsch                                | `docker compose up -d redis`, `redis-cli ping`, dann neu starten                             |
-| kein `teams` in `/api/stream`                 | `AGENT_HQ_V2_WORKERS` nicht gesetzt                                          | mit `AGENT_HQ_V2_WORKERS=1` neu starten                                                      |
-| Issue bekommt kein `status:queued`            | kein oder falsches `team:*`, schon `status:*` gesetzt, Issue in anderem Repo | Labels korrigieren und 60 s warten                                                           |
-| `status:blocked` ohne offene Frage            | Job nach 4 Versuchen fehlgeschlagen                                          | Server-Log und Run-Log in `AGENT_HQ_LOG_DIR` lesen, Ursache beheben                          |
-| `curl: (7) Failed to connect` aus Claude Code | Claude-Sandbox blockiert `localhost`                                         | Befehl außerhalb der Sandbox ausführen                                                       |
-| Worker-Lauf scheitert bei `git worktree add`  | Branch `feat/<n>-<slug>` ist anderswo ausgecheckt                            | eigenen Worktree entfernen oder detached auschecken                                          |
+| Symptom                                       | Ursache                                                                                             | Lösung                                                                                       |
+| :-------------------------------------------- | :-------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------- |
+| `Fehler: Port 3333 ist bereits … belegt`      | alter Server oder anderer Dienst                                                                    | Prozess aus der Ausgabe beenden oder `PORT=3335 AGENT_HQ_URL=http://127.0.0.1:3335 ./run.sh` |
+| `Warnung: Docker läuft nicht …`               | Docker Desktop aus                                                                                  | Docker starten, dann neu starten                                                             |
+| `Redis nicht erreichbar, V2 deaktiviert`      | Redis-Container fehlt oder `REDIS_URL` falsch                                                       | `docker compose up -d redis`, `redis-cli ping`, dann neu starten                             |
+| kein `teams` in `/api/stream`                 | `AGENT_HQ_V2_WORKERS` nicht gesetzt                                                                 | mit `AGENT_HQ_V2_WORKERS=1` neu starten                                                      |
+| Issue bekommt kein `status:queued`            | kein oder falsches `team:*`, schon `status:*` gesetzt, Repo nicht registriert oder `enabled: false` | Labels korrigieren und 60 s warten                                                           |
+| `status:blocked` ohne offene Frage            | Job nach 4 Versuchen fehlgeschlagen                                                                 | Server-Log und Run-Log in `AGENT_HQ_LOG_DIR` lesen, Ursache beheben                          |
+| `curl: (7) Failed to connect` aus Claude Code | Claude-Sandbox blockiert `localhost`                                                                | Befehl außerhalb der Sandbox ausführen                                                       |
+| Worker-Lauf scheitert bei `git worktree add`  | Branch `feat/<n>-<slug>` ist anderswo ausgecheckt                                                   | eigenen Worktree entfernen oder detached auschecken                                          |
 
 `PORT=3334` ist ungünstig, obwohl `run.sh` es vorschlägt: Dort läuft das Bull-Board aus dem Compose-Profil `dev`.
