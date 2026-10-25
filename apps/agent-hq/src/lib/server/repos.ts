@@ -151,6 +151,8 @@ export function setRepoGhRunner(runner?: RepoCommandRunner): void {
   ghRunner = runner ?? run('gh');
 }
 
+export const runRepoGh: RepoCommandRunner = (args, cwd) => ghRunner(args, cwd);
+
 export async function registerRepo(input: {
   repo: unknown;
   path: unknown;

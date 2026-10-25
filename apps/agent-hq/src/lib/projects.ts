@@ -1,3 +1,5 @@
+import type { RepoStats, RepoStatsResponse } from './server/repo-stats';
+
 export interface RepoEntryData {
   repo: string;
   path: string;
@@ -121,4 +123,64 @@ export async function toggleProjectRepo(
     (status) => `Fehler beim Ändern des Status (${status})`,
     'Netzwerkfehler beim Ändern des Status',
   );
+}
+
+export interface ProjectRepoItem {
+  repo: string;
+  path?: string;
+  enabled: boolean;
+  isHome?: boolean;
+  stats?: RepoStats;
+}
+
+export const HOME_FALLBACK_NAME = 'Home-Repository';
+
+export async function fetchRepoStats(
+  fetchFn: typeof fetch = fetch,
+): Promise<ProjectApiResult<RepoStatsResponse>> {
+  return apiRequest<RepoStatsResponse>(
+    fetchFn,
+    '/api/repos/stats',
+    undefined,
+    (status) => `Kennzahlen: Server antwortete mit Status ${status}`,
+    'Netzwerkfehler beim Laden der Kennzahlen',
+  );
+}
+
+/** Registry plus stats; missing stats are not fatal, the cards show zeros. */
+export async function loadProjectOverview(
+  fetchFn: typeof fetch = fetch,
+): Promise<ProjectApiResult<ProjectRepoItem[]>> {
+  const [reposRes, statsRes] = await Promise.all([
+    fetchProjectRepos(fetchFn),
+    fetchRepoStats(fetchFn),
+  ]);
+  if (!reposRes.ok) return { ok: false, error: reposRes.error };
+
+  const stats = statsRes.data?.repos ?? [];
+  const byName = new Map(
+    stats.flatMap((s) => (s.repo ? [[s.repo.toLowerCase(), s] as const] : [])),
+  );
+  const items: ProjectRepoItem[] = (reposRes.data ?? []).map((entry) => {
+    const s = byName.get(entry.repo.toLowerCase());
+    return { ...entry, isHome: s?.home ?? false, stats: s };
+  });
+  // ADR 0007: empty registry means home repo; an unregistered home repo
+  // also appears while it still has legacy jobs.
+  const homeStats = stats.find((s) => s.home);
+  if (homeStats && !items.some((i) => i.stats === homeStats)) {
+    items.push(homeItem(homeStats.repo ?? statsRes.data?.homeRepo, homeStats));
+  }
+  if (items.length === 0) items.push(homeItem(statsRes.data?.homeRepo));
+  return { ok: true, data: items };
+}
+
+function homeItem(repo?: string | null, stats?: RepoStats): ProjectRepoItem {
+  return {
+    repo: repo ?? HOME_FALLBACK_NAME,
+    path: '(Home-Repository)',
+    enabled: true,
+    isHome: true,
+    stats,
+  };
 }

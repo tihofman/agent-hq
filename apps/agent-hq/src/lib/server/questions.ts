@@ -40,6 +40,11 @@ export function setQueueManager(manager?: QueueManagerLike): void {
   activeQueueManager = manager;
 }
 
+/** Undefined without Redis/V2. */
+export function getQueueManager(): QueueManagerLike | undefined {
+  return activeQueueManager;
+}
+
 export function resetQuestionsState(): void {
   activeQueueManager = undefined;
   answeringIds.clear();
