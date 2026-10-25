@@ -338,39 +338,59 @@ fi
 STOP_ROOT="$TEST_DIR/stop_root"
 mkdir -p "$STOP_ROOT/scripts"
 cp "$ROOT/scripts/hq-tui.sh" "$STOP_ROOT/scripts/"
+# Fake run.sh (= npx/nx) startet "node" in einer eigenen Prozessgruppe, wie es nx tun kann.
+# Den erreicht nur der Kill über den Port-Listener (gemocktes lsof).
 cat <<EOF >"$STOP_ROOT/run.sh"
 #!/usr/bin/env bash
 [ "\$1" = "--web" ] || exit 2
+echo "\${NX_TUI:-}" > "$TEST_DIR/nx_tui"
+set -m
+bash -c 'trap "echo TERM >> $TEST_DIR/node_signal; exit 0" TERM; echo \$\$ > $TEST_DIR/node_pid; while :; do sleep 0.05; done' &
 trap 'echo TERM >> "$TEST_DIR/server_signal"; exit 0' TERM
 trap 'echo HUP >> "$TEST_DIR/server_signal"; exit 0' HUP
 echo \$\$ > "$TEST_DIR/server_pid"
 while :; do sleep 0.05; done
 EOF
+STOP_BIN="$TEST_DIR/bin_stop"
+mkdir -p "$STOP_BIN"
+cat <<EOF >"$STOP_BIN/lsof"
+#!/bin/sh
+cat "$TEST_DIR/node_pid" 2>/dev/null
+EOF
+chmod +x "$STOP_BIN/lsof"
 
-bash "$STOP_ROOT/scripts/hq-tui.sh" _server </dev/null >/dev/null 2>&1 &
+PATH="$STOP_BIN:$PATH" bash "$STOP_ROOT/scripts/hq-tui.sh" _server </dev/null >/dev/null 2>&1 &
 WRAPPER_PID=$!
 for _ in {1..100}; do
-  [ ! -s "$TEST_DIR/server_pid" ] || break
+  [ ! -s "$TEST_DIR/server_pid" ] || [ ! -s "$TEST_DIR/node_pid" ] || break
   sleep 0.05
 done
 FAKE_SERVER_PID="$(cat "$TEST_DIR/server_pid" 2>/dev/null || true)"
+FAKE_NODE_PID="$(cat "$TEST_DIR/node_pid" 2>/dev/null || true)"
 kill -HUP "$WRAPPER_PID" 2>/dev/null
 for _ in {1..100}; do
   kill -0 "$WRAPPER_PID" 2>/dev/null || break
   sleep 0.05
 done
+sleep 0.2
 
-if [ -z "$FAKE_SERVER_PID" ]; then
+if [ -z "$FAKE_SERVER_PID" ] || [ -z "$FAKE_NODE_PID" ]; then
   fail "Wrapper hat run.sh --web nicht gestartet"
-elif kill -0 "$FAKE_SERVER_PID" 2>/dev/null; then
-  kill "$FAKE_SERVER_PID" 2>/dev/null
+elif kill -0 "$FAKE_SERVER_PID" 2>/dev/null || kill -0 "$FAKE_NODE_PID" 2>/dev/null; then
+  kill "$FAKE_SERVER_PID" "$FAKE_NODE_PID" 2>/dev/null
   fail "Server läuft nach SIGHUP an die Sitzung weiter"
-elif [ "$(cat "$TEST_DIR/server_signal" 2>/dev/null)" != "TERM" ]; then
-  fail "Server bekam nicht SIGTERM (Signal: $(cat "$TEST_DIR/server_signal" 2>/dev/null))"
+elif [ "$(cat "$TEST_DIR/server_signal" 2>/dev/null)" != "TERM" ] || [ "$(cat "$TEST_DIR/node_signal" 2>/dev/null)" != "TERM" ]; then
+  fail "Server bekam nicht SIGTERM (run.sh: $(cat "$TEST_DIR/server_signal" 2>/dev/null), node: $(cat "$TEST_DIR/node_signal" 2>/dev/null))"
 else
-  pass "Sitzungsende (SIGHUP) stoppt den selbst gestarteten Server per SIGTERM"
+  pass "Sitzungsende (SIGHUP) stoppt den selbst gestarteten Server samt Port-Listener per SIGTERM"
 fi
 kill -9 "$WRAPPER_PID" 2>/dev/null || true
+
+if [ "$(cat "$TEST_DIR/nx_tui" 2>/dev/null)" = "false" ]; then
+  pass "Server-Fenster startet run.sh --web mit NX_TUI=false (lesbares Log)"
+else
+  fail "NX_TUI=false fehlt im Server-Fenster"
+fi
 
 # -----------------------------------------------------------------------------
 # Zusammenfassung

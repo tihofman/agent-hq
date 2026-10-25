@@ -18,10 +18,16 @@ CALLER_DIR="$PWD"
 # SIGTERM, damit der Server Worker sauber beendet (sveltekit:shutdown).
 if [ "${1:-}" = "_server" ]; then
   set +e -m
-  bash "$ROOT/run.sh" --web &
+  # Ohne nx-TUI bleibt das Log im unteren Pane lesbar.
+  NX_TUI=false bash "$ROOT/run.sh" --web &
   SERVER_PID=$!
   stop_server() {
+    # nx kann node in einer eigenen Prozessgruppe starten. Der Port war vor dem
+    # Start frei, der Listener ist also unser Server.
+    LISTENERS="$(lsof -t -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null)"
     kill -TERM -- "-$SERVER_PID" 2>/dev/null
+    # shellcheck disable=SC2086
+    [ -z "$LISTENERS" ] || kill -TERM $LISTENERS 2>/dev/null
     wait "$SERVER_PID"
     exit 0
   }
