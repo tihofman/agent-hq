@@ -342,6 +342,29 @@ describe('reduce', () => {
     expect(progressed.runs['run-1'].data.statusText).toBe('Building');
   });
 
+  it('sets Run.repo from events, preserves it, and leaves it undefined for home repo', () => {
+    // 1. Run without repo in event: Run.repo is undefined (represents home repo)
+    const homeRun = apply(initialState, 'TASK_START', { runId: 'run-home' });
+    expect(homeRun.runs['run-home'].repo).toBeUndefined();
+
+    // 2. Run with repo in event: Run.repo is set
+    const customRun = apply(initialState, 'TASK_START', {
+      runId: 'run-custom',
+      data: { repo: 'acme/custom-repo' },
+    });
+    expect(customRun.runs['run-custom'].repo).toBe('acme/custom-repo');
+
+    // 3. Progress event without repo maintains previous Run.repo
+    const nextProgress = reduce(
+      customRun,
+      event('TASK_PROGRESS', {
+        runId: 'run-custom',
+        data: { statusText: 'Testing' },
+      }),
+    );
+    expect(nextProgress.runs['run-custom'].repo).toBe('acme/custom-repo');
+  });
+
   it('manages question lifecycle in state for QUESTION_PENDING and QUESTION_RESOLVED without agent', () => {
     const pendingEvent = parseEvent({
       event: 'QUESTION_PENDING',

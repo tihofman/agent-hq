@@ -213,6 +213,14 @@
             </span>
           {/if}
         </div>
+        {#if question.repo}
+          <div class="flex items-center gap-1.5 shrink-0 ml-2" data-testid="question-repo">
+            <span class="text-slate-500 font-semibold text-[11px]">Repo:</span>
+            <span class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-200 border border-slate-700">
+              {question.repo}
+            </span>
+          </div>
+        {/if}
         <span class="text-[11px] text-slate-400 shrink-0 ml-2">
           {metadata.displayName} ({metadata.role})
         </span>

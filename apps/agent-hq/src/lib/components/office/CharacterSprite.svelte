@@ -71,6 +71,8 @@
         : undefined,
   );
 
+  const runRepo = $derived(activeRun?.repo ?? activeRun?.data?.repo);
+
   const activeTeamRun = $derived(
     team
       ? Object.values(liveStore.state?.runs ?? {}).find(
@@ -366,11 +368,12 @@
   data-team={team}
   data-is-team-lead={isTeamLead ? 'true' : undefined}
   data-run-id={runId}
+  data-repo={runRepo}
   data-instance-index={instanceIndex}
   aria-label={ariaLabel}
   title="{teamLabel
     ? `${teamLabel} • `
-    : ''}{metadata.displayName} ({metadata.role}) • {characterStatus}"
+    : ''}{metadata.displayName} ({metadata.role}) • {characterStatus}{runRepo ? ` • [${runRepo}]` : ''}"
   {onclick}
 >
   <!-- Retro Status Speech Bubble -->
@@ -382,7 +385,7 @@
       style="transform: translateX(-50%) scale({overlayScale}); transform-origin: bottom center;"
       data-testid="speech-bubble-{agent}"
       data-run-id={runId}
-      title={bubble.tooltip}
+      title="{bubble.tooltip ?? bubble.text}{runRepo ? ` • ${runRepo}` : ''}"
     >
       {#if bubble.icon}
         <span

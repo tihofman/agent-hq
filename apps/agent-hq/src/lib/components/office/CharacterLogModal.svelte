@@ -142,6 +142,14 @@
             {ticketId.startsWith('#') ? ticketId : `#${ticketId}`}
           </span>
         {/if}
+        {#if activeRun?.repo ?? activeRun?.data?.repo}
+          <span
+            class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300 border border-slate-700 shrink-0"
+            data-testid="character-log-repo"
+          >
+            {activeRun.repo ?? activeRun.data.repo}
+          </span>
+        {/if}
         {#if activeRun?.status}
           <span
             class="rounded bg-slate-800/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-400 border border-slate-700/60 shrink-0"

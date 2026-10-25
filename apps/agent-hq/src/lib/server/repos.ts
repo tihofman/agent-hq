@@ -228,3 +228,20 @@ export function removeRepo(repo: string): Promise<boolean> {
     return { entries: rest, result: rest.length !== entries.length };
   });
 }
+
+export function setRepoEnabled(
+  repo: string,
+  enabled: boolean,
+): Promise<RepoEntry | null> {
+  return updateRepos((entries) => {
+    let updated: RepoEntry | null = null;
+    const next = entries.map((e) => {
+      if (e.repo.toLowerCase() === repo.toLowerCase()) {
+        updated = { ...e, enabled };
+        return updated;
+      }
+      return e;
+    });
+    return { entries: next, result: updated };
+  });
+}

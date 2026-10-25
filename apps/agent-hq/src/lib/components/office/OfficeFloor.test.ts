@@ -89,4 +89,27 @@ describe('OfficeFloor.svelte scaling and layout', () => {
       `transform: scale(${overlayScale}); transform-origin: center;`,
     );
   });
+
+  it('reflects repo in character tooltip and attributes when present in run', () => {
+    liveStore.state.agents.agy = {
+      status: 'coding',
+      room: 'dev',
+      runId: 'run-custom-repo',
+    };
+    liveStore.state.runs['run-custom-repo'] = {
+      runId: 'run-custom-repo',
+      agent: 'agy',
+      status: 'running',
+      room: 'dev',
+      ticketId: '149',
+      timestamp: '2026-10-25T12:00:00Z',
+      repo: 'acme/webapp',
+      data: { title: 'Multi-Repo' },
+    };
+
+    const { html } = render(OfficeFloor, { props: { scale: 1 } });
+    expect(html).toContain('data-repo="acme/webapp"');
+    expect(html).toContain('[acme/webapp]');
+    expect(html).toContain('title="#149 Multi-Repo • acme/webapp"');
+  });
 });

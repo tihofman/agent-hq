@@ -13,10 +13,18 @@
     type HistoryRunItem,
   } from '../../lib/history-format';
 
-  let runs = $state<HistoryRunItem[]>([]);
-  let loading = $state(true);
+  interface Props {
+    data?: {
+      initialRuns?: HistoryRunItem[];
+      initialExpandedRunIds?: string[];
+    };
+  }
+
+  let { data }: Props = $props();
+  let runs = $state<HistoryRunItem[]>(data?.initialRuns ?? []);
+  let loading = $state(data?.initialRuns === undefined);
   let error = $state<string | null>(null);
-  let expandedRunIds = $state<string[]>([]);
+  let expandedRunIds = $state<string[]>(data?.initialExpandedRunIds ?? []);
   let copiedPath = $state<string | null>(null);
 
   function isExpanded(runId: string): boolean {
@@ -63,7 +71,9 @@
   }
 
   onMount(() => {
-    void loadHistory();
+    if (!data?.initialRuns) {
+      void loadHistory();
+    }
   });
 </script>
 
@@ -104,6 +114,14 @@
         <span>↻</span>
         <span>Aktualisieren</span>
       </button>
+
+      <a
+        href={resolve('/projects')}
+        class="flex items-center gap-1.5 rounded bg-slate-800/90 px-3 py-1 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
+        data-testid="projects-link"
+      >
+        Projekte
+      </a>
 
       <a
         href={resolve('/')}
@@ -194,6 +212,7 @@
             <tr>
               <th class="py-3 px-4 font-semibold w-24">Agent</th>
               <th class="py-3 px-4 font-semibold w-20">Ticket</th>
+              <th class="py-3 px-4 font-semibold w-32">Repo</th>
               <th class="py-3 px-4 font-semibold w-44">Start</th>
               <th class="py-3 px-4 font-semibold w-24">Dauer</th>
               <th class="py-3 px-4 font-semibold w-40">Status</th>
@@ -231,6 +250,22 @@
                   class="py-3 px-4 whitespace-nowrap text-slate-300 font-semibold"
                 >
                   {formatTicket(run.ticketId)}
+                </td>
+
+                <!-- Repo -->
+                <td
+                  class="py-3 px-4 whitespace-nowrap text-slate-300 text-xs"
+                  data-testid="run-repo"
+                >
+                  {#if run.repo || run.data?.repo}
+                    <span
+                      class="rounded bg-slate-800/80 px-1.5 py-0.5 text-[10px] text-slate-300 border border-slate-700/60 font-mono"
+                    >
+                      {run.repo ?? run.data?.repo}
+                    </span>
+                  {:else}
+                    <span class="text-slate-600">—</span>
+                  {/if}
                 </td>
 
                 <!-- Start -->
@@ -363,10 +398,11 @@
                               >
                             </div>
                           {/if}
-                          {#if run.data?.repo}
+                          {#if run.repo || run.data?.repo}
                             <div>
                               <span class="text-slate-500">Repo:</span>
-                              <span class="text-slate-200">{run.data.repo}</span
+                              <span class="text-slate-200" data-testid="detail-repo"
+                                >{run.repo ?? run.data?.repo}</span
                               >
                             </div>
                           {/if}

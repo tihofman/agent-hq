@@ -185,6 +185,12 @@
     </button>
 
     <a
+      href={resolve('/projects')}
+      class="flex items-center gap-1.5 rounded bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
+      data-testid="projects-link">Projekte</a
+    >
+
+    <a
       href={resolve('/history')}
       class="flex items-center gap-1.5 rounded bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
       data-testid="history-link">Verlauf</a
