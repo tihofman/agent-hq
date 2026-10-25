@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { HQEvent, InternalAction } from '../../server/state';
+  import type { HQEvent, InternalAction } from '@agent-hq/queue/types';
   import {
     getFeedBadges,
     getFeedMessageText,

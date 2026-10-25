@@ -1,8 +1,8 @@
 import { Box, Text } from 'ink';
-import type { ActivePR, RepoItem } from '../api/types';
+import type { ActivePR, RepoStats } from '@agent-hq/queue/types';
 
 interface ProjectsViewProps {
-  repos: RepoItem[];
+  repos: RepoStats[];
   activePR?: ActivePR | null;
 }
 

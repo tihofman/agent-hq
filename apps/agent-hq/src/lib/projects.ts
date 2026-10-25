@@ -1,10 +1,8 @@
-import type { RepoStats, RepoStatsResponse } from './server/repo-stats';
-
-export interface RepoEntryData {
-  repo: string;
-  path: string;
-  enabled: boolean;
-}
+import type {
+  RepoEntry,
+  RepoStats,
+  RepoStatsResponse,
+} from '@agent-hq/queue/types';
 
 export interface ProjectApiResult<T = unknown> {
   ok: boolean;
@@ -40,8 +38,8 @@ async function apiRequest<T>(
 
 export async function fetchProjectRepos(
   fetchFn: typeof fetch = fetch,
-): Promise<ProjectApiResult<RepoEntryData[]>> {
-  return apiRequest<RepoEntryData[]>(
+): Promise<ProjectApiResult<RepoEntry[]>> {
+  return apiRequest<RepoEntry[]>(
     fetchFn,
     '/api/repos',
     undefined,
@@ -53,7 +51,7 @@ export async function fetchProjectRepos(
 export async function addProjectRepo(
   input: { repo: string; path: string; enabled?: boolean },
   fetchFn: typeof fetch = fetch,
-): Promise<ProjectApiResult<RepoEntryData>> {
+): Promise<ProjectApiResult<RepoEntry>> {
   const repo = input.repo.trim();
   const path = input.path.trim();
   if (!repo || !path) {
@@ -63,7 +61,7 @@ export async function addProjectRepo(
     };
   }
 
-  return apiRequest<RepoEntryData>(
+  return apiRequest<RepoEntry>(
     fetchFn,
     '/api/repos',
     {
@@ -106,13 +104,13 @@ export async function toggleProjectRepo(
   repo: string,
   enabled: boolean,
   fetchFn: typeof fetch = fetch,
-): Promise<ProjectApiResult<RepoEntryData>> {
+): Promise<ProjectApiResult<RepoEntry>> {
   const trimmed = repo.trim();
   if (!trimmed) {
     return { ok: false, error: 'Repository-Name darf nicht leer sein' };
   }
 
-  return apiRequest<RepoEntryData>(
+  return apiRequest<RepoEntry>(
     fetchFn,
     `/api/repos/${trimmed}`,
     {

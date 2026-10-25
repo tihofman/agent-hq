@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Box, Text, useInput, useStdin } from 'ink';
-import type { QuestionPayload } from '../api/types';
+import type { QuestionPayload } from '@agent-hq/queue/types';
 
 interface AnswerModalProps {
   question: QuestionPayload;

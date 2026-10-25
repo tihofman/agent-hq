@@ -9,7 +9,7 @@
   } from '../audio';
   import { notificationFor, showNotification, findNewEntries } from '../notify';
   import { detectPendingInput } from '../feed';
-  import type { HQEvent, InternalAction } from '../server/state';
+  import type { HQEvent, InternalAction } from '@agent-hq/queue/types';
 
   let lastSeen: (HQEvent | InternalAction) | null = null;
   let initialized = false;

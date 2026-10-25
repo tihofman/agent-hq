@@ -1,6 +1,6 @@
-import type { State, HQEvent, InternalAction } from './server/state';
+import type { HQState, HQEvent, InternalAction } from '@agent-hq/queue/types';
 
-const initial = (): State => ({
+const initial = (): HQState => ({
   agents: {
     claude: { status: 'idle', room: 'lounge' },
     agy: { status: 'idle', room: 'lounge' },
@@ -11,7 +11,7 @@ const initial = (): State => ({
 });
 
 export interface LiveStore {
-  state: State;
+  state: HQState;
   feed: (HQEvent | InternalAction)[];
   connected: boolean;
 }
@@ -37,13 +37,13 @@ export function connect(url = '/api/stream'): () => void {
     liveStore.connected = false;
   };
   es.addEventListener('INIT_STATE', (e) => {
-    liveStore.state = JSON.parse((e as MessageEvent).data) as State;
+    liveStore.state = JSON.parse((e as MessageEvent).data) as HQState;
     liveStore.feed = [];
   });
   es.addEventListener('UPDATE', (e) => {
     const { event, state } = JSON.parse((e as MessageEvent).data) as {
       event: HQEvent | InternalAction;
-      state: State;
+      state: HQState;
     };
     liveStore.state = state;
     if ('type' in event && event.type === 'SET_TEAM_STATUSES') {

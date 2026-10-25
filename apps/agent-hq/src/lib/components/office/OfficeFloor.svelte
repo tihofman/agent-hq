@@ -3,7 +3,7 @@
   import CharacterSprite from './CharacterSprite.svelte';
   import CharacterLogModal from './CharacterLogModal.svelte';
   import QuestionModal from './QuestionModal.svelte';
-  import type { Agent } from '../../server/state';
+  import type { Agent } from '@agent-hq/queue/types';
   import type { QuestionPayload } from '@agent-hq/queue';
   import {
     ROOMS,

@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import type { Run } from '../api/types';
+import type { Run } from '@agent-hq/queue/types';
 
 interface LogViewerProps {
   run: Run;

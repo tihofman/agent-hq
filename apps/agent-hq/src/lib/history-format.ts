@@ -1,10 +1,6 @@
-import type { EventData } from './server/state';
-import type { HistoryRun } from './server/history';
+import type { EventData } from '@agent-hq/queue/types';
 
-export interface HistoryRunItem extends HistoryRun {
-  logExists: boolean;
-  prUrl?: string | null;
-}
+export type { HistoryRunItem } from '@agent-hq/queue/types';
 
 export interface PrInfo {
   prNumber: number;

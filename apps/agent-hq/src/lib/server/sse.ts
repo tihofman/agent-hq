@@ -1,3 +1,4 @@
+import type { HQState, StreamUpdatePayload } from '@agent-hq/queue/types';
 import { getState, subscribe } from './store';
 
 export function formatSSE(event: string, data: unknown): string {
@@ -54,12 +55,14 @@ export function createEventStream(
       cleanup = teardown;
 
       // 1. Initial event is INIT_STATE with full current state
-      send(formatSSE('INIT_STATE', getState()));
+      send(formatSSE('INIT_STATE', getState() satisfies HQState));
       if (subscription.isClosed) return;
 
       // 2. Subscribe to store for live state changes
       subscription.unsubscribe = subscribe((state, event) => {
-        send(formatSSE('UPDATE', { event, state }));
+        send(
+          formatSSE('UPDATE', { event, state } satisfies StreamUpdatePayload),
+        );
       });
 
       // 3. Heartbeat comment every 30s (or heartbeatMs)

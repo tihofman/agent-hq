@@ -1,4 +1,4 @@
-import type { QuestionPayload, RepoStatsResponse } from './types';
+import type { QuestionPayload, RepoStatsResponse } from '@agent-hq/queue/types';
 
 export function getBaseUrl(): string {
   const envUrl = process.env.AGENT_HQ_URL?.trim();

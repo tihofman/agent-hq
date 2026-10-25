@@ -1,4 +1,5 @@
-import type { HQState, SSEMessage, StreamUpdatePayload } from './types';
+import type { HQState, StreamUpdatePayload } from '@agent-hq/queue/types';
+import type { SSEMessage } from './types';
 
 export async function* parseSseStream(
   response: Response,
@@ -106,12 +107,15 @@ export function startSseSubscription(
             try {
               const payload = JSON.parse(msg.data) as StreamUpdatePayload;
               onUpdate?.(payload);
+              const event = payload.event;
               if (
-                payload.event?.event === 'TASK_PROGRESS' &&
-                payload.event.runId &&
-                typeof payload.event.data?.logChunk === 'string'
+                event &&
+                'event' in event &&
+                event.event === 'TASK_PROGRESS' &&
+                event.runId &&
+                typeof event.data?.logChunk === 'string'
               ) {
-                onLogChunk?.(payload.event.runId, payload.event.data.logChunk);
+                onLogChunk?.(event.runId, event.data.logChunk);
               }
             } catch {
               // Ignore corrupted update json

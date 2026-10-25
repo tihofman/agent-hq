@@ -1,16 +1,16 @@
 import { Box, Text } from 'ink';
 import {
-  AGENTS,
   TEAMS,
-  type AgentSlotState,
   type Agent,
+  type AgentState,
   type Team,
-  type TeamStatus,
-} from '../api/types';
+  type TeamState,
+} from '@agent-hq/queue/types';
+import { AGENTS } from '../api/types';
 
 interface TeamsViewProps {
-  teams?: Record<Team, { status: TeamStatus }>;
-  agents?: Record<Agent, AgentSlotState>;
+  teams?: Record<Team, TeamState>;
+  agents?: Record<Agent, AgentState>;
 }
 
 function statusColor(status: string): string {

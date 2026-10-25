@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Team } from '../../server/state';
-  import type { QueueState } from '../../server/repo-stats';
+  import type { Team } from '@agent-hq/queue/types';
+  import type { QueueState } from '@agent-hq/queue/types';
   import {
     addProjectRepo,
     loadProjectOverview,

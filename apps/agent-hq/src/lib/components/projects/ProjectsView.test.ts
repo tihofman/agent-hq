@@ -3,7 +3,7 @@ import { render } from 'svelte/server';
 import ProjectsView from './ProjectsView.svelte';
 import { liveStore, resetLiveStore } from '../../live.svelte';
 import { loadProjectOverview, type ProjectRepoItem } from '../../projects';
-import type { RepoStats, RepoStatsResponse } from '../../server/repo-stats';
+import type { RepoStats, RepoStatsResponse } from '@agent-hq/queue/types';
 
 const zero = { waiting: 0, active: 0, delayed: 0, failed: 0 };
 const stats = (

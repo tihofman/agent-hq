@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import type { QuestionPayload } from '../api/types';
+import type { QuestionPayload } from '@agent-hq/queue/types';
 
 interface QuestionsViewProps {
   questions: QuestionPayload[];

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { liveStore } from '../../live.svelte';
-  import type { HQEvent, InternalAction } from '../../server/state';
+  import type { HQEvent, InternalAction } from '@agent-hq/queue/types';
   import type { TicketData } from '../../server/ticket';
   import { getCurrentRun, hasReloadEvent } from './run';
 

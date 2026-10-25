@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { readRecentRuns } from '../../../lib/server/history';
 import { isOriginAllowed } from '../../../lib/server/origin';
-import type { HistoryRunItem } from '../../../lib/history-format';
+import type { HistoryRunItem } from '@agent-hq/queue/types';
 
 const execFileAsync = promisify(execFile);
 const GITHUB_REMOTE_REGEX = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/;

@@ -2,7 +2,12 @@ import { cleanup, render } from 'ink-testing-library';
 import { Box } from 'ink';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
-import type { HQState, QuestionPayload, RepoItem, Run } from './api/types';
+import type {
+  HQState,
+  QuestionPayload,
+  RepoStats,
+  Run,
+} from '@agent-hq/queue/types';
 import { Footer } from './components/Footer';
 import { JobsView } from './components/JobsView';
 
@@ -13,7 +18,7 @@ describe('App TUI Dashboard with mocked SSE stream for two repos', () => {
     cleanup();
   });
 
-  const mockRepos: RepoItem[] = [
+  const mockRepos: RepoStats[] = [
     {
       repo: 'tihofman/agent-hq',
       home: true,
@@ -345,54 +350,57 @@ describe('App TUI Dashboard with mocked SSE stream for two repos', () => {
     expect(lastFrame()).toContain('DASHBOARD');
   });
 
-  it('shows "Letzte Jobs" instead of "LAUFENDE JOBS" when no runs are active, and prevents kill for non-running status', async () => {
-    const mockFetch = vi.fn();
-    const completedState: HQState = {
-      ...mockState,
-      runs: {
-        'run-done-1': {
-          runId: 'run-done-1',
-          agent: 'claude',
-          status: 'complete',
-          ticketId: '#303',
-          repo: 'tihofman/agent-hq',
-          timestamp: '2026-10-25T11:00:00Z',
-          data: { title: 'Finished task', issueId: 303 },
+  it.each(['complete', 'cooldown'] as const)(
+    'shows "Letzte Jobs" instead of "LAUFENDE JOBS" when no runs are active, and prevents kill for status %s',
+    async (status) => {
+      const mockFetch = vi.fn();
+      const completedState: HQState = {
+        ...mockState,
+        runs: {
+          'run-done-1': {
+            runId: 'run-done-1',
+            agent: 'claude',
+            status,
+            ticketId: '#303',
+            repo: 'tihofman/agent-hq',
+            timestamp: '2026-10-25T11:00:00Z',
+            data: { title: 'Finished task', issueId: 303 },
+          },
         },
-      },
-    };
+      };
 
-    const { lastFrame, stdin } = render(
-      <App
-        baseUrl="http://127.0.0.1:3333"
-        fetchFn={mockFetch as unknown as typeof fetch}
-        initialRepos={mockRepos}
-        initialState={completedState}
-        disableAutoConnect={true}
-      />,
-    );
+      const { lastFrame, stdin } = render(
+        <App
+          baseUrl="http://127.0.0.1:3333"
+          fetchFn={mockFetch as unknown as typeof fetch}
+          initialRepos={mockRepos}
+          initialState={completedState}
+          disableAutoConnect={true}
+        />,
+      );
 
-    expect(lastFrame()).toContain('DASHBOARD');
-    await sleep();
+      expect(lastFrame()).toContain('DASHBOARD');
+      await sleep();
 
-    const frame = lastFrame();
-    expect(frame).toContain('Letzte Jobs (1)');
-    expect(frame).not.toContain('LAUFENDE JOBS');
-    expect(frame).not.toContain('[k] Abbrechen');
+      const frame = lastFrame();
+      expect(frame).toContain('Letzte Jobs (1)');
+      expect(frame).not.toContain('LAUFENDE JOBS');
+      expect(frame).not.toContain('[k] Abbrechen');
 
-    // Press 'k' to attempt kill
-    stdin.write('k');
-    await sleep();
+      // Press 'k' to attempt kill
+      stdin.write('k');
+      await sleep();
 
-    // Kill modal must NOT open
-    expect(lastFrame()).not.toContain('LAUF ABBRECHEN (KILL SWITCH)');
-    // No request to /api/kill sent
-    expect(mockFetch).not.toHaveBeenCalled();
-    // Hint displayed in TUI statusMessage
-    expect(lastFrame()).toContain(
-      "Lauf [run-done-1] ist im Status 'complete' und kann nicht abgebrochen werden",
-    );
-  });
+      // Kill modal must NOT open
+      expect(lastFrame()).not.toContain('LAUF ABBRECHEN (KILL SWITCH)');
+      // No request to /api/kill sent
+      expect(mockFetch).not.toHaveBeenCalled();
+      // Hint displayed in TUI statusMessage
+      expect(lastFrame()).toContain(
+        `Lauf [run-done-1] ist im Status '${status}' und kann nicht abgebrochen werden`,
+      );
+    },
+  );
 
   it('fits JobsView and Footer within 80 columns without truncation of issue numbers and with repo truncation', () => {
     const longRun: Run = {
@@ -408,29 +416,46 @@ describe('App TUI Dashboard with mocked SSE stream for two repos', () => {
       },
     };
 
-    const resJobs = render(
-      <Box width={80} padding={1}>
-        <JobsView runs={[longRun]} selectedIndex={0} columns={80} />
-      </Box>,
-    );
-
-    const jobsFrame = resJobs.lastFrame()!;
-    // Issue number must NOT be cut off
-    expect(jobsFrame).toContain('Issue: #99988');
-    // Long repo must be truncated with …
-    expect(jobsFrame).toContain('…');
-    expect(jobsFrame).not.toContain('extremely-long-microservice-backend');
-    // Check line lengths at 80 cols
     const stripAnsi = (str: string) =>
       str.replace(
         new RegExp(String.fromCharCode(27) + '\\[[0-9;]*[a-zA-Z]', 'g'),
         '',
       );
+    // Mirrors the App layout: column box with padding 1.
+    const renderJobsLine = (run: Run) => {
+      const frame = stripAnsi(
+        render(
+          <Box width={80} flexDirection="column" padding={1}>
+            <JobsView runs={[run]} selectedIndex={0} columns={80} />
+          </Box>,
+        ).lastFrame()!,
+      );
+      for (const line of frame.split('\n')) {
+        expect(line.length).toBeLessThanOrEqual(80);
+      }
+      return frame.split('\n').find((line) => line.includes('Repo:'));
+    };
 
-    const jobsLines = jobsFrame.split('\n');
-    for (const line of jobsLines) {
-      expect(stripAnsi(line).length).toBeLessThanOrEqual(80);
-    }
+    const longLine = renderJobsLine(longRun);
+    // Issue number must NOT be cut off
+    expect(longLine).toContain('Issue: #99988');
+    // Long repo must be truncated with …, status stays on the same line
+    expect(longLine).toContain('…');
+    expect(longLine).not.toContain('extremely-long-microservice-backend');
+    expect(longLine).toContain('running');
+
+    // A repo that fits the usable width (80 - 7) is not truncated.
+    const fittingLine = renderJobsLine({
+      runId: 'run-4',
+      agent: 'claude',
+      status: 'running',
+      ticketId: '#7',
+      repo: 'tihofman/agent-hq',
+      timestamp: '2026-10-25T12:00:00Z',
+      data: {},
+    });
+    expect(fittingLine).toContain('Repo: tihofman/agent-hq │');
+    expect(fittingLine).toContain('running');
 
     const resFooter = render(
       <Box width={80} padding={1}>

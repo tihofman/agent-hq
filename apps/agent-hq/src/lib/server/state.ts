@@ -1,7 +1,34 @@
-import type { QuestionPayload, Team } from '@agent-hq/queue';
+import type {
+  Agent,
+  AgentState,
+  AgentStatus,
+  EventData,
+  EventType,
+  HQEvent,
+  HQState,
+  InternalAction,
+  QuestionPayload,
+  Room,
+  Run,
+  RunStatus,
+} from '@agent-hq/queue/types';
 
-export type Agent = 'claude' | 'agy' | 'codex';
-export type Room = 'ceo' | 'hall' | 'dev' | 'qa' | 'lounge';
+export type {
+  Agent,
+  AgentState,
+  AgentStatus,
+  EventData,
+  EventType,
+  HQEvent,
+  InternalAction,
+  Room,
+  Run,
+  RunStatus,
+  Team,
+  TeamState,
+  TeamStatus,
+} from '@agent-hq/queue/types';
+export type State = HQState;
 
 const eventRooms = {
   TASK_HANDOVER: 'hall',
@@ -22,42 +49,7 @@ const eventRooms = {
   SUBSCRIPTION_FAILOVER: 'lounge',
   QUESTION_PENDING: 'dev',
   QUESTION_RESOLVED: 'dev',
-} as const satisfies Record<string, Room>;
-export type EventType = keyof typeof eventRooms;
-export interface EventData {
-  title?: string;
-  statusText?: string;
-  exitCode?: number | null;
-  logFile?: string;
-  prNumber?: number;
-  criteriaTotal?: number;
-  criteriaCompleted?: number;
-  cooldownUntil?: string;
-  logChunk?: string;
-  repo?: string;
-  branch?: string;
-  team?: 'frontend' | 'backend' | 'qa';
-  from?: Agent;
-  to?: Agent | null;
-  questionId?: string;
-  issueId?: number;
-  question?: string;
-  options?: string[];
-  answer?: string;
-}
-export type HQEvent = {
-  [T in EventType]: {
-    event: T;
-    agent?: Agent;
-    timestamp: string;
-    room: Room;
-    runId?: string;
-    ticketId?: string;
-    pid?: number | null;
-    cwd?: string;
-    data: EventData;
-  };
-}[EventType];
+} as const satisfies Record<EventType, Room>;
 
 function object(value: unknown, field: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -213,60 +205,6 @@ export function parseEvent(
   return result;
 }
 
-export type AgentStatus =
-  | 'idle'
-  | 'walking'
-  | 'handover'
-  | 'coding'
-  | 'testing'
-  | 'reviewing'
-  | 'errorAlert'
-  | 'cooldown';
-export interface AgentState {
-  status: AgentStatus;
-  room: Room;
-  runId?: string;
-  cooldownUntil?: string;
-}
-export type RunStatus =
-  | 'handover'
-  | 'running'
-  | 'complete'
-  | 'failed'
-  | 'aborted'
-  | 'cooldown'
-  | 'stale';
-export interface Run {
-  runId: string;
-  agent: Agent;
-  pid?: number | null;
-  ticketId?: string;
-  cwd?: string;
-  logFile?: string;
-  exitCode?: number | null;
-  status: RunStatus;
-  room?: Room;
-  timestamp: string;
-  data: EventData;
-  repo?: string;
-}
-export type { Team } from '@agent-hq/queue';
-export type TeamStatus = 'idle' | 'working' | 'waiting_input';
-export interface TeamState {
-  status: TeamStatus;
-}
-export interface State {
-  agents: Record<Agent, AgentState>;
-  runs: Record<string, Run>;
-  activePR:
-    | (EventData & {
-        status?: 'draft' | 'reviewing' | 'ready' | 'merged' | 'closed';
-        ci?: 'pass' | 'fail';
-      })
-    | null;
-  questions?: Record<string, QuestionPayload>;
-  teams?: Record<Team, TeamState>;
-}
 export const initialState: State = {
   agents: {
     claude: { status: 'idle', room: 'lounge' },
@@ -277,15 +215,6 @@ export const initialState: State = {
   activePR: null,
   questions: {},
 };
-
-// Animation, test-parser and timer callbacks supply actions instead of reducer side effects.
-export type InternalAction =
-  | {
-      type: 'ARRIVED' | 'TEST_STARTED' | 'TEST_FINISHED' | 'DISMISS_ERROR';
-      agent: Agent;
-    }
-  | { type: 'TICK'; timestamp: string }
-  | { type: 'SET_TEAM_STATUSES'; teams: Partial<Record<Team, TeamStatus>> };
 
 export function reduce(state: State, event: HQEvent | InternalAction): State {
   if ('type' in event) {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { liveStore } from '../../live.svelte';
-  import type { Agent } from '../../server/state';
+  import type { Agent } from '@agent-hq/queue/types';
   import { getSpriteMetadata } from '../../office/sprites';
   import {
     filterCharacterLog,

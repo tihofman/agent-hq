@@ -1,4 +1,4 @@
-import type { Run, HQEvent, InternalAction } from '../../server/state';
+import type { Run, HQEvent, InternalAction } from '@agent-hq/queue/types';
 
 type FeedEntry = HQEvent | InternalAction;
 

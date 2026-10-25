@@ -1,4 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
+import type { RepoEntry } from '@agent-hq/queue/types';
 import { isOriginAllowed } from '../../../lib/server/origin';
 import {
   loadRepos,
@@ -11,7 +12,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
     return json({ error: 'Forbidden origin' }, { status: 403 });
   }
   try {
-    return json(loadRepos());
+    return json(loadRepos() satisfies RepoEntry[]);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal error';
     return json({ error: message }, { status: 500 });
@@ -38,7 +39,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
   const { repo, path, enabled } = body as Record<string, unknown>;
   try {
     const entry = await registerRepo({ repo, path, enabled });
-    return json(entry, { status: 201 });
+    return json(entry satisfies RepoEntry, { status: 201 });
   } catch (err) {
     if (err instanceof RepoValidationError) {
       return json({ error: err.message }, { status: 400 });
