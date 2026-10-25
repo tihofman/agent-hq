@@ -222,7 +222,9 @@ export async function registerRepo(input: {
 
 export function removeRepo(repo: string): Promise<boolean> {
   return updateRepos((entries) => {
-    const rest = entries.filter((e) => e.repo !== repo);
+    const rest = entries.filter(
+      (e) => e.repo.toLowerCase() !== repo.toLowerCase(),
+    );
     return { entries: rest, result: rest.length !== entries.length };
   });
 }

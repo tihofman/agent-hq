@@ -111,7 +111,7 @@ describe('repo registry (ADR 0007)', () => {
       { repo: 'acme/alpha', path: repoDir, enabled: false },
     ]);
 
-    expect(await removeRepo('acme/alpha')).toBe(true);
+    expect(await removeRepo('ACME/Alpha')).toBe(true);
     expect(await removeRepo('acme/alpha')).toBe(false);
     expect(loadRepos()).toEqual([]);
   });
