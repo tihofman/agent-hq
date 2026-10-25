@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../tmp/agent-hq-tui.tsbuildinfo",
+    "composite": false,
+    "declarationMap": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "noEmit": true,
+    "emitDeclarationOnly": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../libs/queue/src/types.ts"]
+}

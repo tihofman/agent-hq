@@ -1,0 +1,17 @@
+{
+  "name": "agent-hq-tui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-hq-tui": "./bin/agent-hq-tui.js"
+  },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "ink-testing-library": "^4.0.0"
+  }
+}

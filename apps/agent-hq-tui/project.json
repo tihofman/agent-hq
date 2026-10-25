@@ -1,0 +1,33 @@
+{
+  "name": "agent-hq-tui",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/agent-hq-tui/src",
+  "targets": {
+    "build": {
+      "command": "vite build",
+      "options": {
+        "cwd": "apps/agent-hq-tui"
+      },
+      "outputs": ["{workspaceRoot}/dist/apps/agent-hq-tui"]
+    },
+    "test": {
+      "command": "vitest run",
+      "options": {
+        "cwd": "apps/agent-hq-tui"
+      }
+    },
+    "lint": {
+      "command": "eslint .",
+      "options": {
+        "cwd": "apps/agent-hq-tui"
+      }
+    },
+    "typecheck": {
+      "command": "tsc --noEmit -p ./tsconfig.json",
+      "options": {
+        "cwd": "apps/agent-hq-tui"
+      }
+    }
+  }
+}

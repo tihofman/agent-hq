@@ -67,6 +67,32 @@ npx nx serve agent-hq
 
 Der Entwicklungsserver unterstützt schnelles Hot Module Replacement (HMR).
 
+### Terminal-Dashboard (agent-hq-tui)
+
+Als zweiter Client neben der Web-UI steht das Terminal-Dashboard `agent-hq-tui` (Ink) zur Verfügung:
+
+```bash
+# Bauen
+npx nx run agent-hq-tui:build
+
+# Starten (verbindet sich mit $AGENT_HQ_URL oder standardmäßig http://127.0.0.1:3333)
+node dist/apps/agent-hq-tui/main.js
+# oder
+./apps/agent-hq-tui/bin/agent-hq-tui.js
+```
+
+Das Dashboard zeigt Projekte mit Queue-Zählern, Teams und Slots, laufende Jobs, Live-Logs, offene Rückfragen und Draft-PRs an.
+
+**Tastenbelegung:**
+
+- `↑ / ↓`: Navigation (Jobs und Rückfragen auswählen)
+- `Enter`: Live-Log für ausgewählten Lauf öffnen
+- `a`: Offene Rückfrage beantworten (Optionen oder Freitext)
+- `k`: Lauf abbrechen (Kill Switch mit Bestätigung)
+- `Tab` / `1-4`: Zwischen Ansichten wechseln
+- `?`: Hilfe einblenden
+- `q`: Beenden
+
 ### Tests & Qualitätssicherung
 
 ```bash
