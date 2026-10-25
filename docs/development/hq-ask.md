@@ -14,6 +14,8 @@ Beim Start eines Laufs durch den Worker-Pool (#98) übergibt `delegate.sh` die f
 | :------------------- | :------ | :---------------------------------------------------------------------- | :---------------------- |
 | `HQ_ISSUE_ID`        | Ja      | Positive Ganzzahl des bearbeiteten GitHub-Issues (z. B. `105`)          | _(keiner)_              |
 | `HQ_TEAM`            | Ja      | Team-Kennung (`frontend`, `backend`, `qa`)                              | _(keiner)_              |
+| `HQ_REPO`            | Nein    | `owner/name` des Ziel-Repos; fehlt bei Jobs des Home-Repos (ADR 0007)   | _(keiner)_              |
+| `HQ_JOB_ID`          | Nein    | Job-ID (`owner/name#<n>` oder `issue-<n>`), ordnet die Frage dem Job zu | _(keiner)_              |
 | `HQ_ASK`             | Nein    | Absoluter Pfad zu `hq-ask.sh`, von `delegate.sh` für den Worker gesetzt | _(keiner)_              |
 | `AGENT_HQ_URL`       | Nein    | Basis-URL der Agent-HQ-Instanz                                          | `http://127.0.0.1:3333` |
 | `HQ_CONNECT_TIMEOUT` | Nein    | Verbindungs-Timeout für curl in Sekunden                                | `2`                     |

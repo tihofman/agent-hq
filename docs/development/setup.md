@@ -94,7 +94,7 @@ Agent-HQ und seine Hilfsskripte können über Umgebungsvariablen gesteuert werde
 | `PORT`             | `3333`                     | Port, auf dem der Agent-HQ-Server lauscht (z.B. `PORT=3482 ./run.sh`).                                                            |
 | `HOST`             | `127.0.0.1`                | Bind-Adresse des Servers (standardmäßig nur localhost).                                                                           |
 | `AGENT_HQ_URL`     | `http://127.0.0.1:3333`    | Basis-URL, die von Client-Skripten (`delegate.sh`, `hq-hook.sh`) zur Ingest-API aufgerufen wird.                                  |
-| `AGENT_HQ_HOME`    | `~/.agent-hq`              | Verzeichnis zur Speicherung der persistenten Event-Historie (`history.jsonl`).                                                    |
+| `AGENT_HQ_HOME`    | `~/.agent-hq`              | Verzeichnis der Event-Historie (`history.jsonl`) und der Repo-Registry (`repos.json`).                                            |
 | `AGENT_HQ_LOG_DIR` | `${TMPDIR:-/tmp}/agent-hq` | Verzeichnis, aus dem der Server Run-Logs liest. Muss zu `delegate.sh` passen, das immer nach `${TMPDIR:-/tmp}/agent-hq` schreibt. |
 | `RUN_SH_DRY_RUN`   | `0`                        | Wenn auf `1` gesetzt, führt `./run.sh` nur Pre-Flight-Prüfungen durch und beendet ohne Serverstart (genutzt in Tests).            |
 
@@ -137,7 +137,28 @@ Der Skill steuert nur die Agent-HQ-Instanz, die im selben Repo läuft (siehe Ein
 
 ---
 
-## 6. Branching & Worktree-Strategie
+## 6. Weitere Repos registrieren (V2)
+
+Eine Agent-HQ-Instanz kann Issues aus mehreren GitHub-Repos bearbeiten ([ADR-0007](../adr/0007-mehrere-repos.md)). Die Registry liegt in `$AGENT_HQ_HOME/repos.json`. Ist sie leer oder fehlt sie, bearbeitet Agent-HQ wie bisher nur das Repo, aus dem der Server läuft. Sobald ein Repo registriert ist, gilt nur noch die Registry. Registriere dann auch das Home-Repo, wenn es weiter bearbeitet werden soll.
+
+```bash
+HQ="${AGENT_HQ_URL:-http://127.0.0.1:3333}"
+# Registrieren (Pfad = lokaler Klon mit GitHub-Remote)
+curl -s -X POST "$HQ/api/repos" -H 'Content-Type: application/json' \
+  -d '{"repo":"owner/name","path":"/abs/pfad/zum/klon"}'
+# Auflisten
+curl -s "$HQ/api/repos"
+# Entfernen
+curl -s -X DELETE "$HQ/api/repos/owner/name"
+```
+
+Beim Registrieren prüft der Server, dass der Pfad existiert, ein Git-Repo ist und `gh repo view` dort `owner/name` meldet. Danach legt er **auf GitHub** die Labels `team:*` und `status:*` an und trägt `.worktrees/` in `.git/info/exclude` des Repos ein. Mit `"enabled": false` bleibt ein Repo registriert, wird aber nicht mehr eingelesen.
+
+Registrierte Repos bekommen Worker mit weitreichenden Rechten. Registriere nur Repos, denen du vertraust. Laufende Jobs eines entfernten Repos schlagen fehl, statt im Home-Repo weiterzulaufen.
+
+---
+
+## 7. Branching & Worktree-Strategie
 
 Alle Features und Tickets werden über isolierte Git Worktrees bearbeitet:
 

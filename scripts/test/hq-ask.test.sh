@@ -227,6 +227,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 4a. Repo and job ID from the worker slot are sent; absent without env (home repo)
+# ---------------------------------------------------------------------------
+: > "$REQUESTS_FILE"
+rm -f "$CONTROL_FILE"
+OUT=$(HQ_ISSUE_ID="12" HQ_TEAM="backend" HQ_REPO="acme/my-repo" HQ_JOB_ID="acme/my-repo#12" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Repo-Frage?")
+CODE=$?
+BODY=$(tail -n1 "$REQUESTS_FILE" | jq -r '.body')
+OUT_HOME=$( (unset HQ_REPO HQ_JOB_ID; HQ_ISSUE_ID="12" HQ_TEAM="backend" AGENT_HQ_URL="$SERVER_URL" "$ASK_SCRIPT" "Home-Frage?") )
+HOME_BODY=$(tail -n1 "$REQUESTS_FILE" | jq -r '.body')
+
+if [ "$CODE" -eq 0 ] && \
+   [ "$(jq -r '.repo' <<<"$BODY")" = "acme/my-repo" ] && \
+   [ "$(jq -r '.jobId' <<<"$BODY")" = "acme/my-repo#12" ] && \
+   [ "$(jq -c 'has("repo"), has("jobId")' <<<"$HOME_BODY" | tr -d '\n')" = "falsefalse" ]; then
+  pass "HQ_REPO/HQ_JOB_ID -> repo and jobId in JSON, omitted without env"
+else
+  fail "HQ_REPO/HQ_JOB_ID -> repo and jobId in JSON, omitted without env" "code=$CODE body='$BODY' home='$HOME_BODY' out='$OUT$OUT_HOME'"
+fi
+
+# ---------------------------------------------------------------------------
 # 4b. YAGNI: -o and --option= are not supported -> Exit 1
 # ---------------------------------------------------------------------------
 : > "$REQUESTS_FILE"

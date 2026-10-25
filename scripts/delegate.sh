@@ -27,11 +27,12 @@ hq_event() { # <event> [pid] [exitCode]
     -H "Content-Type: application/json" \
     -d "$(jq -nc --arg e "$1" --arg a "$AGENT" --arg r "$RUN_ID" --arg t "$TICKET_ID" \
             --arg cwd "$PWD" --arg log "$LOG" --argjson pid "${2:-null}" --argjson code "${3:-null}" \
-            --arg pr "$pr" --arg title "$title" \
+            --arg pr "$pr" --arg title "$title" --arg repo "${HQ_REPO:-}" \
             '{event:$e, agent:$a, runId:$r, ticketId:$t, pid:$pid, cwd:$cwd,
               data:({logFile:$log, exitCode:$code}
                     + (if $pr != "" and ($pr | test("^[0-9]+$")) then {prNumber:($pr | tonumber)} else {} end)
-                    + (if $title != "" then {title:$title} else {} end))}')" \
+                    + (if $title != "" then {title:$title} else {} end)
+                    + (if $repo != "" then {repo:$repo} else {} end))}')" \
     >/dev/null 2>&1 || true
 }
 
@@ -194,9 +195,11 @@ ticket_title() {
     local out_file
     out_file="$(mktemp "${TMPDIR:-/tmp}/gh-title.XXXXXX")" || return 0
     local timeout="${DELEGATE_GH_TIMEOUT:-3}"
+    local repo_args=()
+    [ -z "${HQ_REPO:-}" ] || repo_args=(--repo "$HQ_REPO")
     (
       set -m
-      gh issue view "$id" --json title -q .title > "$out_file" 2>/dev/null &
+      gh issue view "$id" --json title -q .title ${repo_args[@]+"${repo_args[@]}"} > "$out_file" 2>/dev/null &
       local cmd_pid=$!
       (
         sleep "$timeout" &

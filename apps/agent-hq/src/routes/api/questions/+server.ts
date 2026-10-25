@@ -9,6 +9,7 @@ import {
   QuestionConflictError,
   QuestionNotFoundError,
 } from '../../../lib/server/questions';
+import { isValidRepoName } from '../../../lib/server/repos';
 import type { Team } from '@agent-hq/queue';
 
 const VALID_TEAMS: readonly string[] = ['frontend', 'backend', 'qa'];
@@ -44,6 +45,19 @@ export const POST: RequestHandler = async ({ request, url }) => {
   const team = record.team;
   const question = record.question;
   const options = record.options;
+  const repo = record.repo;
+  const jobId = record.jobId;
+
+  // Both optional: calls without repo belong to the home repo.
+  if (repo !== undefined && !isValidRepoName(repo)) {
+    return json({ error: 'repo must be owner/name' }, { status: 400 });
+  }
+  if (
+    jobId !== undefined &&
+    (typeof jobId !== 'string' || !jobId.trim() || jobId.length > 300)
+  ) {
+    return json({ error: 'jobId must be a non-empty string' }, { status: 400 });
+  }
 
   if (
     typeof issueId !== 'number' ||
@@ -102,6 +116,8 @@ export const POST: RequestHandler = async ({ request, url }) => {
       team: team as Team,
       question: question.trim(),
       options: options as string[] | undefined,
+      repo,
+      jobId,
     });
     return json({ ok: true, question: result }, { status: 201 });
   } catch (err) {

@@ -8,6 +8,8 @@ export type QuestionStatus = 'PENDING' | 'ANSWERED';
 export interface QuestionPayload {
   id: string;
   issueId: number;
+  /** `owner/name`; absent for legacy home-repo jobs. */
+  repo?: string;
   team: Team;
   question: string;
   options?: string[];
@@ -17,6 +19,8 @@ export interface QuestionPayload {
 
 export interface TaskPayload {
   issueId: number;
+  /** `owner/name`; absent for legacy home-repo jobs (`issue-<n>`). */
+  repo?: string;
   title: string;
   team: Team;
   body: string;

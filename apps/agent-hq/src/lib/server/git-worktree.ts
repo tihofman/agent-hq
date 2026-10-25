@@ -8,6 +8,8 @@ const defaultExecFileAsync = promisify(execFile);
 
 export interface WorktreeContext {
   repoRoot: string;
+  /** `owner/name` for registered repos; legacy home repo omits it. */
+  repo?: string;
   remote?: string;
   baseBranch?: string;
   ghBinary?: string;
@@ -225,12 +227,13 @@ export async function finalizeWorktree(
   // 3. Push branch to remote
   await git(['push', '-u', remote, wt.branch], wt.worktreePath, ctx.env);
 
-  // 4. Draft PR creation / lookup
+  // 4. Draft PR creation / lookup; registered repos are addressed explicitly
+  const repoFlag = ctx.repo ? ['--repo', ctx.repo] : [];
   let prUrl: string | null = null;
   try {
     const { stdout } = await defaultExecFileAsync(
       ghBinary,
-      ['pr', 'view', wt.branch, '--json', 'url', '-q', '.url'],
+      ['pr', 'view', wt.branch, '--json', 'url', '-q', '.url', ...repoFlag],
       { cwd: wt.worktreePath, env: ctx.env },
     );
     const trimmed = stdout.trim();
@@ -251,6 +254,9 @@ export async function finalizeWorktree(
           prTitle,
           '--body',
           `Closes #${payload.issueId}`,
+          ...(ctx.repo
+            ? [...repoFlag, '--head', wt.branch, '--base', baseBranch]
+            : []),
         ],
         { cwd: wt.worktreePath, env: ctx.env },
       );
