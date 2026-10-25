@@ -5,10 +5,13 @@ Alle Befehle laufen im Repo-Root des Servers (`<root>`), außer denen zur Regist
 ## Start
 
 ```bash
-AGENT_HQ_V2_WORKERS=1 ./run.sh
+AGENT_HQ_V2_WORKERS=1 ./run.sh --web    # Server im Vordergrund
+AGENT_HQ_V2_WORKERS=1 ./run.sh --tui    # tmux-Sitzung agent-hq: TUI, Orchestrator claude, Server-Log
 ```
 
-`run.sh`:
+Ohne Flag fragt `run.sh` nach dem Modus. Ohne Terminal (z. B. aus einem Agenten) gilt `--web`. Gib das Flag deshalb immer an.
+
+`run.sh --web`:
 
 1. prüft `node`, `npm`, `jq`, `gh` und `lsof`,
 2. bricht mit Exit 1 ab, wenn `PORT` (Standard `3333`) belegt ist,
@@ -17,6 +20,15 @@ AGENT_HQ_V2_WORKERS=1 ./run.sh
 5. baut und startet den Server über `npx nx start agent-hq` (`node build` in `apps/agent-hq`) auf `http://$HOST:$PORT`.
 
 Der Prozess läuft im Vordergrund. Starte ihn in einem eigenen Terminal oder als Hintergrund-Prozess. Server-Logs (`[issue-ingest]`, `[hooks]`, Worker-Fehler) stehen auf seiner Standardausgabe.
+
+`run.sh --tui` ist für den User am Terminal gedacht, starte es nicht aus einem Agenten heraus. Es braucht `tmux` und `claude` und
+
+- hängt sich an eine laufende Sitzung `agent-hq` an (`tmux has-session -t agent-hq`),
+- nutzt einen laufenden Server, wenn `PORT` belegt ist und `/api/stream` antwortet. Ist der Port fremd belegt, bricht es ab. Sonst startet es `run.sh --web` im tmux-Fenster `server` und reicht `AGENT_HQ_*`, `REDIS_*`, `PORT` und `HOST` durch,
+- zeigt im Fenster `hq` links die TUI, rechts `claude` im Aufrufverzeichnis (ohne `--dangerously-skip-permissions`) und unten das Server-Log (`${TMPDIR:-/tmp}/agent-hq-server.log`),
+- weist auf einen fehlenden Skill `agent-hq` hin, ohne ihn zu installieren.
+
+Lösen mit `Ctrl-b d`, Server und Orchestrator laufen weiter. `tmux kill-session -t agent-hq` stoppt einen von der Sitzung gestarteten Server per SIGTERM. Ein vorher laufender Server bleibt unberührt.
 
 V2 läuft nur, wenn `AGENT_HQ_V2_WORKERS` den Wert `1` oder `true` hat **und** Redis beim Start erreichbar ist. Ist Redis nicht erreichbar, loggt der Server „Redis nicht erreichbar, V2 deaktiviert“ und läuft im V1-Modus weiter.
 
@@ -40,7 +52,7 @@ Nötig nach Merges, die Server-Code betreffen (`apps/agent-hq/**`, `libs/**`), u
 ```bash
 git pull --ff-only                                                # im Server-Checkout auf main
 kill "$(lsof -t -nP -iTCP:"${PORT:-3333}" -sTCP:LISTEN)"
-AGENT_HQ_V2_WORKERS=1 ./run.sh
+AGENT_HQ_V2_WORKERS=1 ./run.sh --web
 ```
 
 Prüfe vorher mit `gh issue list --label status:in-progress`, ob gerade ein Worker läuft. Beim Stoppen beendet der Server laufende Worker-Prozesse (SIGTERM, nach 2 s SIGKILL). Starte deshalb möglichst neu, wenn kein Job aktiv ist. Die Jobs selbst liegen in Redis. Offene Rückfragen lädt der Server beim Start wieder aus Redis.

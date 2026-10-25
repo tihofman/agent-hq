@@ -39,6 +39,26 @@ Das Skript:
 4. Installiert Abhängigkeiten (`npm ci`), falls das Verzeichnis `node_modules` noch nicht existiert.
 5. Baut die SvelteKit-Anwendung und startet den Server über `npx nx start agent-hq` auf `http://127.0.0.1:3333`.
 
+### Startmodus: `--web` oder `--tui`
+
+```bash
+./run.sh --web                          # Server im Vordergrund, Bedienung über die Web-UI (wie oben)
+AGENT_HQ_V2_WORKERS=1 ./run.sh --tui    # tmux-Sitzung mit TUI, Orchestrator und Server-Log
+scripts/agent-hq --tui                  # dünner Wrapper, gleiche Optionen wie run.sh
+```
+
+Ohne Flag fragt `run.sh` nach dem Modus (`[w]eb / [t]ui`, Enter = Web). Ist stdin kein Terminal (CI, Skripte), gilt `--web`.
+
+`--tui` ([ADR 0008](../adr/0008-tui-und-tmux-start.md)) braucht `tmux` (`brew install tmux` bzw. `sudo apt install tmux`) und `claude`. Der Befehl
+
+1. hängt sich an eine laufende tmux-Sitzung `agent-hq` an, statt eine zweite zu starten,
+2. führt `npm ci` aus, wenn `node_modules` fehlt, und baut die TUI, wenn `dist/apps/agent-hq-tui/main.js` fehlt,
+3. nutzt einen laufenden Server, wenn `PORT` belegt ist und `/api/stream` antwortet. Ist der Port von einem anderen Prozess belegt, bricht er ab. Sonst startet er `run.sh --web` im tmux-Fenster `server`, reicht `PORT`, `HOST`, `PATH`, `AGENT_HQ_*` und `REDIS_*` durch und wartet, bis der Server antwortet,
+4. baut das Fenster `hq` auf: links die TUI, rechts `claude` im Aufrufverzeichnis (normaler Berechtigungsmodus, ohne `--dangerously-skip-permissions`), unten `tail -F` auf das Server-Log (`AGENT_HQ_SERVER_LOG`, Standard `${TMPDIR:-/tmp}/agent-hq-server.log`),
+5. weist darauf hin, wenn der Skill `agent-hq` in Claude Code fehlt (siehe Abschnitt 5). Installiert wird nichts.
+
+Lösen mit `Ctrl-b d`, wieder anhängen mit `./run.sh --tui`. Server und Orchestrator laufen dabei weiter. `tmux kill-session -t agent-hq` beendet die Sitzung und stoppt einen von ihr gestarteten Server per SIGTERM. Ein schon vorher laufender Server bleibt unberührt, sein Log steht in dessen Terminal.
+
 ### Redis & Docker Compose (Queue-Architektur V2)
 
 Für die V2-Queue-Architektur (BullMQ) wird Redis über Docker Compose (`docker-compose.yml`) bereitgestellt:
@@ -115,14 +135,16 @@ npx nx format:check --all
 
 Agent-HQ und seine Hilfsskripte können über Umgebungsvariablen gesteuert werden:
 
-| Variable           | Standardwert               | Beschreibung                                                                                                                      |
-| :----------------- | :------------------------- | :-------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`             | `3333`                     | Port, auf dem der Agent-HQ-Server lauscht (z.B. `PORT=3482 ./run.sh`).                                                            |
-| `HOST`             | `127.0.0.1`                | Bind-Adresse des Servers (standardmäßig nur localhost).                                                                           |
-| `AGENT_HQ_URL`     | `http://127.0.0.1:3333`    | Basis-URL, die von Client-Skripten (`delegate.sh`, `hq-hook.sh`) zur Ingest-API aufgerufen wird.                                  |
-| `AGENT_HQ_HOME`    | `~/.agent-hq`              | Verzeichnis der Event-Historie (`history.jsonl`) und der Repo-Registry (`repos.json`).                                            |
-| `AGENT_HQ_LOG_DIR` | `${TMPDIR:-/tmp}/agent-hq` | Verzeichnis, aus dem der Server Run-Logs liest. Muss zu `delegate.sh` passen, das immer nach `${TMPDIR:-/tmp}/agent-hq` schreibt. |
-| `RUN_SH_DRY_RUN`   | `0`                        | Wenn auf `1` gesetzt, führt `./run.sh` nur Pre-Flight-Prüfungen durch und beendet ohne Serverstart (genutzt in Tests).            |
+| Variable                 | Standardwert                          | Beschreibung                                                                                                                      |
+| :----------------------- | :------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                   | `3333`                                | Port, auf dem der Agent-HQ-Server lauscht (z.B. `PORT=3482 ./run.sh`).                                                            |
+| `HOST`                   | `127.0.0.1`                           | Bind-Adresse des Servers (standardmäßig nur localhost).                                                                           |
+| `AGENT_HQ_URL`           | `http://127.0.0.1:3333`               | Basis-URL, die von Client-Skripten (`delegate.sh`, `hq-hook.sh`) zur Ingest-API aufgerufen wird.                                  |
+| `AGENT_HQ_HOME`          | `~/.agent-hq`                         | Verzeichnis der Event-Historie (`history.jsonl`) und der Repo-Registry (`repos.json`).                                            |
+| `AGENT_HQ_LOG_DIR`       | `${TMPDIR:-/tmp}/agent-hq`            | Verzeichnis, aus dem der Server Run-Logs liest. Muss zu `delegate.sh` passen, das immer nach `${TMPDIR:-/tmp}/agent-hq` schreibt. |
+| `RUN_SH_DRY_RUN`         | `0`                                   | Wenn auf `1` gesetzt, führt `./run.sh` nur Pre-Flight-Prüfungen durch und beendet ohne Serverstart (genutzt in Tests).            |
+| `AGENT_HQ_SERVER_LOG`    | `${TMPDIR:-/tmp}/agent-hq-server.log` | Server-Log der `--tui`-Sitzung (unteres Pane).                                                                                    |
+| `RUN_SH_SERVER_ATTEMPTS` | `240`                                 | Versuche à 0,5 s, mit denen `--tui` auf `/api/stream` des selbst gestarteten Servers wartet.                                      |
 
 ---
 

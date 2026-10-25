@@ -42,7 +42,7 @@ for missing in jq gh lsof; do
 
   OUT_FILE="$TEST_DIR/out_no_$missing"
   set +e
-  PATH="$MOCK_BIN" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
+  PATH="$MOCK_BIN" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null >"$OUT_FILE" 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -60,7 +60,7 @@ done
 # -----------------------------------------------------------------------------
 OUT_FILE="$TEST_DIR/out_bad_port"
 set +e
-PORT="3484 x" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
+PORT="3484 x" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null >"$OUT_FILE" 2>&1
 EXIT_CODE=$?
 set -e
 if [ "$EXIT_CODE" -ne 1 ] || ! grep -q "numerisch" "$OUT_FILE"; then
@@ -94,7 +94,7 @@ else
   BUSY_PORT="$(cat "$PORT_FILE")"
   OUT_FILE="$TEST_DIR/out_busy_port"
   set +e
-  PORT="$BUSY_PORT" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
+  PORT="$BUSY_PORT" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null >"$OUT_FILE" 2>&1
   EXIT_CODE=$?
   set -e
 
@@ -123,7 +123,7 @@ fi
 # Wir nutzen denselben Port, der nach dem Beenden des Listeners nun frei ist
 OUT_FILE="$TEST_DIR/out_free_port"
 set +e
-PORT="$BUSY_PORT" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$OUT_FILE" 2>&1
+PORT="$BUSY_PORT" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null >"$OUT_FILE" 2>&1
 EXIT_CODE=$?
 set -e
 
@@ -140,7 +140,7 @@ fi
 # -----------------------------------------------------------------------------
 OUT_FILE="$TEST_DIR/out_default_port"
 set +e
-(unset PORT; RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh") >"$OUT_FILE" 2>&1
+(unset PORT; RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null) >"$OUT_FILE" 2>&1
 EXIT_CODE=$?
 set -e
 
@@ -168,7 +168,7 @@ chmod +x "$MOCK_BIN/docker"
 STDOUT_FILE="$TEST_DIR/out_docker_down_stdout"
 STDERR_FILE="$TEST_DIR/out_docker_down_stderr"
 set +e
-PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 set -e
 
@@ -201,7 +201,7 @@ chmod +x "$MOCK_BIN/docker"
 STDOUT_FILE="$TEST_DIR/out_docker_dry_run_stdout"
 STDERR_FILE="$TEST_DIR/out_docker_dry_run_stderr"
 set +e
-PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=1 bash "$ROOT/run.sh" </dev/null >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 set -e
 
@@ -250,7 +250,7 @@ chmod +x "$MOCK_BIN/npx"
 STDOUT_FILE="$TEST_DIR/out_docker_start_stdout"
 STDERR_FILE="$TEST_DIR/out_docker_start_stderr"
 set +e
-PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" </dev/null >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 set -e
 
@@ -296,7 +296,7 @@ chmod +x "$MOCK_BIN/npx"
 STDOUT_FILE="$TEST_DIR/out_docker_timeout_stdout"
 STDERR_FILE="$TEST_DIR/out_docker_timeout_stderr"
 set +e
-PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_REDIS_ATTEMPTS=2 RUN_SH_REDIS_SLEEP=0.05 RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_REDIS_ATTEMPTS=2 RUN_SH_REDIS_SLEEP=0.05 RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" </dev/null >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 set -e
 
@@ -343,7 +343,7 @@ chmod +x "$MOCK_BIN/npx"
 STDOUT_FILE="$TEST_DIR/out_docker_up_fail_stdout"
 STDERR_FILE="$TEST_DIR/out_docker_up_fail_stderr"
 set +e
-PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$ROOT/run.sh" </dev/null >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 set -e
 
@@ -393,7 +393,7 @@ chmod +x "$MOCK_BIN/docker"
 STDOUT_FILE="$TEST_DIR/out_no_nm_stdout"
 STDERR_FILE="$TEST_DIR/out_no_nm_stderr"
 set +e
-PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$TEMP_ROOT/run.sh" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+PORT="$BUSY_PORT" PATH="$MOCK_BIN:$PATH" RUN_SH_DRY_RUN=0 bash "$TEMP_ROOT/run.sh" </dev/null >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 set -e
 

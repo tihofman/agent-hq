@@ -11,6 +11,37 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# 0. Moduswahl: --web (Server im Vordergrund) oder --tui (tmux-Sitzung, siehe ADR 0008)
+MODE=
+case "${1:-}" in
+  --web) MODE=web ;;
+  --tui) MODE=tui ;;
+  "")
+    if [ -t 0 ] || [ "${RUN_SH_ASSUME_TTY:-0}" = "1" ]; then
+      printf 'Startmodus [w]eb / [t]ui: ' >&2
+      read -r ANSWER || ANSWER=
+      case "$ANSWER" in
+        t | T | tui) MODE=tui ;;
+        w | W | web | "") MODE=web ;;
+        *)
+          echo "Fehler: unbekannte Auswahl: $ANSWER" >&2
+          exit 1
+          ;;
+      esac
+    else
+      MODE=web
+    fi
+    ;;
+  *)
+    echo "Fehler: unbekannte Option: $1 (erlaubt: --web, --tui)" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$MODE" = "tui" ]; then
+  exec bash "$ROOT/scripts/hq-tui.sh"
+fi
+
 # 1. Voraussetzungen prüfen (lsof wird für die Port-Prüfung gebraucht)
 MISSING_TOOLS=()
 for tool in node npm jq gh lsof; do
