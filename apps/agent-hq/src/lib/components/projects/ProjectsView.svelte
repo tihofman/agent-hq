@@ -2,45 +2,34 @@
   import { onMount } from 'svelte';
   import { liveStore } from '../../live.svelte';
   import type { Team } from '../../server/state';
+  import type { QueueState } from '../../server/repo-stats';
   import {
-    fetchProjectRepos,
     addProjectRepo,
+    loadProjectOverview,
     removeProjectRepo,
     toggleProjectRepo,
+    type ProjectRepoItem,
   } from '../../projects';
-
-  export interface RepoMetrics {
-    running: {
-      frontend: number;
-      backend: number;
-      qa: number;
-    };
-    openQuestions: number;
-    runsPrs: number;
-    /** Backward compatibility alias */
-    queue?: {
-      frontend: number;
-      backend: number;
-      qa: number;
-    };
-    /** Backward compatibility alias */
-    openDraftPrs?: number;
-  }
-
-  export interface ProjectRepoItem {
-    repo: string;
-    path?: string;
-    enabled: boolean;
-    isHome?: boolean;
-    metrics?: RepoMetrics;
-  }
 
   interface Props {
     initialRepos?: ProjectRepoItem[];
     fetchFn?: typeof fetch;
+    refreshMs?: number;
   }
 
-  let { initialRepos, fetchFn = fetch }: Props = $props();
+  let { initialRepos, fetchFn = fetch, refreshMs = 15_000 }: Props = $props();
+
+  const TEAM_LABELS: { team: Team; label: string; color: string }[] = [
+    { team: 'frontend', label: 'Frontend', color: 'text-sky-400' },
+    { team: 'backend', label: 'Backend', color: 'text-orange-400' },
+    { team: 'qa', label: 'QA', color: 'text-purple-400' },
+  ];
+  const STATE_LABELS: { state: QueueState; label: string }[] = [
+    { state: 'waiting', label: 'wartend' },
+    { state: 'active', label: 'laufend' },
+    { state: 'delayed', label: 'pausiert' },
+    { state: 'failed', label: 'fehlgeschlagen' },
+  ];
 
   let repos = $state<ProjectRepoItem[]>(initialRepos ?? []);
   let loading = $state(!initialRepos);
@@ -54,98 +43,22 @@
   let addError = $state<string | null>(null);
   let isSubmitting = $state(false);
 
-  function deriveMetricsForRepo(
-    repoName: string,
-    isHome = false,
-  ): RepoMetrics {
-    const runs = Object.values(liveStore.state?.runs ?? {});
-    const questions = Object.values(liveStore.state?.questions ?? {});
-
-    const isMatch = (targetRepo?: string) =>
-      targetRepo === repoName || (!targetRepo && isHome);
-
-    const countRunning = (team: Team) =>
-      runs.filter(
-        (r) =>
-          isMatch(r.repo ?? r.data?.repo) &&
-          r.data?.team === team &&
-          (r.status === 'running' || r.status === 'handover'),
-      ).length;
-
-    const openQuestions = questions.filter(
-      (q) => isMatch(q.repo) && q.status === 'PENDING',
+  function openQuestionsFor(r: ProjectRepoItem): number {
+    return Object.values(liveStore.state?.questions ?? {}).filter(
+      (q) =>
+        q.status === 'PENDING' && (q.repo ? q.repo === r.repo : !!r.isHome),
     ).length;
-
-    const prNumbers: number[] = [];
-    for (const r of runs) {
-      if (
-        isMatch(r.repo ?? r.data?.repo) &&
-        typeof r.data?.prNumber === 'number' &&
-        !prNumbers.includes(r.data.prNumber)
-      ) {
-        prNumbers.push(r.data.prNumber);
-      }
-    }
-    const activePR = liveStore.state?.activePR;
-    if (
-      activePR &&
-      isMatch(activePR.repo) &&
-      typeof activePR.prNumber === 'number' &&
-      !prNumbers.includes(activePR.prNumber)
-    ) {
-      prNumbers.push(activePR.prNumber);
-    }
-    const runsPrs = prNumbers.length;
-
-    const running = {
-      frontend: countRunning('frontend'),
-      backend: countRunning('backend'),
-      qa: countRunning('qa'),
-    };
-
-    return {
-      running,
-      openQuestions,
-      runsPrs,
-      queue: running,
-      openDraftPrs: runsPrs,
-    };
   }
 
-  async function loadRepos() {
-    loading = true;
-    pageError = null;
-    const res = await fetchProjectRepos(fetchFn);
-    if (!res.ok) {
+  /** Silent reloads (timer) keep the cards visible instead of the spinner. */
+  async function loadRepos(silent = false) {
+    if (!silent) loading = true;
+    const res = await loadProjectOverview(fetchFn);
+    if (res.ok) {
+      repos = res.data ?? [];
+      pageError = null;
+    } else if (!silent) {
       pageError = res.error || 'Fehler beim Laden der Repositories';
-      loading = false;
-      return;
-    }
-
-    const data = res.data ?? [];
-    if (data.length === 0) {
-      // ADR 0007: Leere Registry -> Home-Repo
-      const activeRun = Object.values(liveStore.state?.runs ?? {}).find(
-        (r) => r.repo || r.data?.repo,
-      );
-      const homeName =
-        activeRun?.repo ??
-        activeRun?.data?.repo ??
-        liveStore.state?.activePR?.repo ??
-        'Home-Repository';
-      repos = [
-        {
-          repo: homeName,
-          path: '(Home-Repository)',
-          enabled: true,
-          isHome: true,
-        },
-      ];
-    } else {
-      repos = data.map((d) => ({
-        ...d,
-        isHome: false,
-      }));
     }
     loading = false;
   }
@@ -198,15 +111,15 @@
       actionError = res.error || 'Fehler beim Ändern des Repository-Status';
       return;
     }
-    repos = repos.map((r) =>
-      r.repo === repoName ? { ...r, enabled } : r,
-    );
+    repos = repos.map((r) => (r.repo === repoName ? { ...r, enabled } : r));
   }
 
   onMount(() => {
     if (!initialRepos) {
       void loadRepos();
     }
+    const timer = setInterval(() => void loadRepos(true), refreshMs);
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -216,7 +129,9 @@
 >
   <!-- Main Content -->
   <main class="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
-    <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+    <div
+      class="flex items-center justify-between border-b border-slate-800 pb-4"
+    >
       <div>
         <h1
           class="text-xl font-bold font-mono tracking-tight text-white flex items-center gap-2"
@@ -225,14 +140,15 @@
           <span>Projektansicht</span>
         </h1>
         <p class="text-xs text-slate-400 mt-1">
-          Alle registrierten Repositories mit Status, laufenden Teams und offenen Vorgängen auf einem Bildschirm.
+          Alle registrierten Repositories mit Status, Queue je Team, Rückfragen
+          und Draft-PRs auf einem Bildschirm.
         </p>
       </div>
 
       <div class="flex items-center gap-4">
         <button
           type="button"
-          onclick={loadRepos}
+          onclick={() => loadRepos()}
           class="flex items-center gap-1.5 rounded bg-slate-800/90 px-3 py-1 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition cursor-pointer font-mono text-xs"
           title="Liste aktualisieren"
           data-testid="refresh-button"
@@ -282,7 +198,7 @@
         <p class="text-xs text-rose-300/80">{pageError}</p>
         <button
           type="button"
-          onclick={loadRepos}
+          onclick={() => loadRepos()}
           class="rounded bg-rose-900/80 px-3 py-1 text-xs text-white hover:bg-rose-800 border border-rose-700 transition cursor-pointer"
         >
           Erneut versuchen
@@ -292,7 +208,8 @@
       <!-- Repositories Grid / Cards -->
       <div class="grid grid-cols-1 gap-4" data-testid="repos-list">
         {#each repos as r (r.repo)}
-          {@const metrics = r.metrics ?? deriveMetricsForRepo(r.repo, r.isHome)}
+          {@const openQuestions = openQuestionsFor(r)}
+          {@const draftPRs = r.stats?.draftPRs ?? []}
           {@const repoSlug = r.repo.replace(/[/.]/g, '-')}
           <div
             class="flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-900/60 p-5 shadow-lg font-mono text-xs"
@@ -366,71 +283,83 @@
               class="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-slate-800/80 text-xs"
               data-testid="repo-metrics-{repoSlug}"
             >
-              <!-- Frontend Laufend -->
-              <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
-                <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Laufend: Frontend
-                </span>
-                <span
-                  class="text-sm font-bold text-sky-400 mt-0.5 block"
-                  data-testid="running-frontend-{repoSlug}"
+              <!-- Queue je Team -->
+              {#each TEAM_LABELS as { team, label, color } (team)}
+                <div
+                  class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60"
+                  data-testid="queue-{team}-{repoSlug}"
                 >
-                  Frontend: {metrics.running?.frontend ?? metrics.queue?.frontend ?? 0}
-                </span>
-              </div>
-
-              <!-- Backend Laufend -->
-              <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
-                <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Laufend: Backend
-                </span>
-                <span
-                  class="text-sm font-bold text-orange-400 mt-0.5 block"
-                  data-testid="running-backend-{repoSlug}"
-                >
-                  Backend: {metrics.running?.backend ?? metrics.queue?.backend ?? 0}
-                </span>
-              </div>
-
-              <!-- QA Laufend -->
-              <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
-                <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  Laufend: QA
-                </span>
-                <span
-                  class="text-sm font-bold text-purple-400 mt-0.5 block"
-                  data-testid="running-qa-{repoSlug}"
-                >
-                  QA: {metrics.running?.qa ?? metrics.queue?.qa ?? 0}
-                </span>
-              </div>
+                  <span
+                    class="text-[10px] uppercase tracking-wider block font-bold {color}"
+                  >
+                    Queue: {label}
+                  </span>
+                  <dl
+                    class="mt-1 grid grid-cols-[1fr_auto] gap-x-2 text-[11px]"
+                  >
+                    {#each STATE_LABELS as { state, label: stateLabel } (state)}
+                      {@const count = r.stats?.queues[team]?.[state] ?? 0}
+                      <dt class="text-slate-400">{stateLabel}</dt>
+                      <dd
+                        class="text-right font-bold {count > 0
+                          ? state === 'failed'
+                            ? 'text-rose-400'
+                            : 'text-slate-100'
+                          : 'text-slate-500'}"
+                        data-testid="queue-{team}-{state}-{repoSlug}"
+                      >
+                        {count}
+                      </dd>
+                    {/each}
+                  </dl>
+                </div>
+              {/each}
 
               <!-- Offene Rückfragen -->
-              <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
-                <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
+              <div
+                class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60"
+              >
+                <span
+                  class="text-[10px] text-slate-400 uppercase tracking-wider block"
+                >
                   Rückfragen
                 </span>
                 <span
-                  class="text-sm font-bold {metrics.openQuestions > 0
+                  class="text-sm font-bold {openQuestions > 0
                     ? 'text-amber-400'
                     : 'text-slate-400'} mt-0.5 block"
                   data-testid="open-questions-{repoSlug}"
                 >
-                  Rückfragen: {metrics.openQuestions}
+                  Rückfragen: {openQuestions}
                 </span>
               </div>
 
-              <!-- PRs aus Läufen -->
-              <div class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60">
-                <span class="text-[10px] text-slate-400 uppercase tracking-wider block">
-                  PRs aus Läufen
-                </span>
+              <!-- Offene Draft-PRs -->
+              <div
+                class="rounded bg-slate-950/60 p-2.5 border border-slate-800/60 min-w-0"
+                data-testid="draft-prs-{repoSlug}"
+              >
                 <span
-                  class="text-sm font-bold text-emerald-400 mt-0.5 block"
-                  data-testid="runs-prs-{repoSlug}"
+                  class="text-[10px] text-slate-400 uppercase tracking-wider block"
                 >
-                  PRs aus Läufen: {metrics.runsPrs ?? metrics.openDraftPrs ?? 0}
+                  Draft-PRs: {draftPRs.length}
                 </span>
+                <ul class="mt-1 space-y-0.5 text-[11px]">
+                  {#each draftPRs as pr (pr.number)}
+                    <li class="truncate">
+                      <a
+                        href={pr.url}
+                        target="_blank"
+                        rel="external noopener noreferrer"
+                        class="text-emerald-400 hover:text-emerald-300 hover:underline"
+                        title={pr.title}
+                      >
+                        #{pr.number}
+                        {pr.title}
+                      </a>
+                    </li>
+                  {/each}
+                </ul>
               </div>
             </div>
           </div>
@@ -459,10 +388,13 @@
         >
           <span class="text-sm">⚠️</span>
           <div>
-            <strong class="font-semibold block text-amber-100">Hinweis zu GitHub-Labels:</strong>
+            <strong class="font-semibold block text-amber-100"
+              >Hinweis zu GitHub-Labels:</strong
+            >
             Beim Hinzufügen werden automatisch die erforderlichen Team- und Status-Labels
-            (<code>team:*</code> und <code>status:*</code>) im GitHub-Repository angelegt.
-            Außerdem wird <code>.worktrees/</code> in <code>.git/info/exclude</code> eingetragen.
+            (<code>team:*</code> und <code>status:*</code>) im GitHub-Repository
+            angelegt. Außerdem wird <code>.worktrees/</code> in
+            <code>.git/info/exclude</code> eingetragen.
           </div>
         </div>
 
@@ -476,11 +408,18 @@
           </div>
         {/if}
 
-        <form onsubmit={handleAddRepo} class="space-y-4" data-testid="add-repo-form">
+        <form
+          onsubmit={handleAddRepo}
+          class="space-y-4"
+          data-testid="add-repo-form"
+        >
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Repo: owner/name -->
             <div class="space-y-1.5">
-              <label for="repo-input" class="block text-slate-300 font-semibold">
+              <label
+                for="repo-input"
+                class="block text-slate-300 font-semibold"
+              >
                 Repository (owner/name) <span class="text-rose-400">*</span>
               </label>
               <input
@@ -496,7 +435,10 @@
 
             <!-- Path: /abs/path -->
             <div class="space-y-1.5">
-              <label for="path-input" class="block text-slate-300 font-semibold">
+              <label
+                for="path-input"
+                class="block text-slate-300 font-semibold"
+              >
                 Lokaler Pfad (absolut) <span class="text-rose-400">*</span>
               </label>
               <input
@@ -520,7 +462,10 @@
               class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500"
               data-testid="enabled-checkbox"
             />
-            <label for="enabled-checkbox" class="text-slate-300 text-xs select-none cursor-pointer">
+            <label
+              for="enabled-checkbox"
+              class="text-slate-300 text-xs select-none cursor-pointer"
+            >
               Sofort aktivieren (Ingest aktiv)
             </label>
           </div>
