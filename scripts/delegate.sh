@@ -37,17 +37,33 @@ hq_event() { # <event> [pid] [exitCode]
 }
 
 codex_command() {
+  # Worktrees keep index, objects and refs in the main repo's .git, outside $PWD.
+  # Allow only what commits need; hooks and config stay read-only.
+  local roots=("$PWD" "$HOME/.npm")
+  local gitdir=""
+  if git rev-parse --git-common-dir >/dev/null 2>&1; then
+    gitdir="$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
+  fi
+  if [ -n "$gitdir" ]; then
+    local d
+    for d in worktrees objects refs logs; do
+      [ -d "$gitdir/$d" ] && roots+=("$gitdir/$d")
+    done
+  fi
   if [ -n "$SESSION" ]; then
     CMD=(codex exec resume "$SESSION")
     [ -z "${AGENT_MODEL:-}" ] || CMD+=(-m "$AGENT_MODEL")
     CMD+=(-c 'sandbox_mode="workspace-write"'
       -c sandbox_workspace_write.network_access=true
-      -c "sandbox_workspace_write.writable_roots=$(jq -nc --arg cwd "$PWD" --arg npm "$HOME/.npm" '[$cwd,$npm]')"
+      -c "sandbox_workspace_write.writable_roots=$(jq -nc '$ARGS.positional' --args "${roots[@]}")"
       -- "$NEXT_PROMPT")
   else
     CMD=(codex exec)
     [ -z "${AGENT_MODEL:-}" ] || CMD+=(-m "$AGENT_MODEL")
-    CMD+=(-s workspace-write -c sandbox_workspace_write.network_access=true --add-dir "$HOME/.npm" -- "$NEXT_PROMPT")
+    CMD+=(-s workspace-write -c sandbox_workspace_write.network_access=true)
+    local r
+    for r in "${roots[@]:1}"; do CMD+=(--add-dir "$r"); done
+    CMD+=(-- "$NEXT_PROMPT")
   fi
 }
 
