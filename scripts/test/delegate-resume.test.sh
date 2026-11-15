@@ -119,6 +119,15 @@ for ((i=0; i<${#CMD[@]}; i++)); do
   fi
 done
 [ "$found" = 1 ] || fail 'claude resume session flag missing'
+name_arg() { local i; for ((i=0; i<${#CMD[@]}; i++)); do [ "${CMD[i]}" != --name ] || printf '%s\n' "${CMD[i+1]}"; done; }
+(
+  TICKET_ID=169 TICKET_TITLE='Cache repo stats' HQ_REPO=acme/shop; claude_command
+  [ "$(name_arg)" = 'claude - shop - #169 - Cache repo stats' ] || exit 1
+  TICKET_ID=T-03 TICKET_TITLE= HQ_REPO=acme/shop; claude_command
+  [ "$(name_arg)" = 'claude - shop - T-03' ] || exit 1
+  TICKET_ID= TICKET_TITLE= HQ_REPO=; claude_command
+  [ "$(name_arg)" = "claude - $(basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")")" ] || exit 1
+) || fail 'claude session name format'
 CLAUDE_SESSION_ID=; SESSION=; claude_command
 for arg in "${CMD[@]}"; do
   [ "$arg" != --resume ] && [ "$arg" != --session-id ] || fail 'claude fallback unexpectedly pinned/resumed a session'

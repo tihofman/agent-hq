@@ -75,6 +75,19 @@ agy_command() {
   [ -z "$SESSION" ] || CMD+=(--conversation "$SESSION")
 }
 
+session_name() { # <agent> - <project> - <ticket> - <title>, empty parts skipped
+  local project="${HQ_REPO##*/}" ticket="$TICKET_ID" part name="$1"
+  if [ -z "$project" ]; then
+    project="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    project="$(basename "$(dirname "${project:-$PWD/.git}")")"
+  fi
+  [[ ! "$ticket" =~ ^[0-9]+$ ]] || ticket="#$ticket"
+  for part in "$project" "$ticket" "${TICKET_TITLE:-}"; do
+    [ -z "$part" ] || name+=" - $part"
+  done
+  printf '%s\n' "$name"
+}
+
 claude_command() {
   local prompt="$NEXT_PROMPT"
   [[ "$prompt" != -* ]] || prompt=" $prompt"
@@ -146,6 +159,7 @@ claude_command() {
   elif [ -n "$SESSION" ]; then
     CMD+=(--resume "$SESSION")
   fi
+  CMD+=(--name "$(session_name claude)")
   CMD+=(--settings "$settings" --permission-mode acceptEdits --add-dir "$HOME/.npm")
   [ -z "${AGENT_MODEL:-}" ] || CMD+=(--model "$AGENT_MODEL")
 }
