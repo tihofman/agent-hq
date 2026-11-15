@@ -336,16 +336,18 @@ CLAUDE_TMPDIR="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd || echo /tmp)"
 [ -n "$CLAUDE_TMPDIR" ] || CLAUDE_TMPDIR="/tmp"
 jq -se --arg model "claude-3-7-sonnet" --arg cwd "$PWD" --arg npm "$HOME/.npm" --arg tmp "$CLAUDE_TMPDIR" --arg git "$CLAUDE_GITDIR" '
   .[-1] as $call |
-  ($call | index("--model")) != null and
-  $call[($call | index("--model")) + 1] == $model and
+  ($call | index("--model")) as $modelflag |
+  ($call | index("--session-id")) as $idflag |
+  ($call | index("--permission-mode")) as $modeflag |
+  ($call | index("--settings")) as $settingsflag |
+  ($call | index("--name")) as $nameflag |
+  $modelflag != null and $call[$modelflag+1] == $model and
   ($call | index("-p")) != null and
   ($call | index("--dangerously-skip-permissions")) == null and
-  ($call | index("--session-id")) as $idflag |
-  ($call[$idflag+1] | test("^[0-9a-f-]{36}$")) and
-  ($call | index("--permission-mode")) as $modeflag |
-  $call[$modeflag+1] == "acceptEdits" and
-  ($call | index("--settings")) as $settingsflag |
-  ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
+  $idflag != null and ($call[$idflag+1] | test("^[0-9a-f-]{36}$")) and
+  $modeflag != null and $call[$modeflag+1] == "acceptEdits" and
+  $nameflag != null and ($call[$nameflag+1] | startswith("claude - ")) and
+  $settingsflag != null and ($call[$settingsflag+1] | fromjson | .sandbox.enabled == true and
     .sandbox.failIfUnavailable == true and .sandbox.allowUnsandboxedCommands == false and
     .sandbox.autoAllowBashIfSandboxed == true and
     (.sandbox | has("excludedCommands") | not) and
