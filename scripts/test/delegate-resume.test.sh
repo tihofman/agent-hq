@@ -317,7 +317,10 @@ run_case() {
      else .[1] | .[0:3] == ["exec","resume","01234567-abcd-1234-abcd-012345678901"] and
        index("sandbox_mode=\"workspace-write\"") != null and
        index("sandbox_workspace_write.network_access=true") != null and
-       index("sandbox_workspace_write.writable_roots=" + $roots) != null end)
+       ([.[] | select(startswith("sandbox_workspace_write.writable_roots="))
+          | ltrimstr("sandbox_workspace_write.writable_roots=") | fromjson][0]) as $w |
+       $w[0:2] == ($roots | fromjson) and
+       all($w[]; endswith("/hooks") or endswith("/config") | not) end)
   ' "$CALLS" >/dev/null || fail 'resume arguments and sandbox'
   jq -se --argjson runs "$((instructions+1))" '
     length == ($runs * 3) and
