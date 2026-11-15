@@ -314,11 +314,12 @@ run_case() {
        (.[0] | index("--dangerously-skip-permissions") == null) and
        (.[1] | index("--dangerously-skip-permissions") == null) and
        (.[0] | index("--settings") != null and index("--add-dir") != null and index("--permission-mode") != null)
-     else .[1] | .[0:3] == ["exec","resume","01234567-abcd-1234-abcd-012345678901"] and
+     else .[1] |
+       ([.[] | select(startswith("sandbox_workspace_write.writable_roots="))
+          | ltrimstr("sandbox_workspace_write.writable_roots=") | fromjson][0] // []) as $w |
+       .[0:3] == ["exec","resume","01234567-abcd-1234-abcd-012345678901"] and
        index("sandbox_mode=\"workspace-write\"") != null and
        index("sandbox_workspace_write.network_access=true") != null and
-       ([.[] | select(startswith("sandbox_workspace_write.writable_roots="))
-          | ltrimstr("sandbox_workspace_write.writable_roots=") | fromjson][0]) as $w |
        $w[0:2] == ($roots | fromjson) and
        all($w[]; endswith("/hooks") or endswith("/config") | not) end)
   ' "$CALLS" >/dev/null || fail 'resume arguments and sandbox'

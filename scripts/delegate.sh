@@ -76,7 +76,8 @@ agy_command() {
 }
 
 session_name() { # <agent> - <project> - <ticket> - <title>, empty parts skipped
-  local project="${HQ_REPO##*/}" ticket="$TICKET_ID" part name="$1"
+  local project="${HQ_REPO:-}" ticket="${TICKET_ID:-}" part name="$1"
+  project="${project##*/}"
   if [ -z "$project" ]; then
     project="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
     project="$(basename "$(dirname "${project:-$PWD/.git}")")"
