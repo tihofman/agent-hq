@@ -119,6 +119,15 @@ for ((i=0; i<${#CMD[@]}; i++)); do
   fi
 done
 [ "$found" = 1 ] || fail 'claude resume session flag missing'
+name_arg() { local i; for ((i=0; i<${#CMD[@]}; i++)); do [ "${CMD[i]}" != --name ] || printf '%s\n' "${CMD[i+1]}"; done; }
+(
+  TICKET_ID=169 TICKET_TITLE='Cache repo stats' HQ_REPO=acme/shop; claude_command
+  [ "$(name_arg)" = 'claude - shop - #169 - Cache repo stats' ] || exit 1
+  TICKET_ID=T-03 TICKET_TITLE= HQ_REPO=acme/shop; claude_command
+  [ "$(name_arg)" = 'claude - shop - T-03' ] || exit 1
+  TICKET_ID= TICKET_TITLE= HQ_REPO=; claude_command
+  [ "$(name_arg)" = "claude - $(basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")")" ] || exit 1
+) || fail 'claude session name format'
 CLAUDE_SESSION_ID=; SESSION=; claude_command
 for arg in "${CMD[@]}"; do
   [ "$arg" != --resume ] && [ "$arg" != --session-id ] || fail 'claude fallback unexpectedly pinned/resumed a session'
@@ -305,10 +314,14 @@ run_case() {
        (.[0] | index("--dangerously-skip-permissions") == null) and
        (.[1] | index("--dangerously-skip-permissions") == null) and
        (.[0] | index("--settings") != null and index("--add-dir") != null and index("--permission-mode") != null)
-     else .[1] | .[0:3] == ["exec","resume","01234567-abcd-1234-abcd-012345678901"] and
+     else .[1] |
+       ([.[] | select(startswith("sandbox_workspace_write.writable_roots="))
+          | ltrimstr("sandbox_workspace_write.writable_roots=") | fromjson][0] // []) as $w |
+       .[0:3] == ["exec","resume","01234567-abcd-1234-abcd-012345678901"] and
        index("sandbox_mode=\"workspace-write\"") != null and
        index("sandbox_workspace_write.network_access=true") != null and
-       index("sandbox_workspace_write.writable_roots=" + $roots) != null end)
+       $w[0:2] == ($roots | fromjson) and
+       all($w[]; endswith("/hooks") or endswith("/config") | not) end)
   ' "$CALLS" >/dev/null || fail 'resume arguments and sandbox'
   jq -se --argjson runs "$((instructions+1))" '
     length == ($runs * 3) and
